@@ -29,7 +29,7 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
         const snapshot = await request<RuntimeSnapshotList>('/nodes/runtime');
         if (!active || ticket !== read) return;
         const generation = feed.generation, inventory = feed.inventoryRevision;
-        if (!feed.calibrate(snapshot)) return;
+        if (!feed.calibrate(snapshot)) { freeze(); return; }
         revision.value++;
         statusNow.value = Date.now();
         ready.value = true;
@@ -52,7 +52,7 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
     const snapshot = (event as CustomEvent<RuntimeSnapshot>).detail;
     const inventory = feed.inventoryRevision;
     const update = feed.receive(snapshot, ready.value && !document.hidden);
-    if (snapshot.generation !== feed.generation) {
+    if (ready.value && snapshot.generation !== feed.generation) {
       freeze();
       void calibrate();
     }

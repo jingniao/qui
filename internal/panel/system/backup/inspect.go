@@ -375,6 +375,9 @@ func validateContents(ctx context.Context, work string) error {
 	if err := validateNodeTags(ctx, database); err != nil {
 		return err
 	}
+	if err := validateInboundEgress(ctx, database); err != nil {
+		return err
+	}
 	if err := validateOutboundSource(ctx, database); err != nil {
 		return err
 	}

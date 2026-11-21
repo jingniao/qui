@@ -14,6 +14,7 @@ import (
 func (a *Adapter) Probe(ctx context.Context) error {
 	a.mu.Lock()
 	probes := append([]core.Probe(nil), a.current.Probes...)
+	fingerprints := a.current.ProbeFingerprints
 	known := map[string]scheduler.Health{}
 	for id, status := range a.outboundHealth {
 		known[id] = status
@@ -22,7 +23,8 @@ func (a *Adapter) Probe(ctx context.Context) error {
 	now := time.Now().UTC()
 	var firstErr error
 	for _, probe := range probes {
-		if previous, exists := known[probe.OutboundID]; exists && now.Sub(previous.CheckedAt) < probe.Interval {
+		key := probe.Key()
+		if previous, exists := known[key]; exists && now.Sub(previous.CheckedAt) < probe.Interval {
 			continue
 		}
 		if err := scheduler.ValidateProbeURL(probe.URL); err != nil {
@@ -57,7 +59,9 @@ func (a *Adapter) Probe(ctx context.Context) error {
 		if a.outboundHealth == nil {
 			a.outboundHealth = map[string]scheduler.Health{}
 		}
-		a.outboundHealth[probe.OutboundID] = status
+		if a.current.ProbeFingerprints[key] == fingerprints[key] {
+			a.outboundHealth[key] = status
+		}
 		a.mu.Unlock()
 		if err != nil && firstErr == nil {
 			firstErr = errors.New("one or more outbound probes failed")
@@ -69,13 +73,11 @@ func (a *Adapter) OutboundHealth() map[string]scheduler.Health {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	copy := map[string]scheduler.Health{}
-	active := map[string]bool{}
 	for _, probe := range a.current.Probes {
-		active[probe.OutboundID] = true
-	}
-	for id, value := range a.outboundHealth {
-		if active[id] {
-			copy[id] = value
+		if probe.SourceIP == "" {
+			if value, ok := a.outboundHealth[probe.Key()]; ok {
+				copy[probe.OutboundID] = value
+			}
 		}
 	}
 	return copy

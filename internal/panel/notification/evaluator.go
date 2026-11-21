@@ -5,11 +5,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	nodeavailability "proxycontrol/internal/panel/node"
 )
 
 type NodeSnapshot struct {
 	ID, Name, Status string
 	LastHeartbeat    time.Time
+	LastHeartbeatRaw string
+	Maintenance      bool
 	Addresses        []string
 }
 
@@ -24,10 +28,11 @@ type TrafficSnapshot struct {
 }
 
 type Snapshot struct {
-	Now     time.Time
-	Nodes   []NodeSnapshot
-	Metrics map[string]MetricWindow
-	Traffic map[string]TrafficSnapshot
+	OfflineAlertNotBefore time.Time
+	Now                   time.Time
+	Nodes                 []NodeSnapshot
+	Metrics               map[string]MetricWindow
+	Traffic               map[string]TrafficSnapshot
 }
 
 type Event struct {
@@ -50,34 +55,34 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 
 	for _, node := range snap.Nodes {
 		// 1. node_offline rule
-		if node.Status != "pending" && node.Status != "disabled" {
+		if node.Status != "pending" && node.Status != "disabled" && !node.Maintenance {
 			key := "node_offline:" + node.ID
 			st := next[key]
 			r, ok := ruleMap["node_offline"]
 
-			if node.Status == "offline" && ok {
-				dur := time.Duration(r.DurationMinutes) * time.Minute
-				offlineDur := snap.Now.Sub(node.LastHeartbeat)
-				if !node.LastHeartbeat.IsZero() && offlineDur >= dur {
-					minutes := int(offlineDur.Minutes())
-					// An offline episode fires once, regardless of the cooldown.
-					// Its persisted active state is cleared only on recovery.
-					if !st.Active {
-						events = append(events, Event{
-							Kind:      "node_offline",
-							Severity:  "critical",
-							NodeID:    node.ID,
-							Title:     fmt.Sprintf("节点「%s」离线", node.Name),
-							Body:      fmt.Sprintf("已 %d 分钟没有心跳", minutes),
-							DedupeKey: key,
-							Resolved:  false,
-						})
-						st.Key = key
-						st.Active = true
-						st.Since = snap.Now
-						st.LastNotified = snap.Now
-						next[key] = st
+			if ok && nodeavailability.ConfirmedOffline(node.Status, node.LastHeartbeatRaw, r.DurationMinutes*60, snap.Now) {
+				// An offline episode fires once, regardless of the cooldown.
+				// Its persisted active state is cleared only on recovery.
+				if !st.Active && !snap.Now.Before(snap.OfflineAlertNotBefore) {
+					body := "没有有效心跳记录"
+					heartbeat, err := time.Parse(time.RFC3339Nano, node.LastHeartbeatRaw)
+					if age := snap.Now.Sub(heartbeat); err == nil && age >= -5*time.Second {
+						body = fmt.Sprintf("已 %d 分钟没有心跳", int(age.Minutes()))
 					}
+					events = append(events, Event{
+						Kind:      "node_offline",
+						Severity:  "critical",
+						NodeID:    node.ID,
+						Title:     fmt.Sprintf("节点「%s」离线", node.Name),
+						Body:      body,
+						DedupeKey: key,
+						Resolved:  false,
+					})
+					st.Key = key
+					st.Active = true
+					st.Since = snap.Now
+					st.LastNotified = snap.Now
+					next[key] = st
 				}
 			} else if node.Status == "online" || node.Status == "degraded" {
 				if st.Active {

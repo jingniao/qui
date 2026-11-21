@@ -22,6 +22,7 @@ type Store struct {
 type Fact struct {
 	ID, Name, Status, LastHeartbeat string
 	Maintenance                     bool
+	Disabled                        bool
 }
 
 // View fixes the time and all status inputs for one subscription generation.
@@ -41,7 +42,9 @@ func (v View) Evaluate(ids []string) ([]Exclusion, error) {
 			return nil, fmt.Errorf("subscription dependency node %s: status record missing", id)
 		}
 		reason := ""
-		if n.Maintenance {
+		if n.Disabled || n.Status == "disabled" {
+			reason = "已禁用"
+		} else if n.Maintenance {
 			reason = "维护中"
 		} else if node.ConfirmedOffline(n.Status, n.LastHeartbeat, v.OfflineAfterSeconds, v.Now) {
 			reason = "确认离线"
@@ -58,14 +61,14 @@ func readView(ctx context.Context, q Reader, now time.Time) (View, error) {
 	if err := q.QueryRowContext(ctx, `SELECT duration_minutes*60 FROM notification_rules WHERE kind='node_offline'`).Scan(&v.OfflineAfterSeconds); err != nil {
 		return v, fmt.Errorf("subscription offline duration: %w", err)
 	}
-	rows, err := q.QueryContext(ctx, `SELECT id,name,status,last_heartbeat,maintenance FROM nodes`)
+	rows, err := q.QueryContext(ctx, `SELECT id,name,status,last_heartbeat,maintenance,NOT enabled FROM nodes`)
 	if err != nil {
 		return v, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var fact Fact
-		if err = rows.Scan(&fact.ID, &fact.Name, &fact.Status, &fact.LastHeartbeat, &fact.Maintenance); err != nil {
+		if err = rows.Scan(&fact.ID, &fact.Name, &fact.Status, &fact.LastHeartbeat, &fact.Maintenance, &fact.Disabled); err != nil {
 			return v, err
 		}
 		v.Nodes[fact.ID] = fact

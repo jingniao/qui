@@ -7,6 +7,15 @@
       <label class="block">监听地址<input v-model="form.listen" placeholder="例如 0.0.0.0 或 127.0.0.1" class="form-input-base mt-2 font-mono" />
         <span class="block text-xs mt-1">入站绑定的本地地址；一般保留 0.0.0.0（全部网卡），只想让本机或中转进程连接时填 127.0.0.1。</span>
       </label>
+      <label v-if="egressSupported" class="block">出口 IP<select v-model="form.egressSourceIp" class="form-input-base mt-2 font-mono">
+        <option value="">跟随服务器设置</option><option v-for="ip in egressAddresses" :key="ip" :value="ip">{{ ip }}</option>
+      </select><span class="block text-xs mt-1">此节点全部流量从所选 IP 发出；域名只解析该地址族，没有该地址族的目标连接失败；Block 规则仍阻断。发布后生效。</span></label>
+      <div v-else-if="form.egressSourceIp" class="space-y-2 text-xs">
+        <p>出口 IP：<span class="font-mono">{{ form.egressSourceIp }}</span></p>
+        <p v-if="(props.form.core || primaryCoreName(props.server)) === 'gost'">GOST 核心不支持指定出口 IP，请清除后保存。</p>
+        <p v-else>当前核心未上报出口 IP 能力，请升级 Agent 后编辑，或清除后保存。</p>
+        <button type="button" class="ios-btn-secondary text-xs" @click="form.egressSourceIp = ''">清除出口 IP</button>
+      </div>
       <label class="block">默认出站<select v-model="form.defaultOutbound" class="form-input-base mt-2">
         <option value="direct">Direct</option><option value="block">Block</option>
         <option v-for="item in outbounds.filter(o => o.nodeId === form.nodeId && o.enabled)" :key="item.id" :value="item.id">{{ item.name }}</option>
@@ -28,9 +37,23 @@
   </details>
 </template>
 <script setup lang="ts">
+import { computed } from 'vue';
+import type { NodeView } from '../../../nodes/api';
+import { primaryCoreName } from '../../../nodes/coreSummary';
 import type { InboundInput, Outbound, OutboundGroup, ProxyChain } from '../../api';
 import type { UserChoice } from '../../../users/api';
 import { internalRelaySettingsReason } from './nodeEditorModel';
-defineProps<{ form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: UserChoice[]; open?: boolean; ready: boolean; error: string }>();
+const props = defineProps<{ server?: NodeView; form: InboundInput; editing: boolean; outbounds: Outbound[]; groups: OutboundGroup[]; chains: ProxyChain[]; users: UserChoice[]; open?: boolean; ready: boolean; error: string }>();
 const emit = defineEmits<{ toggle: [open: boolean]; retry: [] }>();
+const egressSupported = computed(() => {
+  const caps = props.server?.capabilities;
+  const core = props.form.core || primaryCoreName(props.server);
+  if (core !== 'xray' && core !== 'sing-box') return false;
+  if (caps?.multi_core_supported) return caps.cores?.find(c => c.name === core)?.inbound_egress_source_supported === true;
+  return caps?.core_name === core && caps.inbound_egress_source_supported === true;
+});
+const egressAddresses = computed(() => Array.from(new Set([
+  ...(props.server?.publicAddresses || []).map(a => a.address),
+  ...(props.form.egressSourceIp ? [props.form.egressSourceIp] : [])
+])));
 </script>

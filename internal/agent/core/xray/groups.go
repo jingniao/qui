@@ -15,13 +15,14 @@ import (
 )
 
 type RenderOptions struct {
-	PrivatePorts  []int
-	Health        map[string]scheduler.Health
-	ProbePorts    map[string]int
-	Access        bool
-	AccessLogPath string
-	StatsPort     int
-	OnlineStats   bool
+	probeFingerprints map[string]string
+	PrivatePorts      []int
+	Health            map[string]scheduler.Health
+	ProbePorts        map[string]int
+	Access            bool
+	AccessLogPath     string
+	StatsPort         int
+	OnlineStats       bool
 }
 type balancerConfig struct {
 	Tag         string           `json:"tag"`
@@ -183,69 +184,55 @@ func compileGroups(document *configDocument, state desiredstate.State, at time.T
 	}
 	return targets, nil
 }
-func addProbeInbounds(document *configDocument, state desiredstate.State, options RenderOptions, rendered *core.RenderedConfig) error {
-	urls := map[string]string{}
-	intervals := map[string]int{}
-	for _, group := range state.OutboundGroups {
-		for _, member := range group.Members {
-			if previous, exists := urls[member.OutboundID]; exists && previous != group.ProbeURL {
-				return errors.New("an outbound cannot use conflicting probe URLs in different groups")
-			}
-			urls[member.OutboundID] = group.ProbeURL
-			if value := intervals[member.OutboundID]; value == 0 || group.ProbeInterval < value {
-				intervals[member.OutboundID] = group.ProbeInterval
-			}
+func addProbeInbounds(document *configDocument, probes []core.Probe, source, suffix string, options RenderOptions, rendered *core.RenderedConfig) {
+	var rules []route
+	for _, probe := range probes {
+		if probe.SourceIP != source {
+			continue
 		}
-	}
-	ids := []string{}
-	for id := range urls {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	probeRules := []route{}
-	for _, id := range ids {
-		port := options.ProbePorts[id]
+		port := options.ProbePorts[probe.Key()]
 		if port == 0 {
 			continue
 		}
-		tag := "_probe_" + id
+		tag := "_probe_" + probe.OutboundID + suffix
 		document.Inbounds = append(document.Inbounds, inboundConfig{Tag: tag, Listen: "127.0.0.1", Port: port, Protocol: "socks", Settings: socksSettings{Auth: "noauth"}, Sniffing: sniffing{Enabled: false}})
-		probeRules = append(probeRules, route{Type: "field", InboundTag: []string{tag}, OutboundTag: id})
-		endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-		rendered.HealthEndpoints = append(rendered.HealthEndpoints, endpoint)
-		rendered.Probes = append(rendered.Probes, core.Probe{OutboundID: id, Address: endpoint, URL: urls[id], Interval: time.Duration(intervals[id]) * time.Second})
+		rules = append(rules, route{Type: "field", InboundTag: []string{tag}, OutboundTag: probe.OutboundID})
+		probe.Address = net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+		rendered.HealthEndpoints = append(rendered.HealthEndpoints, probe.Address)
+		rendered.Probes = append(rendered.Probes, probe)
 	}
-	document.Routing.Rules = append(probeRules, document.Routing.Rules...)
-	return nil
+	document.Routing.Rules = append(rules, document.Routing.Rules...)
 }
+
 func (a *Adapter) options(ctx context.Context, state desiredstate.State) (RenderOptions, error) {
+	probes, err := core.GroupProbes(state)
+	if err != nil {
+		return RenderOptions{}, err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.probePorts == nil {
 		a.probePorts = map[string]int{}
 	}
-	if a.outboundHealth == nil {
-		a.outboundHealth = map[string]scheduler.Health{}
-	}
-	for _, group := range state.OutboundGroups {
-		for _, member := range group.Members {
-			if a.probePorts[member.OutboundID] != 0 {
-				continue
-			}
+	options := RenderOptions{Health: map[string]scheduler.Health{}, ProbePorts: map[string]int{}, probeFingerprints: map[string]string{}}
+	for _, probe := range probes {
+		key := probe.Key()
+		if a.probePorts[key] == 0 {
 			port, err := a.privatePortLocked(state)
 			if err != nil {
 				return RenderOptions{}, err
 			}
-			a.probePorts[member.OutboundID] = port
+			a.probePorts[key] = port
+		}
+		options.ProbePorts[key] = a.probePorts[key]
+		fingerprint, err := core.ProbeFingerprint(state, probe)
+		if err != nil {
+			return RenderOptions{}, err
+		}
+		options.probeFingerprints[key] = fingerprint
+		if observed, known := a.outboundHealth[key]; known && a.current.ProbeFingerprints[key] == fingerprint {
+			options.Health[key] = observed
 		}
 	}
-	health := map[string]scheduler.Health{}
-	ports := map[string]int{}
-	for id, value := range a.outboundHealth {
-		health[id] = value
-	}
-	for id, value := range a.probePorts {
-		ports[id] = value
-	}
-	return RenderOptions{Health: health, ProbePorts: ports}, ctx.Err()
+	return options, ctx.Err()
 }

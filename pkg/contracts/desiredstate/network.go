@@ -2,7 +2,9 @@ package desiredstate
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"net/netip"
 	"regexp"
 )
 
@@ -113,4 +115,20 @@ func validateSourceIP(value string, family int) error {
 		return errors.New("address is not a unicast host address")
 	}
 	return nil
+}
+
+// CanonicalEgressSource validates the API address and removes mapped IPv4 notation.
+func CanonicalEgressSource(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	ip, err := netip.ParseAddr(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid inbound egress source IP: %w", err)
+	}
+	ip = ip.Unmap()
+	if ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return "", errors.New("invalid inbound egress source IP: unicast host address required")
+	}
+	return ip.String(), nil
 }

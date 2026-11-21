@@ -12,6 +12,7 @@ import (
 )
 
 type wireGuardEndpoint struct {
+	egressSourceIP   string
 	Type             string          `json:"type"`
 	Tag              string          `json:"tag"`
 	System           bool            `json:"system"`

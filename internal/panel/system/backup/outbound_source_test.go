@@ -23,3 +23,20 @@ func TestValidateOutboundSource(t *testing.T) {
 		}
 	}
 }
+
+func TestInboundEgressValidationSkipsPre0159Archive(t *testing.T) {
+	source, _, _ := sourceFixture(t)
+	ctx := context.Background()
+	if err := validateInboundEgress(ctx, source.Database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Database.Exec(`DELETE FROM schema_migrations WHERE version='0159_inbound_egress_source.sql'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Database.Exec(`ALTER TABLE inbounds DROP COLUMN egress_source_ip`); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateInboundEgress(ctx, source.Database); err != nil {
+		t.Fatalf("0158 archive without the new column rejected: %v", err)
+	}
+}

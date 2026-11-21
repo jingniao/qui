@@ -58,6 +58,12 @@ function oldServerProtocol(protocol) {
 }
 const protocols = ['vless', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'wireguard', 'forward', 'socks5', 'http'];
 let comparisons = 0;
+const egressEditor = api.createEditor('server');
+egressEditor.form.egressSourceIp = '192.0.2.10';
+assert.equal(api.buildPayload(egressEditor).egressSourceIp, '192.0.2.10');
+egressEditor.original = { egressSourceIp: '192.0.2.10' };
+egressEditor.form.egressSourceIp = '';
+assert.equal(api.buildPayload(egressEditor).egressSourceIp, '', 'clearing a stored egress IP stays explicit');
 for (const protocol of protocols) {
   const settings = protocol === 'vless' ? { transport: 'ws', security: 'tls', path: '/proxy', server_name: 'example.com', certificate_pem: 'CERT', private_key_pem: 'KEY', trusted_ca_pem: 'CA' }
     : protocol === 'wireguard' ? { wireguard: { secret_key: '', addresses: ['10.77.0.1/24'], peers: [], mtu: 1420 } }
@@ -97,7 +103,9 @@ for (const protocol of protocols) {
   for (const internal of [false, true]) {
     server.form.name = '  server name  ';
     server.form.internalRelay = internal;
-    const expected = legacyServer(server.form, server.addresses, server.mtu);
+    // The pre-egress implementation did not accept the new form field.
+    const { egressSourceIp, ...legacyForm } = server.form;
+    const expected = legacyServer(legacyForm, server.addresses, server.mtu);
     if (!internal && api.tlsBlockShown(server.form)) expected.tlsSource = 'paste';
     assert.deepEqual(api.buildPayload(server), expected, `U3 ${protocol} payload`);
     comparisons++;

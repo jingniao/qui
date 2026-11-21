@@ -13,6 +13,33 @@ import (
 	"time"
 )
 
+func TestNotificationSourcePreservesAvailabilityFlags(t *testing.T) {
+	app := testServer(t)
+	ctx := context.Background()
+	repo := &node.Repository{Database: app.Database}
+	n, _, _, err := repo.CreateEnrollment(ctx, "notification-flags", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.Database.Exec(`UPDATE nodes SET enabled=0,status='online',maintenance=1,last_heartbeat='invalid' WHERE id=?`, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	sources := &nodeNotificationSources{nodes: repo}
+	nodes, err := sources.Nodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range nodes {
+		if got.ID == n.ID {
+			if got.Status != "disabled" || !got.Maintenance || got.LastHeartbeatRaw != "invalid" {
+				t.Fatalf("snapshot = %+v", got)
+			}
+			return
+		}
+	}
+	t.Fatal("notification node missing")
+}
+
 func startTestStatistics(t *testing.T, app *Server) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -20,7 +20,11 @@ import (
 func applyOutboundSource(document *configDocument, state desiredstate.State) error {
 	for index := range document.Outbounds {
 		outbound := &document.Outbounds[index]
-		if err := applyOutboundNetwork(outbound, state.OutboundNetwork(outbound.sourceID)); err != nil {
+		network := state.OutboundNetwork(outbound.sourceID)
+		if outbound.egressSourceIP != "" {
+			network = desiredstate.Network{OutboundSourceIP: outbound.egressSourceIP}
+		}
+		if err := applyOutboundNetwork(outbound, network); err != nil {
 			return err
 		}
 	}

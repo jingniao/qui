@@ -8,6 +8,9 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
+var ErrInboundEgressUnsupported = errors.New("inbound_egress_unsupported")
+var ErrInboundEgressUnsupportedCore = errors.New("inbound_egress_unsupported_core")
+
 var ErrOutboundSourceUnsupported = errors.New("outbound_source_unsupported")
 var ErrHostSourceExemptUnsupported = errors.New("host_source_exempt_unsupported")
 
@@ -31,6 +34,18 @@ func RequireOutboundSourceSupport(state desiredstate.State, c *pb.Capabilities, 
 	if name == "" {
 		name = state.NodeID
 	}
+	for _, in := range state.Inbounds {
+		if in.EgressSourceIP == "" {
+			continue
+		}
+		core := SelectedCore(c, in.Core)
+		if in.Core == desiredstate.CoreGost || core != nil && core.Name == desiredstate.CoreGost {
+			return &CapabilityError{Err: ErrInboundEgressUnsupportedCore, Message: "GOST 入站不支持指定出口 IP"}
+		}
+		if core == nil || !core.InboundEgressSourceSupported {
+			return &CapabilityError{Err: ErrInboundEgressUnsupported, Message: "该入站核心未上报出口 IP 能力，请升级 Agent"}
+		}
+	}
 	for _, out := range state.Outbounds {
 		if !out.Enabled || (out.SourceIP == "" && out.SourceInterface == "") {
 			continue
@@ -42,6 +57,9 @@ func RequireOutboundSourceSupport(state desiredstate.State, c *pb.Capabilities, 
 		}
 	}
 	v4, v6 := desiredstate.ExtraHostExemptions(state)
+	if len(v4) > 16 || len(v6) > 16 {
+		return errors.New("host_source_exempt_limit: extra source exemptions exceed 16 per family")
+	}
 	if len(v4)+len(v6) > 0 && !c.GetHostSourceExtraExemptSupported() {
 		return &CapabilityError{Err: ErrHostSourceExemptUnsupported, Message: fmt.Sprintf("服务器「%s」的主机网络 helper 不支持出站源 IP 与强制出站同时使用，请在该服务器上运行一次 qui-update --component agent", name)}
 	}

@@ -1025,6 +1025,7 @@ async function loadAgentReleases(refresh = false) {
   agentUpgradeErrors.value = [];
   try {
     agentReleaseList.value = await nodeAPI.agentReleases(refresh);
+    return agentReleaseList.value;
   } catch (e) {
     showToast((e as Error).message, 'error');
   } finally {
@@ -1051,11 +1052,13 @@ async function selectAgentVersionForUpgrade(versionItem: AgentReleaseVersion) {
       }
     }
     agentUpgradeErrors.value = failures;
+    if (failures.length && !agentUpgradeTargetNode.value) showToast(failures.join('\n'), 'error');
     if (success) showToast(`已下发 ${success} 台服务器的 Agent v${versionItem.version} 完整升级任务，请在任务记录中查看结果`);
     if (!failures.length) agentUpgradeDialogVisible.value = false;
     void load();
   } catch (e) {
     agentUpgradeErrors.value = [(e as Error).message];
+    if (!agentUpgradeTargetNode.value) showToast((e as Error).message, 'error');
   } finally {
     agentUpgradeBusy.value = false;
   }
@@ -1736,11 +1739,12 @@ function handleUpgradeSingle(node: NodeView, kind: 'agent' | 'core') {
 // are queued.
 async function upgradeAllFor(kind: 'agent' | 'core') {
   if (!isOwner.value) return;
+  if (kind === 'agent' && (agentUpgradeLoading.value || agentUpgradeBusy.value)) return;
   try { batchNodes.value = await readAllNodes(); }
   catch (e) { showToast((e as Error).message, 'error'); return; }
   withBaseline(batchNodes.value.filter(node => !upgradeUnavailableReason(node) && (kind !== 'agent' || node.agentSystemUpdateSupported)), () => openBatchUpgrade(kind));
 }
-function openBatchUpgrade(kind: 'agent' | 'core') {
+async function openBatchUpgrade(kind: 'agent' | 'core') {
   const eligible = eligibleOnlineNodes.value;
   if (!eligible.length) {
     showToast('当前暂无满足升级条件的在线服务器 (需在线且已上报配置版本)', 'warning');
@@ -1748,9 +1752,16 @@ function openBatchUpgrade(kind: 'agent' | 'core') {
   }
 
   if (kind === 'agent') {
+    if (agentUpgradeLoading.value || agentUpgradeBusy.value) return;
     agentUpgradeTargetNode.value = null;
-    agentUpgradeDialogVisible.value = true;
-    void loadAgentReleases();
+    const releases = await loadAgentReleases();
+    if (!releases) return;
+    const latest = releases[0];
+    if (!latest) {
+      showToast('暂未发现可用的官方 Agent 发布版本', 'warning');
+      return;
+    }
+    await selectAgentVersionForUpgrade(latest);
   } else {
     if (!coreBatchComponents.value.length) {
       showToast('尚未有服务器上报已启用的内核，无法批量升级', 'warning');

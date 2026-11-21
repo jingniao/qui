@@ -68,6 +68,7 @@ type Credential struct {
 	PublicKey string `json:"public_key,omitempty"`
 }
 type Inbound struct {
+	EgressSourceIP      string           `json:"egress_source_ip,omitempty"`
 	Core                string           `json:"core,omitempty"`
 	ID                  string           `json:"id"`
 	Protocol            string           `json:"protocol"`
@@ -432,6 +433,14 @@ func (s State) Validate() error {
 	}
 	ports := map[string]bool{}
 	for _, inbound := range s.Inbounds {
+		if canonical, err := CanonicalEgressSource(inbound.EgressSourceIP); err != nil {
+			return err
+		} else if canonical != inbound.EgressSourceIP {
+			return errors.New("inbound egress source IP must be canonical")
+		}
+		if inbound.Core == CoreGost && inbound.EgressSourceIP != "" {
+			return errors.New("inbound_egress_unsupported_core")
+		}
 		if inbound.Core != "" && inbound.Core != CoreXray && inbound.Core != CoreSingBox && inbound.Core != CoreGost {
 			return errors.New("unsupported inbound core")
 		}

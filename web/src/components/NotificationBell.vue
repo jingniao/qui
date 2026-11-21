@@ -1,6 +1,6 @@
 <template>
   <!-- Expanded: the popover is positioned against the sidebar (which is relative), not
-       the bell near its right edge, so a right-aligned 24rem panel never runs off-screen. -->
+       the bell near its right edge, so the panel never runs off-screen. -->
   <div :class="collapsed ? 'relative' : ''" ref="rootRef">
     <!-- Bell Button -->
     <button
@@ -35,12 +35,12 @@
     <div
       v-if="isOpen"
       :class="[
-        'absolute z-50 bg-white/95 backdrop-blur-xl rounded-2xl shadow-ios-lg border border-black/[0.08] flex flex-col w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] max-h-[30rem] overflow-hidden select-text text-left',
+        'absolute z-50 bg-white rounded-2xl shadow-ios-lg border border-black/[0.08] flex flex-col w-80 max-w-[calc(100vw-1.5rem)] max-h-[30rem] overflow-hidden select-text text-left',
         collapsed ? 'left-full ml-3 top-0' : 'left-3 top-14'
       ]"
     >
       <!-- Header -->
-      <div class="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between bg-[#F8F8FA]/90 shrink-0">
+      <div class="px-4 py-3 border-b border-black/[0.06] flex items-center justify-between bg-ios-bg shrink-0">
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold text-ios-label">通知中心</span>
           <span v-if="unreadCount > 0" class="px-1.5 py-0.5 text-xs font-medium bg-ios-red/10 text-ios-red rounded-full">
@@ -149,7 +149,7 @@ defineProps<{
 const router = useRouter();
 const rootRef = ref<HTMLElement | null>(null);
 const isOpen = ref(false);
-const unreadFilter = ref(false);
+const unreadFilter = ref(true);
 const unreadCount = ref(0);
 const items = ref<Notification[]>([]);
 const loading = ref(false);
@@ -227,6 +227,8 @@ async function loadUnreadOnly() {
 function toggleOpen() {
   isOpen.value = !isOpen.value;
   if (isOpen.value) {
+    unreadFilter.value = true;
+    items.value = [];
     loadData();
   }
 }

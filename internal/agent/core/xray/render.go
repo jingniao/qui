@@ -53,12 +53,13 @@ type sniffing struct {
 	RouteOnly    bool     `json:"routeOnly"`
 }
 type outboundConfig struct {
-	sourceID    string
-	Settings    any             `json:"settings,omitempty"`
-	Stream      *streamSettings `json:"streamSettings,omitempty"`
-	Tag         string          `json:"tag"`
-	Protocol    string          `json:"protocol"`
-	SendThrough string          `json:"sendThrough,omitempty"`
+	egressSourceIP string
+	sourceID       string
+	Settings       any             `json:"settings,omitempty"`
+	Stream         *streamSettings `json:"streamSettings,omitempty"`
+	Tag            string          `json:"tag"`
+	Protocol       string          `json:"protocol"`
+	SendThrough    string          `json:"sendThrough,omitempty"`
 }
 type routingConfig struct {
 	DomainStrategy string           `json:"domainStrategy"`
@@ -115,20 +116,6 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 		credentials[credential.ID] = credential
 	}
 
-	for _, outbound := range state.Outbounds {
-		if !outbound.Enabled {
-			continue
-		}
-		compiled, err := buildOutbound(outbound, credentials)
-		if err != nil {
-			return core.RenderedConfig{}, err
-		}
-		document.Outbounds = append(document.Outbounds, compiled)
-		if options.Access {
-			document.accessOrigins[outbound.ID] = accessOrigin(original, outbound)
-		}
-
-	}
 	rendered := core.RenderedConfig{NodeID: state.NodeID, Revision: state.Revision, HealthEndpoints: []string{}}
 	if options.Access {
 		rendered.AccessContext = collector.NewContext(original)
@@ -157,57 +144,16 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			rendered.HealthEndpoints = append(rendered.HealthEndpoints, endpoint)
 		}
 	}
-	if len(document.Outbounds) == 0 {
-		return rendered, errors.New("configuration must include an enabled outbound")
-	}
-	targets, err := compileGroups(&document, state, at, options, aliases)
+	probes, err := core.GroupProbes(state)
 	if err != nil {
 		return rendered, err
 	}
-	compiledPolicies, err := compilePolicies(state, at)
-	if err != nil {
+	rendered.ProbeFingerprints = options.probeFingerprints
+	if err := compileRouting(&document, state, original, credentials, at, options, aliases); err != nil {
 		return rendered, err
 	}
-	for index := range compiledPolicies {
-		key := normalizedTarget(compiledPolicies[index].OutboundTag)
-		selected, ok := targets[key]
-		if !ok {
-			return rendered, errors.New("policy target unavailable")
-		}
-		assignTarget(&compiledPolicies[index], selected)
-	}
-	for _, rule := range compiledPolicies {
-		if options.Access {
-			selected := target{Outbound: rule.OutboundTag, Balancer: rule.BalancerTag}
-			rules, err := accessAccountRules(&document, rule, selected, original)
-			if err != nil {
-				return rendered, err
-			}
-			document.Routing.Rules = append(document.Routing.Rules, rules...)
-		} else {
-			document.Routing.Rules = append(document.Routing.Rules, rule)
-		}
-	}
-	for _, inbound := range state.Inbounds {
-		if inbound.Enabled {
-			selected, ok := targets[normalizedTarget(inbound.DefaultOutbound)]
-			if !ok {
-				return rendered, errors.New("default target unavailable")
-			}
-			rule := route{Type: "field", InboundTag: []string{inbound.ID}}
-			assignTarget(&rule, selected)
-			if options.Access {
-				rules, err := accessAccountRules(&document, rule, selected, original)
-				if err != nil {
-					return rendered, err
-				}
-				document.Routing.Rules = append(document.Routing.Rules, rules...)
-			} else {
-				document.Routing.Rules = append(document.Routing.Rules, rule)
-			}
-		}
-	}
-	if err := addProbeInbounds(&document, state, options, &rendered); err != nil {
+	addProbeInbounds(&document, probes, "", "", options, &rendered)
+	if err := applyInboundEgress(&document, state, original, credentials, at, options, aliases, probes, &rendered); err != nil {
 		return rendered, err
 	}
 	if options.Access {
@@ -232,4 +178,73 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	data, err := json.MarshalIndent(document, "", "  ")
 	rendered.Data = append(data, '\n')
 	return rendered, err
+}
+
+// compileRouting builds the graph with the health of a single source. Policy
+// overrides and nested failure targets are resolved before assigning native tags.
+func compileRouting(document *configDocument, state, original desiredstate.State, credentials map[string]desiredstate.Credential, at time.Time, options RenderOptions, aliases map[string]string) error {
+	for _, outbound := range state.Outbounds {
+		if !outbound.Enabled {
+			continue
+		}
+		compiled, err := buildOutbound(outbound, credentials)
+		if err != nil {
+			return err
+		}
+		document.Outbounds = append(document.Outbounds, compiled)
+		if options.Access {
+			document.accessOrigins[outbound.ID] = accessOrigin(original, outbound)
+		}
+	}
+	if len(document.Outbounds) == 0 {
+		return errors.New("configuration must include an enabled outbound")
+	}
+	targets, err := compileGroups(document, state, at, options, aliases)
+	if err != nil {
+		return err
+	}
+	compiledPolicies, err := compilePolicies(state, at)
+	if err != nil {
+		return err
+	}
+	for index := range compiledPolicies {
+		key := normalizedTarget(compiledPolicies[index].OutboundTag)
+		selected, ok := targets[key]
+		if !ok {
+			return errors.New("policy target unavailable")
+		}
+		assignTarget(&compiledPolicies[index], selected)
+	}
+	for _, rule := range compiledPolicies {
+		if options.Access {
+			selected := target{Outbound: rule.OutboundTag, Balancer: rule.BalancerTag}
+			rules, err := accessAccountRules(document, rule, selected, original)
+			if err != nil {
+				return err
+			}
+			document.Routing.Rules = append(document.Routing.Rules, rules...)
+		} else {
+			document.Routing.Rules = append(document.Routing.Rules, rule)
+		}
+	}
+	for _, inbound := range state.Inbounds {
+		if inbound.Enabled {
+			selected, ok := targets[normalizedTarget(inbound.DefaultOutbound)]
+			if !ok {
+				return errors.New("default target unavailable")
+			}
+			rule := route{Type: "field", InboundTag: []string{inbound.ID}}
+			assignTarget(&rule, selected)
+			if options.Access {
+				rules, err := accessAccountRules(document, rule, selected, original)
+				if err != nil {
+					return err
+				}
+				document.Routing.Rules = append(document.Routing.Rules, rules...)
+			} else {
+				document.Routing.Rules = append(document.Routing.Rules, rule)
+			}
+		}
+	}
+	return nil
 }

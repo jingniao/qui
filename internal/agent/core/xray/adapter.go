@@ -376,6 +376,11 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 			}
 			a.process = command
 			a.done = done
+			for key := range a.outboundHealth {
+				if a.current.ProbeFingerprints[key] != configuration.ProbeFingerprints[key] {
+					delete(a.outboundHealth, key)
+				}
+			}
 			a.current = configuration
 			a.gateDigest = ""
 			a.gateRecovery = false

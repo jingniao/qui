@@ -124,6 +124,7 @@ type inbound struct {
 	CongestionControl string            `json:"congestion_control,omitempty"`
 }
 type outbound struct {
+	egressSourceIP    string
 	Type              string            `json:"type"`
 	Tag               string            `json:"tag"`
 	Outbounds         []string          `json:"outbounds,omitempty"`
@@ -232,69 +233,8 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	// resolves to loopback, including hosts files with only commented examples.
 	doc.DNS = dnsOptions{Servers: []dnsServer{{Type: "local", Tag: "_panel_dns_"}, {Type: "hosts", Tag: "_panel_loopback_", Predefined: map[string][]string{"localhost": {"127.0.0.1", "::1"}}}}, Final: "_panel_dns_"}
 	doc.Route.DefaultDomainResolver = "_panel_dns_"
-	protocols := map[string]string{}
-	for _, entry := range state.Outbounds {
-		if !entry.Enabled {
-			continue
-		}
-		if entry.ID == "_panel_terminal_" || strings.HasPrefix(entry.ID, "_panel_access_rule_") || strings.HasPrefix(entry.ID, "_panel_group_") {
-			return core.RenderedConfig{}, errors.New("sing-box reserved terminal tag cannot be used by business configuration")
-		}
-		protocols[entry.ID] = entry.Protocol
-		if entry.Protocol == "block" {
-			continue
-		}
-		if entry.Protocol == "wireguard" {
-			if !options.wireGuardOutbound {
-				return core.RenderedConfig{}, errors.New("sing-box WireGuard requires detected with_wireguard endpoint capability")
-			}
-			endpoint, err := compileWireGuardEndpoint(entry, credentials)
-			if err != nil {
-				return core.RenderedConfig{}, err
-			}
-			doc.Endpoints = append(doc.Endpoints, endpoint)
-			continue
-		}
-		compiled := outbound{Type: entry.Protocol, Tag: entry.ID, Server: entry.Address, Port: entry.Port}
-		if entry.Protocol == "socks5" {
-			compiled.Type = "socks"
-		}
-		if err := supported(entry.Protocol); err != nil {
-			return core.RenderedConfig{}, err
-		}
-		if entry.Protocol != "direct" {
-			credential, exists := credentials[entry.CredentialID]
-			if !exists && (entry.CredentialID != "" || entry.Protocol != "http" && entry.Protocol != "socks5") {
-				return core.RenderedConfig{}, errors.New("outbound credential missing")
-			}
-			switch entry.Protocol {
-			case "http", "socks5":
-				compiled.Username = credential.Username
-				compiled.Password = credential.Secret
-			case "vless":
-				compiled.UUID = credential.Secret
-				compiled.Flow = entry.Settings.Flow
-			case "tuic":
-				compiled.UUID = credential.Username
-				compiled.Password = credential.Secret
-			default:
-				compiled.Password = credential.Secret
-			}
-		}
-		if q := entry.Settings.QUIC; q != nil {
-			compiled.UpMbps = q.UpMbps
-			compiled.DownMbps = q.DownMbps
-			compiled.CongestionControl = q.CongestionControl
-			compiled.UDPRelayMode = q.UDPRelayMode
-		}
-		if entry.Protocol == "shadowsocks" {
-			compiled.Method = cipher(entry.Settings)
-		}
-		compiled.TLS, compiled.Transport, err = security(entry.Protocol, entry.Settings, false)
-		if err != nil {
-			return core.RenderedConfig{}, err
-		}
-		doc.Outbounds = append(doc.Outbounds, compiled)
+	if err := compileOutbounds(&doc, state, credentials, options); err != nil {
+		return core.RenderedConfig{}, err
 	}
 	// A reject rule represents Block on modern sing-box; a private Direct
 	// terminal is unreachable because every enabled inbound has a terminal rule.
@@ -402,150 +342,14 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 			result.HealthEndpoints = append(result.HealthEndpoints, endpoint)
 		}
 	}
-	targets, err := compileGroups(&doc, state, original, at, options, aliases)
-	if err != nil {
+	if err := compileRoutes(&doc, state, original, credentials, at, options, aliases); err != nil {
 		return result, err
 	}
-	for _, rule := range policy.Sort(state.Policies) {
-		if !rule.Enabled || !policy.TimeActive(rule, at) || len(rule.Scope.NodeIDs) > 0 && !contains(rule.Scope.NodeIDs, state.NodeID) {
-			continue
-		}
-		if options.access {
-			// Runtime reconciliation fingerprints core JSON. Equal routing can
-			// still change its rule identity or privacy setting at a time boundary.
-			// An unused reserved tag makes that metadata change visible without
-			// weakening match conditions or adding listeners/control operations.
-			logging := "1"
-			if rule.Logging != nil && !rule.Logging.LogDomain {
-				logging = "0"
-			}
-			doc.Outbounds = append(doc.Outbounds, outbound{Type: "direct", Tag: "_panel_access_rule_" + rule.ID + "_" + logging})
-		}
-		if len(rule.Scope.GroupIDs) > 0 || len(rule.Match.ServiceIDs) > 0 {
-			return result, errors.New("services and node groups must be expanded before sing-box compilation")
-		}
-		target := rule.Action.TargetID
-		if rule.Action.Type == "Direct" || rule.Action.Type == "Block" {
-			kind := strings.ToLower(rule.Action.Type)
-			target = ""
-			for _, entry := range state.Outbounds {
-				if entry.Enabled && entry.Protocol == kind {
-					target = entry.ID
-					break
-				}
-			}
-		} else if rule.Action.Type != "Outbound" && rule.Action.Type != "OutboundGroup" && rule.Action.Type != "ProxyChain" {
-			return result, errors.New("sing-box policy scheduling target is not available")
-		}
-		chosen, exists := targets[normalizedTarget(target)]
-		if !exists {
-			return result, errors.New("sing-box policy target unavailable")
-		}
-		base := selectedRoute(chosen)
-		base.origin.RuleID = rule.ID
-		if rule.Logging != nil {
-			base.origin.LogDomain = rule.Logging.LogDomain
-		}
-		if base.candidates != nil {
-			candidates := map[string]collector.Exit{}
-			for id, origin := range base.candidates {
-				origin.RuleID = rule.ID
-				origin.LogDomain = base.origin.LogDomain
-				candidates[id] = origin
-			}
-			base.candidates = candidates
-		}
-		base.Domain = rule.Match.Domains
-		base.Suffix = rule.Match.Suffixes
-		base.Keywords = rule.Match.Keywords
-		base.CIDR = rule.Match.CIDRs
-		// Native rule sets are local binary files the Agent downloaded; the rule
-		// references them by tag and sing-box merges their entries into the same
-		// address match as the literal entries. A rule set is never optional: a
-		// policy that depends on one must never render without an address field.
-		for _, set := range rule.Match.RuleSets {
-			if options.ruleSetDirectory == "" {
-				return result, errors.New("native rule sets need the core runtime directory")
-			}
-			tag := "qui-rs-" + set.ID
-			path := filepath.Join(options.ruleSetDirectory, rulesets.FileName(set.SingBoxURL, true))
-			known := false
-			for _, existing := range doc.Route.RuleSet {
-				if existing.Tag == tag {
-					known = true
-					if existing.Path != path {
-						return result, errors.New("native rule set ID maps to two files")
-					}
-				}
-			}
-			if !known {
-				doc.Route.RuleSet = append(doc.Route.RuleSet, ruleSetOption{Type: "local", Tag: tag, Format: "binary", Path: path})
-			}
-			base.RuleSet = append(base.RuleSet, tag)
-		}
-		base.Domain = nil
-		for _, domain := range rule.Match.Domains {
-			if strings.Contains(domain, "*") {
-				base.Regex = append(base.Regex, policy.Pattern(domain))
-			} else {
-				base.Domain = append(base.Domain, domain)
-			}
-		}
-		if rule.Match.Network != "" && rule.Match.Network != "all" {
-			base.Network = []string{rule.Match.Network}
-		}
-		for _, port := range rule.Match.Ports {
-			if strings.Contains(port, "-") {
-				base.PortRange = append(base.PortRange, strings.ReplaceAll(port, "-", ":"))
-			} else {
-				number, err := strconv.Atoi(port)
-				if err != nil {
-					return result, err
-				}
-				base.Ports = append(base.Ports, uint16(number))
-			}
-		}
-		if len(rule.Scope.UserIDs) == 0 && len(rule.Scope.DeviceIDs) == 0 {
-			appendRoute(&doc, base)
-			continue
-		}
-		for _, entry := range state.Inbounds {
-			if !entry.Enabled {
-				continue
-			}
-			if entry.Protocol == "socks5" && rule.Match.Network != "tcp" {
-				return result, errors.New("sing-box scoped SOCKS5 UDP identity requires native validation before publication")
-			}
-			scoped := base
-			scoped.Inbound = []string{entry.ID}
-			for _, id := range entry.CredentialIDs {
-				credential := credentials[id]
-				if len(rule.Scope.UserIDs) > 0 && !contains(rule.Scope.UserIDs, credential.UserID) || len(rule.Scope.DeviceIDs) > 0 && !contains(rule.Scope.DeviceIDs, credential.DeviceID) {
-					continue
-				}
-				name := credential.ID
-				if entry.Protocol == "http" || entry.Protocol == "socks5" {
-					name = credential.Username
-				}
-				scoped.AuthUser = append(scoped.AuthUser, name)
-			}
-			if len(scoped.AuthUser) > 0 {
-				appendRoute(&doc, scoped)
-			}
-		}
+	sources := core.InboundEgressSources(state)
+	if err := applyInboundEgress(&doc, state, original, credentials, at, options, aliases, sources); err != nil {
+		return result, err
 	}
-	for _, entry := range state.Inbounds {
-		if entry.Enabled {
-			chosen, exists := targets[normalizedTarget(entry.DefaultOutbound)]
-			if !exists {
-				return result, errors.New("sing-box default scheduler target unavailable")
-			}
-			rule := selectedRoute(chosen)
-			rule.Inbound = []string{entry.ID}
-			appendRoute(&doc, rule)
-		}
-	}
-	if err := addProbeInbounds(&doc, state, options, &result); err != nil {
+	if err := addProbeInbounds(&doc, state, options, sources, &result); err != nil {
 		return result, err
 	}
 	if options.statsPort > 0 {
@@ -574,6 +378,220 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	}
 	result.Data, err = json.MarshalIndent(doc, "", "  ")
 	return result, err
+}
+
+func compileOutbounds(doc *document, state desiredstate.State, credentials map[string]desiredstate.Credential, options renderOptions) error {
+	for _, entry := range state.Outbounds {
+		if !entry.Enabled {
+			continue
+		}
+		if entry.ID == "_panel_terminal_" || strings.HasPrefix(entry.ID, "_panel_access_rule_") || strings.HasPrefix(entry.ID, "_panel_group_") {
+			return errors.New("sing-box reserved terminal tag cannot be used by business configuration")
+		}
+		if entry.Protocol == "block" {
+			continue
+		}
+		if entry.Protocol == "wireguard" {
+			if !options.wireGuardOutbound {
+				return errors.New("sing-box WireGuard requires detected with_wireguard endpoint capability")
+			}
+			endpoint, err := compileWireGuardEndpoint(entry, credentials)
+			if err != nil {
+				return err
+			}
+			doc.Endpoints = append(doc.Endpoints, endpoint)
+			continue
+		}
+		compiled := outbound{Type: entry.Protocol, Tag: entry.ID, Server: entry.Address, Port: entry.Port}
+		if entry.Protocol == "socks5" {
+			compiled.Type = "socks"
+		}
+		if err := supported(entry.Protocol); err != nil {
+			return err
+		}
+		if entry.Protocol != "direct" {
+			credential, exists := credentials[entry.CredentialID]
+			if !exists && (entry.CredentialID != "" || entry.Protocol != "http" && entry.Protocol != "socks5") {
+				return errors.New("outbound credential missing")
+			}
+			switch entry.Protocol {
+			case "http", "socks5":
+				compiled.Username = credential.Username
+				compiled.Password = credential.Secret
+			case "vless":
+				compiled.UUID = credential.Secret
+				compiled.Flow = entry.Settings.Flow
+			case "tuic":
+				compiled.UUID = credential.Username
+				compiled.Password = credential.Secret
+			default:
+				compiled.Password = credential.Secret
+			}
+		}
+		if q := entry.Settings.QUIC; q != nil {
+			compiled.UpMbps = q.UpMbps
+			compiled.DownMbps = q.DownMbps
+			compiled.CongestionControl = q.CongestionControl
+			compiled.UDPRelayMode = q.UDPRelayMode
+		}
+		if entry.Protocol == "shadowsocks" {
+			compiled.Method = cipher(entry.Settings)
+		}
+		var err error
+		compiled.TLS, compiled.Transport, err = security(entry.Protocol, entry.Settings, false)
+		if err != nil {
+			return err
+		}
+		doc.Outbounds = append(doc.Outbounds, compiled)
+	}
+	return nil
+}
+
+func compileRoutes(doc *document, state, original desiredstate.State, credentials map[string]desiredstate.Credential, at time.Time, options renderOptions, aliases map[string]string) error {
+	targets, err := compileGroups(doc, state, original, at, options, aliases)
+	if err != nil {
+		return err
+	}
+	for _, rule := range policy.Sort(state.Policies) {
+		if !rule.Enabled || !policy.TimeActive(rule, at) || len(rule.Scope.NodeIDs) > 0 && !contains(rule.Scope.NodeIDs, state.NodeID) {
+			continue
+		}
+		if options.access {
+			// Runtime reconciliation fingerprints core JSON. Equal routing can
+			// still change its rule identity or privacy setting at a time boundary.
+			// An unused reserved tag makes that metadata change visible without
+			// weakening match conditions or adding listeners/control operations.
+			logging := "1"
+			if rule.Logging != nil && !rule.Logging.LogDomain {
+				logging = "0"
+			}
+			doc.Outbounds = append(doc.Outbounds, outbound{Type: "direct", Tag: "_panel_access_rule_" + rule.ID + "_" + logging})
+		}
+		if len(rule.Scope.GroupIDs) > 0 || len(rule.Match.ServiceIDs) > 0 {
+			return errors.New("services and node groups must be expanded before sing-box compilation")
+		}
+		target := rule.Action.TargetID
+		if rule.Action.Type == "Direct" || rule.Action.Type == "Block" {
+			kind := strings.ToLower(rule.Action.Type)
+			target = ""
+			for _, entry := range state.Outbounds {
+				if entry.Enabled && entry.Protocol == kind {
+					target = entry.ID
+					break
+				}
+			}
+		} else if rule.Action.Type != "Outbound" && rule.Action.Type != "OutboundGroup" && rule.Action.Type != "ProxyChain" {
+			return errors.New("sing-box policy scheduling target is not available")
+		}
+		chosen, exists := targets[normalizedTarget(target)]
+		if !exists {
+			return errors.New("sing-box policy target unavailable")
+		}
+		base := selectedRoute(chosen)
+		base.origin.RuleID = rule.ID
+		if rule.Logging != nil {
+			base.origin.LogDomain = rule.Logging.LogDomain
+		}
+		if base.candidates != nil {
+			candidates := map[string]collector.Exit{}
+			for id, origin := range base.candidates {
+				origin.RuleID = rule.ID
+				origin.LogDomain = base.origin.LogDomain
+				candidates[id] = origin
+			}
+			base.candidates = candidates
+		}
+		base.Domain = rule.Match.Domains
+		base.Suffix = rule.Match.Suffixes
+		base.Keywords = rule.Match.Keywords
+		base.CIDR = rule.Match.CIDRs
+		// Native rule sets are local binary files the Agent downloaded; the rule
+		// references them by tag and sing-box merges their entries into the same
+		// address match as the literal entries. A rule set is never optional: a
+		// policy that depends on one must never render without an address field.
+		for _, set := range rule.Match.RuleSets {
+			if options.ruleSetDirectory == "" {
+				return errors.New("native rule sets need the core runtime directory")
+			}
+			tag := "qui-rs-" + set.ID
+			path := filepath.Join(options.ruleSetDirectory, rulesets.FileName(set.SingBoxURL, true))
+			known := false
+			for _, existing := range doc.Route.RuleSet {
+				if existing.Tag == tag {
+					known = true
+					if existing.Path != path {
+						return errors.New("native rule set ID maps to two files")
+					}
+				}
+			}
+			if !known {
+				doc.Route.RuleSet = append(doc.Route.RuleSet, ruleSetOption{Type: "local", Tag: tag, Format: "binary", Path: path})
+			}
+			base.RuleSet = append(base.RuleSet, tag)
+		}
+		base.Domain = nil
+		for _, domain := range rule.Match.Domains {
+			if strings.Contains(domain, "*") {
+				base.Regex = append(base.Regex, policy.Pattern(domain))
+			} else {
+				base.Domain = append(base.Domain, domain)
+			}
+		}
+		if rule.Match.Network != "" && rule.Match.Network != "all" {
+			base.Network = []string{rule.Match.Network}
+		}
+		for _, port := range rule.Match.Ports {
+			if strings.Contains(port, "-") {
+				base.PortRange = append(base.PortRange, strings.ReplaceAll(port, "-", ":"))
+			} else {
+				number, err := strconv.Atoi(port)
+				if err != nil {
+					return err
+				}
+				base.Ports = append(base.Ports, uint16(number))
+			}
+		}
+		if len(rule.Scope.UserIDs) == 0 && len(rule.Scope.DeviceIDs) == 0 {
+			appendRoute(doc, base)
+			continue
+		}
+		for _, entry := range state.Inbounds {
+			if !entry.Enabled {
+				continue
+			}
+			if entry.Protocol == "socks5" && rule.Match.Network != "tcp" {
+				return errors.New("sing-box scoped SOCKS5 UDP identity requires native validation before publication")
+			}
+			scoped := base
+			scoped.Inbound = []string{entry.ID}
+			for _, id := range entry.CredentialIDs {
+				credential := credentials[id]
+				if len(rule.Scope.UserIDs) > 0 && !contains(rule.Scope.UserIDs, credential.UserID) || len(rule.Scope.DeviceIDs) > 0 && !contains(rule.Scope.DeviceIDs, credential.DeviceID) {
+					continue
+				}
+				name := credential.ID
+				if entry.Protocol == "http" || entry.Protocol == "socks5" {
+					name = credential.Username
+				}
+				scoped.AuthUser = append(scoped.AuthUser, name)
+			}
+			if len(scoped.AuthUser) > 0 {
+				appendRoute(doc, scoped)
+			}
+		}
+	}
+	for _, entry := range state.Inbounds {
+		if entry.Enabled {
+			chosen, exists := targets[normalizedTarget(entry.DefaultOutbound)]
+			if !exists {
+				return errors.New("sing-box default scheduler target unavailable")
+			}
+			rule := selectedRoute(chosen)
+			rule.Inbound = []string{entry.ID}
+			appendRoute(doc, rule)
+		}
+	}
+	return nil
 }
 
 func appendRoute(doc *document, terminal route) {

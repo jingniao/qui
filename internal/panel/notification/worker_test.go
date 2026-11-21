@@ -3,7 +3,60 @@ package notification
 import (
 	"context"
 	"testing"
+	"time"
 )
+
+type startupSources struct{ nodes []NodeSnapshot }
+
+func (s *startupSources) Nodes(context.Context) ([]NodeSnapshot, error) { return s.nodes, nil }
+func (s *startupSources) Metrics(context.Context, time.Time) (map[string]MetricWindow, error) {
+	return nil, nil
+}
+func (s *startupSources) Traffic(context.Context, time.Time) (map[string]TrafficSnapshot, error) {
+	return nil, nil
+}
+
+func TestWorkerStartupOfflineObservation(t *testing.T) {
+	for _, minutes := range []int{0, 3} {
+		t.Run((time.Duration(minutes) * time.Minute).String(), func(t *testing.T) {
+			repo, _ := newTestRepo(t)
+			ctx := context.Background()
+			if err := repo.SaveRules(ctx, []Rule{{Kind: "node_offline", Enabled: true, DurationMinutes: minutes}}); err != nil {
+				t.Fatal(err)
+			}
+			source := &startupSources{nodes: []NodeSnapshot{{ID: "n", Status: "offline", LastHeartbeatRaw: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)}}}
+			worker := Worker{Repository: repo, Sources: source, startedAt: time.Now()}
+			worker.tick(ctx)
+			items, total, err := repo.List(ctx, false, false, 1, 20)
+			if err != nil || total != 0 {
+				t.Fatalf("startup notifications = %+v, %v", items, err)
+			}
+			// 0 minutes still needs a full heartbeat window after startup.
+			worker.startedAt = time.Now().Add(-44 * time.Second)
+			worker.tick(ctx)
+			_, total, err = repo.List(ctx, false, false, 1, 20)
+			if err != nil || total != 0 {
+				t.Fatalf("alert before observation window: %d, %v", total, err)
+			}
+			worker.startedAt = time.Now().Add(-max(45*time.Second, time.Duration(minutes)*time.Minute) - time.Second)
+			worker.tick(ctx)
+			items, total, err = repo.List(ctx, false, false, 1, 20)
+			if err != nil || total != 1 || items[0].Severity != "critical" {
+				t.Fatalf("missing real offline: %+v, %v", items, err)
+			}
+			// Restarting again must keep the active episode without a duplicate.
+			worker.startedAt = time.Now()
+			worker.tick(ctx)
+			source.nodes[0].Status = "online"
+			source.nodes[0].LastHeartbeatRaw = time.Now().Format(time.RFC3339Nano)
+			worker.tick(ctx)
+			items, total, err = repo.List(ctx, false, false, 1, 20)
+			if err != nil || total != 2 || items[0].Severity != "resolved" {
+				t.Fatalf("recovery during observation: %+v, %v", items, err)
+			}
+		})
+	}
+}
 
 func TestAlertMapsKnownKinds(t *testing.T) {
 	repo, _ := newTestRepo(t)

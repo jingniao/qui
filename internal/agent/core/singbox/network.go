@@ -30,6 +30,9 @@ func applyOutboundSource(doc *document, state desiredstate.State) error {
 	// not copied), so each outbound looks up its own binding by tag.
 	dial := func(outbound *outbound) error {
 		network := state.OutboundNetwork(outbound.Tag)
+		if outbound.egressSourceIP != "" {
+			network = desiredstate.Network{OutboundSourceIP: outbound.egressSourceIP}
+		}
 		bind, strategy, err := sourceBind(network.OutboundSourceIP)
 		if err != nil {
 			return err
@@ -63,11 +66,14 @@ func applyOutboundSource(doc *document, state desiredstate.State) error {
 		}
 	}
 	for index := range doc.Endpoints {
-		if !outboundEndpoints[doc.Endpoints[index].Tag] {
+		if !outboundEndpoints[doc.Endpoints[index].Tag] && doc.Endpoints[index].egressSourceIP == "" {
 			continue
 		}
 		endpoint := &doc.Endpoints[index]
 		network := state.OutboundNetwork(endpoint.Tag)
+		if endpoint.egressSourceIP != "" {
+			network = desiredstate.Network{OutboundSourceIP: endpoint.egressSourceIP}
+		}
 		bind, strategy, err := sourceBind(network.OutboundSourceIP)
 		if err != nil {
 			return err

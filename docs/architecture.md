@@ -70,7 +70,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码与最新正式版 **v1.7.6** 的迁移头均为 **`0158`**（迁移文件 `0152_baseline.sql` 至 `0158_subscription_route_dependencies.sql`）；存储与生命周期见第 8.1 节。已应用迁移（`0152–0158`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头为 **`0159`**（`0159_inbound_egress_source.sql`）；最新正式版 **v1.7.6** 迁移头为 **`0158`**；存储与生命周期见第 8.1 节。已应用迁移（`0152–0159`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |
@@ -96,6 +96,8 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 **订阅**：Token → 用户 → 来源（已发布节点、授权导入缓存）→ 中立代理模型 → 注册导出器（uri/base64/sing-box/clash/clash-legacy）。一个用户一个隐藏身份与共享链接，新 Token 以哈希查找、vault 加密副本供再次查看；旧 Token 无副本需重置。显式 format 优先，其次客户端 UA 匹配表（尚未逐一完成真机验证），最后系统默认。sing-box 仍是片段；固定证书的 QUIC 在 URI/Base64 中省略，在 sing-box 中带证书、mihomo 中带指纹。全局规则模板按授权展开，不改节点策略；导入仅用于客户端，定时 HTTPS 固定公网 IP 抓取并加密缓存，不在订阅请求中联网。只有 mihomo 输出客户端链。
 
 外部导入使用有界结构化结果与加密缓存，订阅请求不抓取来源。公开模型统一承载 Reality 公钥/Short ID、独立客户端 TLS 指纹与 xhttp host/path/mode；证书指纹不复用为客户端指纹。导出器按格式逐端点省略，复用链依赖清理与 emptyPolicy。自建服务端 Reality 私钥留在加密设置/修订中，经已安装核心原生探测和 Agent 精确能力契约进入发布；订阅只从成功修订映射公开字段，中转保留目标 SNI。
+
+**入站出口 IP**：`inbounds.egress_source_ip` 默认空。Xray/sing-box 在组成员筛选前，按源地址分别编译出站、调度和路由；同地址共享上下文，Block 保持阻断，归属沿用原 ID。内部探测以（源地址、原出站 ID）隔离，面板仍只接收默认来源健康；未知或失败成员仍保留原始探测路径。保存、快照与发布检查实际渲染核心能力；Agent 应用前检查本地地址，整机 SNAT 额外豁免包含入站源地址。详见项目说明书 §13.1。
 
 **节点出站网络**：Owner 在节点设置里填核心出站源 IP / 网卡和服务器强制出站 IPv4 / IPv6（迁移 `0108_node_outbound_network.sql` 的四个 `nodes` 列），改动在**发布配置后**生效。核心出站源在渲染时写入拨号出站（Xray `sendThrough` + `streamSettings.sockopt.interface`，sing-box `inet4/inet6_bind_address` + `bind_interface`）；整机强制出站走 helper：Agent 写 `/var/lib/proxy-agent/host-network/desired.json`，`proxy-agent-host-network.service`（oneshot，只带 `CAP_NET_ADMIN`）执行 `proxy-agent --apply-host-network`，由 `internal/agent/hostnet` 渲染并应用 nft 表 `inet proxy_agent_source`，结果写回 `status.json`。缺失网卡/源地址或 helper 失败是临时失败码，节点保留上一成功配置。
 

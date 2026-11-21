@@ -15,7 +15,7 @@ func TestRecoveryOnlyOnceAfterStateRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := []Rule{{Kind: "node_offline", Enabled: true}}
-	snap := Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Status: "online"}}}
+	snap := Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano)}}}
 	for round := 0; round < 2; round++ {
 		stored, err := repo.States(ctx)
 		if err != nil {
@@ -37,7 +37,7 @@ type durationSources struct {
 }
 
 func (s durationSources) Nodes(context.Context) ([]NodeSnapshot, error) {
-	return []NodeSnapshot{{ID: "n", Status: "online"}}, nil
+	return []NodeSnapshot{{ID: "n", Status: "online", LastHeartbeatRaw: time.Now().Format(time.RFC3339Nano)}}, nil
 }
 func (s durationSources) Traffic(context.Context, time.Time) (map[string]TrafficSnapshot, error) {
 	return nil, nil
@@ -81,7 +81,7 @@ func TestWorkerUsesLongestEnabledResourceDuration(t *testing.T) {
 func TestPublicIPCooldownAndEmptyCandidates(t *testing.T) {
 	now := time.Now()
 	rules := []Rule{{Kind: "public_ip", Enabled: true, CooldownMinutes: 30}}
-	snap := Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Status: "online", Addresses: []string{"1.1.1.1"}}}}
+	snap := Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano), Addresses: []string{"1.1.1.1"}}}}
 	_, states := Evaluate(rules, snap, nil)
 	for i, tc := range []struct {
 		addresses []string

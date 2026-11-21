@@ -66,12 +66,12 @@ export function createEditor(serverId = '', original: Inbound | null = null, ori
   const form: InboundInput = original ? {
     name: original.name, nodeId: original.nodeId, protocol: original.protocol, listen: original.listen,
     port: original.port, enabled: original.enabled, subscriptionVisible: original.subscriptionVisible,
-    internalRelay: original.internalRelay, defaultOutbound: original.defaultOutbound,
+    egressSourceIp: original.egressSourceIp || '', internalRelay: original.internalRelay, defaultOutbound: original.defaultOutbound,
     allowedUserIds: [...original.allowedUserIds], settings: clone(original.settings || {}),
     core: original.core || ''
   } : {
     name: '', nodeId: serverId, protocol: 'vless', listen: '0.0.0.0', port: 443, enabled: true,
-    subscriptionVisible: true, internalRelay: false, defaultOutbound: 'direct', allowedUserIds: [],
+    subscriptionVisible: true, internalRelay: false, egressSourceIp: '', defaultOutbound: 'direct', allowedUserIds: [],
     settings: { transport: 'tcp', security: 'none' }, core: ''
   };
   if (original?.certificateId) form.certificateId = original.certificateId;
@@ -337,6 +337,7 @@ export function buildPayload(state: EditorState, server?: NodeView): InboundInpu
   const payload: InboundInput = { name: state.origin === 'list' ? f.name.trim() : f.name, nodeId: f.nodeId, protocol: p, listen: f.listen, port: f.port,
     enabled: f.enabled, subscriptionVisible: f.internalRelay ? false : f.subscriptionVisible,
     internalRelay: f.internalRelay, defaultOutbound: f.core === 'gost' ? 'direct' : f.defaultOutbound, allowedUserIds: f.allowedUserIds, settings };
+  if (f.egressSourceIp || state.original?.egressSourceIp) payload.egressSourceIp = f.egressSourceIp || '';
   // An empty core means "the node's current primary core" and is omitted from the
   // request, exactly like the Agent contract; a concrete core is sent explicitly.
   if (f.core) payload.core = f.core;

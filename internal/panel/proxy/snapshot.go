@@ -289,7 +289,7 @@ func renderInboundBase(n node.Node, record Inbound) (desiredstate.Inbound, error
 	if record.TLSSource == TLSSourceACME && record.Settings.PrivateKeyPEM == "" {
 		return desiredstate.Inbound{}, fmt.Errorf("inbound %s: 所选证书尚未签发成功，无法发布", record.ID)
 	}
-	inbound := desiredstate.Inbound{Core: record.Core, ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible && !record.InternalRelay, Settings: record.Settings, CredentialIDs: []string{}}
+	inbound := desiredstate.Inbound{EgressSourceIP: record.EgressSourceIP, Core: record.Core, ID: record.ID, Protocol: record.Protocol, Listen: record.Listen, Port: record.Port, Enabled: record.Enabled, DefaultOutbound: record.DefaultOutbound, SubscriptionVisible: record.SubscriptionVisible && !record.InternalRelay, Settings: record.Settings, CredentialIDs: []string{}}
 	return inbound, nil
 }
 

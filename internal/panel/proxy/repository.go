@@ -97,7 +97,7 @@ func (r *Repository) storedInbound(ctx context.Context, q tunnelDatabase, inboun
 	var inbound Inbound
 	var encoded []byte
 	var users string
-	err := q.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,coalesce(certificate_id,'') FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core, &inbound.TLSSource, &inbound.CertificateID)
+	err := q.QueryRowContext(ctx, "SELECT id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,coalesce(certificate_id,''),egress_source_ip FROM inbounds WHERE id=?", inboundID).Scan(&inbound.ID, &inbound.Name, &inbound.NodeID, &inbound.Protocol, &inbound.Listen, &inbound.Port, &inbound.Enabled, &inbound.SubscriptionVisible, &inbound.InternalRelay, &inbound.DefaultOutbound, &users, &encoded, &inbound.RelayCredentialID, &inbound.CreatedAt, &inbound.Core, &inbound.TLSSource, &inbound.CertificateID, &inbound.EgressSourceIP)
 	if errors.Is(err, sql.ErrNoRows) {
 		return inbound, ErrNotFound
 	}
@@ -278,6 +278,11 @@ func (r *Repository) SaveGeneratedInbound(ctx context.Context, inboundID string,
 }
 
 func (r *Repository) saveInbound(ctx context.Context, inboundID string, input InboundInput, validate func(InboundInput) error) (Inbound, error) {
+	canonical, err := desiredstate.CanonicalEgressSource(input.EgressSourceIP)
+	if err != nil {
+		return Inbound{}, err
+	}
+	input.EgressSourceIP = canonical
 	if err := validate(input); err != nil {
 		return Inbound{}, err
 	}
@@ -335,9 +340,9 @@ func (r *Repository) saveInbound(ctx context.Context, inboundID string, input In
 		relayCredential = credential.ID
 	}
 	if create {
-		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,certificate_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created, input.Core, input.TLSSource, nullable(input.CertificateID))
+		_, err = tx.ExecContext(ctx, "INSERT INTO inbounds(id,name,node_id,protocol,listen,port,enabled,subscription_visible,internal_relay,default_outbound,allowed_users_json,encrypted_settings,relay_credential_id,created_at,core,tls_source,certificate_id,egress_source_ip) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", inboundID, input.Name, input.NodeID, input.Protocol, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.InternalRelay, input.DefaultOutbound, string(users), encoded, relayCredential, created, input.Core, input.TLSSource, nullable(input.CertificateID), input.EgressSourceIP)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=?,core=?,tls_source=?,certificate_id=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, input.Core, input.TLSSource, nullable(input.CertificateID), inboundID)
+		_, err = tx.ExecContext(ctx, "UPDATE inbounds SET name=?,listen=?,port=?,enabled=?,subscription_visible=?,default_outbound=?,allowed_users_json=?,encrypted_settings=?,core=?,tls_source=?,certificate_id=?,egress_source_ip=? WHERE id=?", input.Name, input.Listen, input.Port, input.Enabled, input.SubscriptionVisible, input.DefaultOutbound, string(users), encoded, input.Core, input.TLSSource, nullable(input.CertificateID), input.EgressSourceIP, inboundID)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {

@@ -39,6 +39,13 @@ func (r *Reconciler) verifyOutboundNetworks(state desiredstate.State) error {
 			return err
 		}
 	}
+	for _, inbound := range state.Inbounds {
+		if inbound.Enabled && inbound.EgressSourceIP != "" {
+			if err := available(desiredstate.Network{OutboundSourceIP: inbound.EgressSourceIP}); err != nil {
+				return fmt.Errorf("inbound %s: %w", inbound.ID, err)
+			}
+		}
+	}
 	outbounds := state.Outbounds
 	if _, multi := r.Adapter.(*core.MultiRuntime); multi {
 		// MultiRuntime renders only active cores and their reachable graphs.

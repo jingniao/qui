@@ -1230,8 +1230,9 @@ heartbeatLoop:
 			}
 			results = results[1:]
 		}
+		trafficCount, accessCount := 0, 0
 		if telemetryQueue != nil {
-			for count := 0; count < 8; count++ {
+			for ; trafficCount < 8; trafficCount++ {
 				batch, retried, err := telemetryQueue.PendingTrafficForPeer(ctx, welcome.GetWelcome().NodeTrafficSupported)
 				if err != nil {
 					logger.Error("traffic queue read failed")
@@ -1265,7 +1266,7 @@ heartbeatLoop:
 					return err
 				}
 			}
-			for count := 0; count < 8; count++ {
+			for ; accessCount < 8; accessCount++ {
 				batch, retried, err := telemetryQueue.PendingRetry(ctx)
 				if err != nil {
 					logger.Error("telemetry queue read failed")
@@ -1296,7 +1297,12 @@ heartbeatLoop:
 				}
 			}
 		}
-		timer := time.NewTimer(interval)
+		wait := interval
+		if trafficCount == 8 || accessCount == 8 {
+			// Drain backlog without extra heartbeat-interval waits after a full round.
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
 	waitForHeartbeat:
 		for {
 			select {
@@ -1316,13 +1322,15 @@ heartbeatLoop:
 				finishApply(prepared)
 				continue heartbeatLoop
 			case result := <-probeReplies:
-				timer.Stop()
+				// A probe result is a single message: the panel dispatches the
+				// next queued probe in reply to it. Keep the heartbeat timer so
+				// probes do not trigger extra heartbeat rounds.
 				lastProbe = result
 				probeID = ""
 				if err := send(&pb.AgentMessage{Payload: &pb.AgentMessage_TcpProbeResult{TcpProbeResult: result}}); err != nil {
 					return err
 				}
-				continue heartbeatLoop
+				continue waitForHeartbeat
 			case result := <-tuningReplies:
 				timer.Stop()
 				tuningBusy = false
@@ -1343,14 +1351,15 @@ heartbeatLoop:
 				if received.err == nil && received.message.GetApplyCommand() != nil && pendingApplies[string(received.message.GetApplyCommand().DesiredStateJson)] {
 					continue waitForHeartbeat
 				}
-				timer.Stop()
 				if received.err != nil {
+					timer.Stop()
 					return received.err
 				}
 				if received.message.GetTcpProbeCommand() != nil {
 					probe(received.message)
-					continue heartbeatLoop
+					continue waitForHeartbeat
 				}
+				timer.Stop()
 				if received.message.GetRemoveCoreCommand() != nil {
 					removeCore(received.message)
 					continue heartbeatLoop

@@ -2,15 +2,13 @@ package singbox
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net"
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/scheduler"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -189,60 +187,15 @@ func selectedRoute(value selection) route {
 	return route{Action: "route", Outbound: value.tag, origin: value.origin, candidates: value.candidates}
 }
 
-func probesFor(state desiredstate.State) (map[string]core.Probe, error) {
-	probes := map[string]core.Probe{}
-	for _, group := range state.OutboundGroups {
-		for _, member := range group.Members {
-			probe, exists := probes[member.OutboundID]
-			if exists && probe.URL != group.ProbeURL {
-				return nil, errors.New("outbound has conflicting probe URLs")
-			}
-			if !exists || time.Duration(group.ProbeInterval)*time.Second < probe.Interval {
-				probe = core.Probe{OutboundID: member.OutboundID, URL: group.ProbeURL, Interval: time.Duration(group.ProbeInterval) * time.Second}
-			}
-			probes[member.OutboundID] = probe
-		}
-	}
-	return probes, nil
-}
-
-func probeFingerprint(state desiredstate.State, probe core.Probe) string {
-	var entry desiredstate.Outbound
-	for _, out := range state.Outbounds {
-		if out.ID == probe.OutboundID {
-			entry = out
-			break
-		}
-	}
-	credentials := []desiredstate.Credential{}
-	for _, credential := range state.Credentials {
-		if credential.ID == entry.CredentialID {
-			credentials = append(credentials, credential)
-		}
-	}
-	data, _ := json.Marshal(struct {
-		Entry       desiredstate.Outbound
-		Credentials []desiredstate.Credential
-		URL         string
-	}{entry, credentials, probe.URL})
-	digest := sha256.Sum256(data)
-	return hex.EncodeToString(digest[:])
-}
-
-func addProbeInbounds(doc *document, state desiredstate.State, options renderOptions, result *core.RenderedConfig) error {
-	probes, err := probesFor(state)
+func addProbeInbounds(doc *document, state desiredstate.State, options renderOptions, sources []string, result *core.RenderedConfig) error {
+	probes, err := core.GroupProbes(state)
 	if err != nil {
 		return err
 	}
-	ids := []string{}
-	for id := range probes {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
 	rules := []route{}
 	privatePorts := []uint16{}
-	for _, id := range ids {
-		port := options.probePorts[id]
+	for _, probe := range probes {
+		port := options.probePorts[probe.Key()]
 		if port == 0 {
 			continue
 		}
@@ -255,12 +208,16 @@ func addProbeInbounds(doc *document, state desiredstate.State, options renderOpt
 			}
 		}
 		privatePorts = append(privatePorts, uint16(port))
-		tag := "_panel_probe_" + id
+		target := probe.OutboundID
+		if probe.SourceIP != "" {
+			target += egressSuffix(slices.Index(sources, probe.SourceIP))
+		}
+		tag := "_panel_probe_" + target
 		doc.Inbounds = append(doc.Inbounds, inbound{Type: "socks", Tag: tag, Listen: "127.0.0.1", Port: port})
 		// Always probe the raw protocol path, never its Direct/fallback alias.
-		rule := route{Inbound: []string{tag}, Action: "route", Outbound: id}
+		rule := route{Inbound: []string{tag}, Action: "route", Outbound: target}
 		for _, entry := range state.Outbounds {
-			if entry.ID == id && entry.Protocol == "direct" {
+			if entry.ID == probe.OutboundID && entry.Protocol == "direct" {
 				rules = append(rules, route{Inbound: []string{tag}, Domain: []string{"localhost"}, Action: "resolve", Server: "_panel_loopback_"})
 				break
 			}
@@ -268,7 +225,6 @@ func addProbeInbounds(doc *document, state desiredstate.State, options renderOpt
 		rules = append(rules, rule)
 		endpoint := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 		result.HealthEndpoints = append(result.HealthEndpoints, endpoint)
-		probe := probes[id]
 		probe.Address = endpoint
 		result.Probes = append(result.Probes, probe)
 	}
@@ -291,7 +247,7 @@ func (a *Adapter) Probe(ctx context.Context) error {
 	now := time.Now().UTC()
 	var first error
 	for _, probe := range probes {
-		if previous, ok := known[probe.OutboundID]; ok && now.Sub(previous.CheckedAt) < probe.Interval {
+		if previous, ok := known[probe.Key()]; ok && now.Sub(previous.CheckedAt) < probe.Interval {
 			continue
 		}
 		status, err := core.ObserveProbe(ctx, probe)
@@ -303,7 +259,7 @@ func (a *Adapter) Probe(ctx context.Context) error {
 			if a.outboundHealth == nil {
 				a.outboundHealth = map[string]scheduler.Health{}
 			}
-			a.outboundHealth[probe.OutboundID] = status
+			a.outboundHealth[probe.Key()] = status
 		}
 		a.mu.Unlock()
 		if err != nil && first == nil {
@@ -318,7 +274,10 @@ func (a *Adapter) OutboundHealth() map[string]scheduler.Health {
 	defer a.mu.Unlock()
 	result := map[string]scheduler.Health{}
 	for _, probe := range a.current.Probes {
-		if status, ok := a.outboundHealth[probe.OutboundID]; ok {
+		if probe.SourceIP != "" {
+			continue
+		}
+		if status, ok := a.outboundHealth[probe.Key()]; ok {
 			result[probe.OutboundID] = status
 		}
 	}

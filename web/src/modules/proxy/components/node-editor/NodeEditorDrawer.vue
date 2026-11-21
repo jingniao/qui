@@ -79,7 +79,7 @@
         <p class="text-xs text-ios-secondary">启用节点：取消勾选后此入站不参与发布，已发布配置里的用户凭据随之移除。显示在授权用户订阅中：取消后仅供节点间中转使用，用户订阅与凭据都不再包含它。</p>
         <p v-if="!f.internalRelay && f.protocol !== 'forward' && !f.subscriptionVisible" class="text-xs text-ios-orange">隐藏的用户入站不会获得用户凭据，发布后为停用。</p>
       </section>
-      <NodeAdvancedFields :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="advancedOpen || !!error" :ready="advancedReady === f.nodeId && !!f.nodeId" :error="advancedError" @toggle="toggleAdvanced" @retry="readAdvanced" />
+      <NodeAdvancedFields :server="selectedServer" :form="f" :editing="!!state.original" :outbounds="outbounds" :groups="groups" :chains="chains" :users="users" :open="advancedOpen || !!error" :ready="advancedReady === f.nodeId && !!f.nodeId" :error="advancedError" @toggle="toggleAdvanced" @retry="readAdvanced" />
       <details :open="!!savedId" class="rounded-2xl border border-ios-border p-4 text-sm">
         <summary class="cursor-pointer font-medium text-ios-label">配置预览与变更</summary>
         <div class="space-y-4 mt-4">

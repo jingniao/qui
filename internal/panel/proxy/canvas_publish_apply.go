@@ -129,7 +129,7 @@ func canvasPublishedEntries(plan *canvasPlan) []CanvasPlanEntry {
 }
 
 func inboundInputOf(inbound Inbound, defaultOutbound string) InboundInput {
-	return InboundInput{Core: inbound.Core, Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
+	return InboundInput{EgressSourceIP: inbound.EgressSourceIP, Core: inbound.Core, Name: inbound.Name, NodeID: inbound.NodeID, Protocol: inbound.Protocol, Listen: inbound.Listen, Port: inbound.Port, Enabled: inbound.Enabled, SubscriptionVisible: inbound.SubscriptionVisible, InternalRelay: inbound.InternalRelay, DefaultOutbound: defaultOutbound, AllowedUserIDs: inbound.AllowedUserIDs, Settings: inbound.Settings}
 }
 
 func outboundInputOf(outbound Outbound) OutboundInput {

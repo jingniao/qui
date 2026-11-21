@@ -125,6 +125,11 @@ func (s *Service) writeInbound(ctx context.Context, id string, input InboundInpu
 	if err != nil || !n.Enabled || n.DeletedAt != "" {
 		return Inbound{}, errors.New("node missing or disabled")
 	}
+	if input.EgressSourceIP != "" {
+		if err := node.RequireOutboundSourceSupport(desiredstate.State{NodeID: n.ID, Inbounds: []desiredstate.Inbound{{Core: input.Core, EgressSourceIP: input.EgressSourceIP, Enabled: input.Enabled}}, Network: desiredstate.NetworkOrNil(n.OutboundSourceIP, n.OutboundInterface, n.HostSourceIPv4, n.HostSourceIPv6)}, n.Capabilities, n.Name); err != nil {
+			return Inbound{}, err
+		}
+	}
 	if node.CoreSelectionIsBlocked(n, input.Core) {
 		return Inbound{}, errors.New("core_pending: wait for success and refreshed capabilities")
 	}

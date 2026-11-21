@@ -176,7 +176,11 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 	}
 	var capability *node.CapabilityError
 	if errors.As(err, &capability) {
-		httpapi.Error(w, 409, capability.Code(), capability.Message)
+		status := 409
+		if errors.Is(err, node.ErrInboundEgressUnsupported) || errors.Is(err, node.ErrInboundEgressUnsupportedCore) {
+			status = 400
+		}
+		httpapi.Error(w, status, capability.Code(), capability.Message)
 		return
 	}
 	httpapi.Error(w, 400, "invalid_request", err.Error())

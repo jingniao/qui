@@ -161,7 +161,7 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	if err != nil {
 		return core.RenderedConfig{}, err
 	}
-	probes, err := probesFor(scheduled)
+	probes, err := core.GroupProbes(scheduled)
 	if err != nil {
 		return core.RenderedConfig{}, err
 	}
@@ -171,7 +171,8 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	options.probePorts = map[string]int{}
 	options.health = map[string]scheduler.Health{}
 	options.probeFingerprints = map[string]string{}
-	for id, probe := range probes {
+	for _, probe := range probes {
+		id := probe.Key()
 		if a.probePorts[id] == 0 {
 			port, err := a.privatePortLocked(state)
 			if err != nil {
@@ -180,7 +181,10 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 			a.probePorts[id] = port
 		}
 		options.probePorts[id] = a.probePorts[id]
-		fingerprint := probeFingerprint(scheduled, probe)
+		fingerprint, err := core.ProbeFingerprint(scheduled, probe)
+		if err != nil {
+			return core.RenderedConfig{}, err
+		}
 		options.probeFingerprints[id] = fingerprint
 		if a.current.ProbeFingerprints[id] == fingerprint {
 			if health, ok := a.outboundHealth[id]; ok {
@@ -681,6 +685,7 @@ func detect(ctx context.Context, path string) (*pb.Capabilities, error) {
 	// The renderer emits local binary rule_set entries the Agent downloaded
 	// (v1.5.4 item 5).
 	capabilities.NativeRuleSetsSupported = true
+	capabilities.InboundEgressSourceSupported = true
 	capabilities.OutboundSourceSupported = true
 	capabilities.DeviceGateSupported = SupportsClashAPI(capabilities)
 	if capabilities.DeviceGateSupported {

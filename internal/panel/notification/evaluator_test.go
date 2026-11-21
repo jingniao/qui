@@ -8,6 +8,79 @@ import (
 func floatPtr(v float64) *float64 { return &v }
 func uint64Ptr(v uint64) *uint64  { return &v }
 
+func TestOfflineStartupObservation(t *testing.T) {
+	start := time.Now().UTC()
+	oldHeartbeat := start.Add(-time.Hour).Format(time.RFC3339Nano)
+	for _, tc := range []struct {
+		name       string
+		status     string
+		heartbeat  string
+		after      time.Duration
+		active     bool
+		wantEvents int
+	}{
+		{"restart", "offline", oldHeartbeat, 0, false, 0},
+		{"still_observing", "offline", oldHeartbeat, 3*time.Minute - time.Nanosecond, false, 0},
+		{"really_offline", "offline", oldHeartbeat, 3 * time.Minute, false, 1},
+		{"reconnected", "online", start.Format(time.RFC3339Nano), time.Second, false, 0},
+		{"existing_offline", "offline", oldHeartbeat, time.Second, true, 0},
+		{"existing_recovery", "online", start.Format(time.RFC3339Nano), time.Second, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := map[string]State{}
+			if tc.active {
+				states["node_offline:n"] = State{Key: "node_offline:n", Active: true, Since: start.Add(-time.Hour)}
+			}
+			events, next := Evaluate(defaultRules(), Snapshot{Now: start.Add(tc.after), OfflineAlertNotBefore: start.Add(3 * time.Minute), Nodes: []NodeSnapshot{{ID: "n", Status: tc.status, LastHeartbeatRaw: tc.heartbeat}}}, states)
+			if len(events) != tc.wantEvents {
+				t.Fatalf("events = %+v", events)
+			}
+			if tc.active && tc.status == "offline" && !next["node_offline:n"].Active {
+				t.Fatal("existing offline episode lost")
+			}
+			if tc.name == "existing_recovery" && (!events[0].Resolved || next["node_offline:n"].Active) {
+				t.Fatal("recovery blocked during startup observation")
+			}
+			if !tc.active && tc.wantEvents == 0 && next["node_offline:n"].Active {
+				t.Fatal("observation must not create a fake offline episode")
+			}
+		})
+	}
+}
+
+func TestOfflineAvailabilityFlagsAndRawHeartbeat(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, status, heartbeat string
+		maintenance, active     bool
+		wantEvents              int
+	}{
+		{"maintenance", "offline", "", true, false, 0},
+		{"maintenance_recovery", "online", now.Format(time.RFC3339Nano), true, true, 0},
+		{"disabled", "disabled", "", false, false, 0},
+		{"missing", "online", "", false, false, 1},
+		{"invalid", "online", "invalid", false, false, 1},
+		{"future", "online", now.Add(time.Hour).Format(time.RFC3339Nano), false, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := map[string]State{}
+			if tc.active {
+				states["node_offline:n"] = State{Key: "node_offline:n", Active: true}
+			}
+			events, next := Evaluate(defaultRules(), Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Status: tc.status, LastHeartbeatRaw: tc.heartbeat, Maintenance: tc.maintenance}}}, states)
+			if len(events) != tc.wantEvents {
+				t.Fatalf("events = %+v", events)
+			}
+			if tc.wantEvents == 1 && events[0].Body != "没有有效心跳记录" {
+				t.Fatalf("invalid heartbeat body = %q", events[0].Body)
+			}
+			if tc.active && !next["node_offline:n"].Active {
+				t.Fatal("maintenance must preserve the offline episode")
+			}
+		})
+	}
+}
+
 func defaultRules() []Rule {
 	return []Rule{
 		{Kind: "node_offline", Enabled: true, Threshold: 0, DurationMinutes: 3, CooldownMinutes: 30},
@@ -28,7 +101,7 @@ func TestOfflineFiresAfterDurationAndResolves(t *testing.T) {
 	snap1 := Snapshot{
 		Now: now,
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-2 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-2 * time.Minute), LastHeartbeatRaw: now.Add(-2 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states := Evaluate(rules, snap1, nil)
@@ -40,7 +113,7 @@ func TestOfflineFiresAfterDurationAndResolves(t *testing.T) {
 	snap2 := Snapshot{
 		Now: now.Add(90 * time.Second),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-2 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-2 * time.Minute), LastHeartbeatRaw: now.Add(-2 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states = Evaluate(rules, snap2, states)
@@ -52,7 +125,7 @@ func TestOfflineFiresAfterDurationAndResolves(t *testing.T) {
 	snap3 := Snapshot{
 		Now: now.Add(2 * time.Minute),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "online", LastHeartbeat: now.Add(2 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "online", LastHeartbeat: now.Add(2 * time.Minute), LastHeartbeatRaw: now.Add(2 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states = Evaluate(rules, snap3, states)
@@ -73,7 +146,7 @@ func TestPendingNodeIsNotOffline(t *testing.T) {
 		Now: now,
 		Nodes: []NodeSnapshot{
 			{ID: "node_pending", Name: "PendingNode", Status: "pending", LastHeartbeat: time.Time{}},
-			{ID: "node_disabled", Name: "DisabledNode", Status: "disabled", LastHeartbeat: now.Add(-10 * time.Minute)},
+			{ID: "node_disabled", Name: "DisabledNode", Status: "disabled", LastHeartbeat: now.Add(-10 * time.Minute), LastHeartbeatRaw: now.Add(-10 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, _ := Evaluate(rules, snap, nil)
@@ -89,7 +162,7 @@ func TestCPUNeedsFullWindow(t *testing.T) {
 	// CPU duration is 5 minutes. 4 high samples + 1 low sample should NOT trigger
 	snap1 := Snapshot{
 		Now:   now,
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano)}},
 		Metrics: map[string]MetricWindow{
 			"node1": {
 				NodeID: "node1",
@@ -105,7 +178,7 @@ func TestCPUNeedsFullWindow(t *testing.T) {
 	// 5 high samples (>= 90%) -> triggers warning
 	snap2 := Snapshot{
 		Now:   now.Add(time.Minute),
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online", LastHeartbeatRaw: now.Add(time.Minute).Format(time.RFC3339Nano)}},
 		Metrics: map[string]MetricWindow{
 			"node1": {
 				NodeID: "node1",
@@ -121,7 +194,7 @@ func TestCPUNeedsFullWindow(t *testing.T) {
 	// Later, latest sample drops below 90% -> resolves
 	snap3 := Snapshot{
 		Now:   now.Add(2 * time.Minute),
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online", LastHeartbeatRaw: now.Add(2 * time.Minute).Format(time.RFC3339Nano)}},
 		Metrics: map[string]MetricWindow{
 			"node1": {
 				NodeID: "node1",
@@ -142,7 +215,7 @@ func TestMissingSamplesNeitherFireNorResolve(t *testing.T) {
 	// All nil samples
 	snap1 := Snapshot{
 		Now:   now,
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "UK", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano)}},
 		Metrics: map[string]MetricWindow{
 			"node1": {
 				NodeID: "node1",
@@ -176,7 +249,7 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 	snap1 := Snapshot{
 		Now: now,
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-5 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-5 * time.Minute), LastHeartbeatRaw: now.Add(-5 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states := Evaluate(rules, snap1, nil)
@@ -188,7 +261,7 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 	snap2 := Snapshot{
 		Now: now.Add(10 * time.Minute),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-15 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-15 * time.Minute), LastHeartbeatRaw: now.Add(-15 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states = Evaluate(rules, snap2, states)
@@ -200,7 +273,7 @@ func TestCooldownSuppressesRepeat(t *testing.T) {
 	snap3 := Snapshot{
 		Now: now.Add(31 * time.Minute),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-36 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-36 * time.Minute), LastHeartbeatRaw: now.Add(-36 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events, states = Evaluate(rules, snap3, states)
@@ -217,7 +290,7 @@ func TestPublicIPChangeFirstSightIsSilent(t *testing.T) {
 	snap1 := Snapshot{
 		Now: now,
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Alpine", Status: "online", Addresses: []string{"203.0.113.5"}},
+			{ID: "node1", Name: "Alpine", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano), Addresses: []string{"203.0.113.5"}},
 		},
 	}
 	events, states := Evaluate(rules, snap1, nil)
@@ -232,7 +305,7 @@ func TestPublicIPChangeFirstSightIsSilent(t *testing.T) {
 	snap2 := Snapshot{
 		Now: now.Add(time.Minute),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Alpine", Status: "online", Addresses: []string{"203.0.113.9"}},
+			{ID: "node1", Name: "Alpine", Status: "online", LastHeartbeatRaw: now.Add(time.Minute).Format(time.RFC3339Nano), Addresses: []string{"203.0.113.9"}},
 		},
 	}
 	events, states = Evaluate(rules, snap2, states)
@@ -251,7 +324,7 @@ func TestMachineTrafficThreshold(t *testing.T) {
 	// 100GB used of 100GB allowance -> 100% >= threshold 100% -> fires warning
 	snap1 := Snapshot{
 		Now:   now,
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "HK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "HK", Status: "online", LastHeartbeatRaw: now.Format(time.RFC3339Nano)}},
 		Traffic: map[string]TrafficSnapshot{
 			"node1": {NodeID: "node1", UsedBytes: uint64Ptr(100), AllowanceBytes: uint64Ptr(100)},
 		},
@@ -264,7 +337,7 @@ func TestMachineTrafficThreshold(t *testing.T) {
 	// New billing cycle: used drops to 10GB -> resolves
 	snap2 := Snapshot{
 		Now:   now.Add(time.Hour),
-		Nodes: []NodeSnapshot{{ID: "node1", Name: "HK", Status: "online"}},
+		Nodes: []NodeSnapshot{{ID: "node1", Name: "HK", Status: "online", LastHeartbeatRaw: now.Add(time.Hour).Format(time.RFC3339Nano)}},
 		Traffic: map[string]TrafficSnapshot{
 			"node1": {NodeID: "node1", UsedBytes: uint64Ptr(10), AllowanceBytes: uint64Ptr(100)},
 		},
@@ -283,7 +356,7 @@ func TestEvaluatorKeepsStateAcrossRestart(t *testing.T) {
 	snap1 := Snapshot{
 		Now: now,
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-5 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-5 * time.Minute), LastHeartbeatRaw: now.Add(-5 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events1, nextStates := Evaluate(rules, snap1, nil)
@@ -296,7 +369,7 @@ func TestEvaluatorKeepsStateAcrossRestart(t *testing.T) {
 	snap2 := Snapshot{
 		Now: now.Add(time.Minute),
 		Nodes: []NodeSnapshot{
-			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-6 * time.Minute)},
+			{ID: "node1", Name: "Tokyo", Status: "offline", LastHeartbeat: now.Add(-6 * time.Minute), LastHeartbeatRaw: now.Add(-6 * time.Minute).Format(time.RFC3339Nano)},
 		},
 	}
 	events2, _ := Evaluate(rules, snap2, nextStates)

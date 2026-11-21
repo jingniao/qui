@@ -414,6 +414,16 @@ reviewNodeProps.node.capabilities = {};
 assert.equal(reviewNodes.inboundCoreName({ core: '' }), '');
 assert.match(read(serverNodesPath), /<ProtocolBadge v-if="inboundCoreName\(item\)" :protocol="inboundCoreName\(item\)"/);
 console.log('PASS review 2: inbound core badge, explicit core, primary/fallback core and unknown');
+let toggleLatest = { id: 'entry', name: 'entry', nodeId: 'server', protocol: 'http', listen: '0.0.0.0', port: 8080, enabled: true, egressSourceIp: '192.0.2.10', settings: {} };
+const toggledPayloads = [];
+const toggleInbound = vueSubset(serverNodesPath, ['toggle'], {
+  props: { node: { id: 'server' } }, busy: { value: false }, error: { value: '' }, isOwner: { value: true }, emit: () => {},
+  choices: async fetch => (await fetch(1, 100)).items,
+  proxyAPI: { inbounds: async () => ({ items: [toggleLatest] }), saveInbound: async (id, payload) => { toggledPayloads.push(payload); toggleLatest = { id, ...payload }; } }
+});
+await toggleInbound.toggle({ id: 'entry', egressSourceIp: 'stale' });
+await toggleInbound.toggle({ id: 'entry', egressSourceIp: 'stale' });
+assert.deepEqual(toggledPayloads.map(payload => [payload.enabled, payload.egressSourceIp]), [[false, '192.0.2.10'], [true, '192.0.2.10']], 'disable and re-enable preserve the latest stored egress IP');
 
 const previewReview = read('modules/users/pages/PortalPreviewPage.vue');
 assert.equal((previewReview.match(/to="\/users"/g) || []).length, 1, 'toolbar keeps one return link');

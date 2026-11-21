@@ -199,7 +199,7 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 1. 验证用户启用状态、到期状态与订阅 Token。
 2. 展开启用、订阅可见且用途为 `subscription`/`mixed` 的授权节点组，取得入站、规则与导入成员并去重。
 3. 过滤禁用与不允许订阅的节点。
-4. 按成功发布的完整线路依赖索引（`subscription_route_dependencies`），过滤任一受管跳（入口、中间、出口及固定链）处于维护或确认离线的整条线路；离线沿用第 27.11 节持续时间，等待恢复期间保留。纯导入端点无受管机器身份不按 IP 推断状态；依赖材料缺失或损坏明确报错，不返回假成功空订阅。此过滤仅影响订阅与预览，不改凭据或节点运行配置。
+4. 按成功发布的完整线路依赖索引（`subscription_route_dependencies`），过滤任一受管跳（入口、中间、出口及固定链）处于禁用、维护或确认离线的整条线路；离线沿用第 27.11 节持续时间，等待恢复期间保留。纯导入端点无受管机器身份不按 IP 推断状态；依赖材料缺失或损坏明确报错，不返回假成功空订阅。此过滤仅影响订阅与预览，不改凭据或节点运行配置。
 5. 仅保留组内可用入站；非空 `allowedUserIds` 须含本人，且核对已发布凭据（按入站授权，同服务器其他入站不自动获得凭据）。
 6. 仅保留有客户端连接地址（`connectHost`，否则 `publicIp`，第 11.1 节）的入站；缺失地址节点不生成端点，订阅预览明确给出警告。
 7. 输出订阅内容。同节点同协议多入站命名为 `节点 · 协议 · 端口`，单个为 `节点 · 协议`；汇总遇重名保留首个端点并警告。
@@ -230,7 +230,7 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 
 列表展示节点名称、在线状态、公网 IP、操作系统、CPU/内存/磁盘使用率、当前连接数、今日流量、Agent 版本、代理核心及版本、当前配置版本、最后心跳时间与本月整机流量（第 21 节）。
 
-- **版本与更新页**：合并管理 Agent 与代理核心，展示各节点 Agent 版本、已启用核心版本/健康/协议及升级/编辑/添加入口；顶部提供「升级全部核心」与「升级全部 Agent」。具体徽标配色、按钮样式、卡片排版与视觉细节统一遵循[设计系统](design-system.md)。
+- **版本与更新页**：合并管理 Agent 与代理核心，展示各节点 Agent 版本、已启用核心版本/健康/协议及升级/编辑/添加入口；顶部提供「升级全部核心」与「升级全部 Agent」。「升级全部 Agent」直接按最新可用正式版下发任务，不再打开版本确认框；逐台升级仍可选版本，失败显示错误提示，执行结果在任务记录中查看。具体徽标配色、按钮样式、卡片排版与视觉细节统一遵循[设计系统](design-system.md)。
 - **服务器视图与表单**：支持卡片/列表切换、按搜索词与服务器分组标签筛选，监听节点状态 SSE（5 秒节流静默刷新，可见时 30 秒刷新，切回前台立即刷新）。离线卡片去色并在延迟区域提示「已离线」，保留点击与操作。新增与编辑服务器共用表单，提供名称、地区、分组标签、备注、客户端连接地址、默认端口范围（`start-end`，1–65535）、续费信息、整机流量设置（编辑弹窗按 GB 展示，保留原始精确字节，未修改不重写，读取失败阻止保存）与维护模式开关。
 - **分组标签与排序**：服务器分组存于 `node_meta.tags_json`，每台最多 10 个标签（1–20 字符、大小写不敏感去重、禁逗号与控制字符），与订阅节点组独立。Owner 拖动卡片调整全局展示顺序，存于 `system_settings.server_order`，「版本与更新」复用同一顺序。标签与顺序不影响授权、订阅或发布。
 - **离线地区识别**：面板内嵌离线 IP→国家表（`internal/panel/geoip`，DB-IP Lite CC BY 4.0，不向外部发请求），按 `publicIp` 推导 `countryCode`（不入库）。显示优先级：管理员指定地区 ＞ `countryCode` ＞ 名称/主机名关键词 ＞ 🌐。
@@ -290,6 +290,8 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 出站定义节点收到流量后的下一跳方式。支持 Direct、Block、HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard、远程节点、出口组与 Proxy Chain。主要字段含名称、所属节点、类型、目标节点/地址/端口、协议、凭据、TCP/UDP 支持、启用、健康状态与失败策略（Block/Direct/备用出站/备用出口组/备用代理链；固定出口建议 Block 或备用出口，不隐式 Direct）。
 
 ## 13.1 节点出站网络
+
+**入站出口 IP**：高级选项 `egressSourceIp`（期望状态 `egress_source_ip,omitempty`）为空时沿用原行为；非空时规范化为本地单播地址，覆盖服务器和出站绑定、清除网卡绑定。仅支持明确上报 `inbound_egress_source_supported` 的 Xray/sing-box，GOST 返回 `inbound_egress_unsupported_core`，旧 Agent 返回 `inbound_egress_unsupported`。所有适用分流目标和默认目标使用按地址排序编号的 `<origTag>~egress~<k>` 克隆；Block 保持阻断，入站规则先于通用规则。访问、统计归属原 ID，面板仍只接收默认来源的原出站健康。各出口 IP 在组成员筛选前分别建立探测和选路上下文，保留原有主备、延迟、轮询与失败策略；缓存和探测指纹区分源地址、目标、有效绑定及关联凭据，不能复用其他源的健康结果。未知健康沿用组的失败策略，但完整原始成员的探测入口始终保留以便恢复。原生动态组继续从该出口 IP 探测成员（Xray observatory / sing-box `urltest`）。域名只解析指定地址族；另一族 IP 字面量和回环目标连接失败。发布后生效；地址不在本机时返回 `network_unavailable` 并保留旧配置。整机强制出站的额外豁免也包含该地址，仍需 helper 能力，每族最多 16 个。
 
 节点设置可配置出站网络，下一次发布配置生效，留空清除：
 - **核心出站源 IP / 网卡**：作用于代理核心拨号出站（Xray `sendThrough`/`sockopt.interface`，sing-box `inet4/inet6_bind_address`/`bind_interface`；出口组成员继承，sing-box 组节点与 WireGuard 入站不写）；指定源 IP 时固定地址族。
@@ -529,6 +531,7 @@ system        系统设置、备份恢复、证书库、通知与操作日志
 | `0156_tuning_module_intent.sql` | `node_tuning` 新增 `install_missing_modules` 标记 |
 | `0157_agent_system_updates.sql` | `node_update_capabilities` 新增系统更新探测列；新增 `agent_system_update_tasks`/`attempts`/`logs` |
 | `0158_subscription_route_dependencies.sql` | 新增成功发布线路依赖表 `subscription_route_dependencies` |
+| `0159_inbound_egress_source.sql` | 入站新增 `egress_source_ip`，默认空字符串 |
 
 **持续生效的运行时与数据兼容合同（v1.7.5 基线）**：
 - **隧道发布收尾（基线 0149 规则）**：部署批次含 Vault 密封收尾 journal 与完成标记，单节点发布亦使用持久批次；请求断开不取消发布，超 300 秒返回 202/`publishing`；终态、周期扫描与重启统一幂等收尾。**启动收尾失败只记日志，不阻止面板启动；未收尾批次继续占用其节点。**
@@ -615,6 +618,8 @@ GET/POST/PUT/DELETE /api/v1/outbound-groups
 GET/POST/PUT/DELETE /api/v1/proxy-chains
 ```
 
+入站 API（列表、读取、创建、更新）包含 `egressSourceIp`：空字符串清除，非空只接受有效单播 IP，保存为规范形式。
+
 ## 27.7 分流
 
 ```text
@@ -686,7 +691,7 @@ GET /sub/{token}/rules/{id}   # 订阅 Token 授权，输出客户端 classical 
 GET /api/v1/events
 ```
 
-SSE 推送节点状态、配置发布、总览统计与系统告警；按管理员角色过滤（Viewer 仅收节点/发布/总览及 `node_offline`/`cpu`/`memory`/`disk` 四类监控通知，每 15 秒重认证同步角色）。
+SSE 推送节点状态、配置发布、总览统计与系统告警；按管理员角色过滤（Viewer 仅收节点/发布/总览及 `node_offline`/`cpu`/`memory`/`disk` 四类监控通知，每 15 秒重认证同步角色）。关闭 `node_offline` 规则只停止通知，界面与订阅仍读取该规则的离线时限。通知中心使用不透明背景、320px 宽度（不超出视口），每次打开默认仅显示未读，可切换全部。
 
 展示层统一状态优先级：删除 ＞ 停用 ＞ 维护 ＞ 待登记 ＞ 连接状态（等待恢复、离线、核心异常、降级）。管理后台共用通知规则 `node_offline.durationMinutes`（默认 3 分钟，0 表示断线/心跳过期即离线）判定展示离线，超过 45 秒心跳有效期而未达该时长显示「连接中断，等待恢复」；节点读取与 `node_runtime` 快照提供只读 `offlineAfterSeconds`，写操作准入与指标新鲜度仍按真实时钟 45 秒规则执行。前端按 generation/revision 接受 `node_runtime` 增量，可见时每 30 秒及重连/切回前台校准，断连保留最后确认状态并冻结展示时钟。门户节点接口增加明确 `status`（保留 `online`），仅在节点页可见时 30 秒轮询，不接入管理 SSE。
 
@@ -783,7 +788,7 @@ PUT/DELETE /api/v1/notification-channels/{id}
 POST /api/v1/notification-channels/{id}/test
 ```
 
-规则：`node_offline` 每轮离线通知一次、恢复通知一次（跨重启保留状态），其余规则按冷却时间去重；历史通知保留 90 天。渠道支持 `telegram` 与 `webhook`（HTTPS，`format` 支持 `generic`/`wecom`/`dingtalk`/`feishu`，`secret` 仅钉钉/飞书 ≤1024 字节，PUT 空串保留原值、`clearSecret: true` 清除）。三家机器人均须 HTTP 2xx 且业务码为 0，否则报 `channel_rejected`，响应读上限 64 KiB、不回显上游或凭据。
+规则：`node_offline` 跳过待登记、禁用与维护节点；维护期间保留已有离线事件状态，退出维护后继续评估。面板通知 worker 每次启动后重新观察一个配置离线时限（至少 45 秒，覆盖 0 分钟规则的心跳窗口），期间不创建新的离线事件，避免将面板停机当成全部节点故障；已有离线事件保留，恢复通知照常发送。每轮离线通知一次、恢复通知一次（跨重启保留状态），其余规则按冷却时间去重；历史通知保留 90 天。渠道支持 `telegram` 与 `webhook`（HTTPS，`format` 支持 `generic`/`wecom`/`dingtalk`/`feishu`，`secret` 仅钉钉/飞书 ≤1024 字节，PUT 空串保留原值、`clearSecret: true` 清除）。三家机器人均须 HTTP 2xx 且业务码为 0，否则报 `channel_rejected`，响应读上限 64 KiB、不回显上游或凭据。
 
 ## 27.18 系统设置：管理员登录地址与门户字段（v1.5.4）
 

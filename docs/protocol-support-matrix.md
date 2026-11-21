@@ -42,6 +42,7 @@ API 保留以下兼容状态字符串，表示源码能力，不单独等同运�
 - hysteria2/tuic 保持：qui 1.14.4-qui.1 与官方 sing-box 1.14.3 的 `Tags:` 均含 `with_quic`，`internal/agent/core/singbox` 的渲染与真实核测试（`quic_test.go`、`internal/platform/server/quic_agent_test.go`）均覆盖；Xray 不支持这两个协议。
 - WireGuard：官方 sing-box 没有入站（`internal/agent/core/singbox/adapter.go` 只上报 `Inbound:false, Outbound:true`），面板按每核表拒绝给 sing-box 节点保存 WireGuard 入站；Xray 入站需要 major>=25。
 - HTTP、SOCKS5、Shadowsocks、VLESS、Trojan、WireGuard 为原承诺基础协议，已接入的 Hysteria2/TUIC 保持；本表不静默减少任何已支持协议。
+- **入站出口 IP**：仅限上报 `inbound_egress_source_supported` 的 Xray/sing-box，GOST 拒绝。适用分流、默认出口、出口组与代理链均固定所选地址并清除网卡绑定；Block 不变。域名只解析所选地址族，无该族地址、另一族 IP 字面量和回环目标连接失败。空值沿用原行为，发布后生效。各出口 IP 在组成员筛选前分别探测、选路，保留原有策略；未知健康不借用默认来源结果。面板仅接收默认来源出站健康；动态组从对应出口 IP 探测成员（Xray observatory / sing-box `urltest`）。
 - **节点出站源地址（节点级，与协议无关）**：Xray 在每个拨号出站上渲染 `sendThrough` + `streamSettings.sockopt.interface`，地址族用 `freedom` 的 `settings.domainStrategy`、其他协议用 `sockopt.domainStrategy` 固定（`ForceIPv4`/`ForceIPv6`）；sing-box 渲染 `inet4/inet6_bind_address` + `bind_interface` 与限族的 `domain_resolver`（`ipv4_only`/`ipv6_only`）。`blackhole`/`block` 出站、sing-box 的 `selector`/`urltest` 组不渲染（组由上游在运行时选成员），sing-box 只固定出站 WireGuard 端点、入站端点仅监听。目标为另一族的字面量 IP 时连接失败。整机服务器强制出站是内核 SNAT，与协议无关，见[运维手册](operations.md)第 9 节。
 
 ### 自建 VLESS Reality / xhttp（已发布，验收按具体组合记录）

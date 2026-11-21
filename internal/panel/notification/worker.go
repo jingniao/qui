@@ -20,9 +20,11 @@ type Worker struct {
 	Publish    func(kind string, data any)
 	Logger     *slog.Logger
 	Interval   time.Duration
+	startedAt  time.Time
 }
 
 func (w *Worker) Run(ctx context.Context) {
+	w.startedAt = time.Now()
 	interval := w.Interval
 	if interval <= 0 {
 		interval = 60 * time.Second
@@ -81,7 +83,13 @@ func (w *Worker) tick(ctx context.Context) {
 	}
 	now := time.Now()
 	windowMinutes := 15
+	// A panel restart interrupts observation for every node. Let Agents reconnect
+	// before opening new offline episodes; persisted active episodes still resolve.
+	offlineAlertNotBefore := w.startedAt.Add(45 * time.Second)
 	for _, rule := range rules {
+		if rule.Kind == "node_offline" {
+			offlineAlertNotBefore = w.startedAt.Add(max(45*time.Second, time.Duration(rule.DurationMinutes)*time.Minute))
+		}
 		if rule.Enabled && (rule.Kind == "cpu" || rule.Kind == "memory") && rule.DurationMinutes > windowMinutes {
 			windowMinutes = rule.DurationMinutes
 		}
@@ -102,10 +110,11 @@ func (w *Worker) tick(ctx context.Context) {
 	}
 
 	snap := Snapshot{
-		Now:     now,
-		Nodes:   nodes,
-		Metrics: metrics,
-		Traffic: traffic,
+		OfflineAlertNotBefore: offlineAlertNotBefore,
+		Now:                   now,
+		Nodes:                 nodes,
+		Metrics:               metrics,
+		Traffic:               traffic,
 	}
 
 	events, nextStates := Evaluate(rules, snap, states)

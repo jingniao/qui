@@ -30,6 +30,15 @@ func ExtraHostExemptions(state State) (v4, v6 []string) {
 			}
 			addresses[ip.String()] = true
 		}
+		for _, inbound := range state.Inbounds {
+			if !inbound.Enabled || inbound.EgressSourceIP == "" {
+				continue
+			}
+			ip := net.ParseIP(inbound.EgressSourceIP)
+			if ip != nil && (ip.To4() != nil) == (family == 4) && !ip.Equal(net.ParseIP(network.OutboundSourceIP)) && !ip.Equal(net.ParseIP(forced)) {
+				addresses[ip.String()] = true
+			}
+		}
 		var extra []string
 		for address := range addresses {
 			extra = append(extra, address)

@@ -12,6 +12,7 @@ import (
 var ErrNotFound = errors.New("proxy configuration not found")
 
 type Inbound struct {
+	EgressSourceIP       string                        `json:"egressSourceIp"`
 	RouteSummary         *InboundRouteSummary          `json:"routeSummary,omitempty"`
 	ManagedBy            *PortOwner                    `json:"managedBy,omitempty"`
 	UserTrafficSupported *bool                         `json:"userTrafficSupported"`
@@ -40,6 +41,7 @@ type Inbound struct {
 	HasRealityKey        bool                          `json:"hasRealityKey"`
 }
 type InboundInput struct {
+	EgressSourceIP        string                        `json:"egressSourceIp"`
 	RotateRealityKey      bool                          `json:"rotateRealityKey,omitempty"`
 	RegenerateCertificate bool                          `json:"regenerateCertificate,omitempty"`
 	Core                  string                        `json:"core"`
@@ -145,6 +147,9 @@ func ValidateInbound(input InboundInput) error { return validateInboundInput(inp
 func validateGeneratedInbound(input InboundInput) error { return validateInboundInput(input, true) }
 
 func validateInboundInput(input InboundInput, generated bool) error {
+	if _, err := desiredstate.CanonicalEgressSource(input.EgressSourceIP); err != nil {
+		return err
+	}
 	// The public shape never carries a GOST tunnel's relay halves: they belong to
 	// the tunnel resource and are written only by the canvas.
 	if !generated && input.Settings.Forward.HasRelaySettings() {

@@ -1073,6 +1073,7 @@ type Capabilities struct {
 	NativeRuleSetsSupported        bool                   `protobuf:"varint,30,opt,name=native_rule_sets_supported,json=nativeRuleSetsSupported,proto3" json:"native_rule_sets_supported,omitempty"`
 	OutboundSourceSupported        bool                   `protobuf:"varint,31,opt,name=outbound_source_supported,json=outboundSourceSupported,proto3" json:"outbound_source_supported,omitempty"`
 	HostSourceExtraExemptSupported bool                   `protobuf:"varint,32,opt,name=host_source_extra_exempt_supported,json=hostSourceExtraExemptSupported,proto3" json:"host_source_extra_exempt_supported,omitempty"`
+	InboundEgressSourceSupported   bool                   `protobuf:"varint,33,opt,name=inbound_egress_source_supported,json=inboundEgressSourceSupported,proto3" json:"inbound_egress_source_supported,omitempty"`
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -1331,6 +1332,13 @@ func (x *Capabilities) GetHostSourceExtraExemptSupported() bool {
 	return false
 }
 
+func (x *Capabilities) GetInboundEgressSourceSupported() bool {
+	if x != nil {
+		return x.InboundEgressSourceSupported
+	}
+	return false
+}
+
 type CoreCapability struct {
 	state                         protoimpl.MessageState `protogen:"open.v1"`
 	Name                          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1349,6 +1357,7 @@ type CoreCapability struct {
 	ExpandedPolicySupported       bool                   `protobuf:"varint,14,opt,name=expanded_policy_supported,json=expandedPolicySupported,proto3" json:"expanded_policy_supported,omitempty"`
 	NativeRuleSetsSupported       bool                   `protobuf:"varint,15,opt,name=native_rule_sets_supported,json=nativeRuleSetsSupported,proto3" json:"native_rule_sets_supported,omitempty"`
 	OutboundSourceSupported       bool                   `protobuf:"varint,16,opt,name=outbound_source_supported,json=outboundSourceSupported,proto3" json:"outbound_source_supported,omitempty"`
+	InboundEgressSourceSupported  bool                   `protobuf:"varint,17,opt,name=inbound_egress_source_supported,json=inboundEgressSourceSupported,proto3" json:"inbound_egress_source_supported,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1491,6 +1500,13 @@ func (x *CoreCapability) GetNativeRuleSetsSupported() bool {
 func (x *CoreCapability) GetOutboundSourceSupported() bool {
 	if x != nil {
 		return x.OutboundSourceSupported
+	}
+	return false
+}
+
+func (x *CoreCapability) GetInboundEgressSourceSupported() bool {
+	if x != nil {
+		return x.InboundEgressSourceSupported
 	}
 	return false
 }
@@ -6306,7 +6322,7 @@ const file_agent_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12\x1a\n" +
 	"\bsecurity\x18\x03 \x01(\tR\bsecurity\x12\x1c\n" +
 	"\ttransport\x18\x04 \x01(\tR\ttransport\x12\x12\n" +
-	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xf9\x0e\n" +
+	"\x04flow\x18\x05 \x01(\tR\x04flow\"\xc0\x0f\n" +
 	"\fCapabilities\x12\x1b\n" +
 	"\tcore_name\x18\x01 \x01(\tR\bcoreName\x12!\n" +
 	"\fcore_version\x18\x02 \x01(\tR\vcoreVersion\x12G\n" +
@@ -6340,7 +6356,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x19expanded_policy_supported\x18\x1d \x01(\bR\x17expandedPolicySupported\x12;\n" +
 	"\x1anative_rule_sets_supported\x18\x1e \x01(\bR\x17nativeRuleSetsSupported\x12:\n" +
 	"\x19outbound_source_supported\x18\x1f \x01(\bR\x17outboundSourceSupported\x12J\n" +
-	"\"host_source_extra_exempt_supported\x18  \x01(\bR\x1ehostSourceExtraExemptSupported\"\xb3\a\n" +
+	"\"host_source_extra_exempt_supported\x18  \x01(\bR\x1ehostSourceExtraExemptSupported\x12E\n" +
+	"\x1finbound_egress_source_supported\x18! \x01(\bR\x1cinboundEgressSourceSupported\"\xfa\a\n" +
 	"\x0eCoreCapability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12G\n" +
@@ -6358,7 +6375,8 @@ const file_agent_proto_rawDesc = "" +
 	"\x18domain_keyword_supported\x18\r \x01(\bR\x16domainKeywordSupported\x12:\n" +
 	"\x19expanded_policy_supported\x18\x0e \x01(\bR\x17expandedPolicySupported\x12;\n" +
 	"\x1anative_rule_sets_supported\x18\x0f \x01(\bR\x17nativeRuleSetsSupported\x12:\n" +
-	"\x19outbound_source_supported\x18\x10 \x01(\bR\x17outboundSourceSupportedB\n" +
+	"\x19outbound_source_supported\x18\x10 \x01(\bR\x17outboundSourceSupported\x12E\n" +
+	"\x1finbound_egress_source_supported\x18\x11 \x01(\bR\x1cinboundEgressSourceSupportedB\n" +
 	"\n" +
 	"\b_healthy\"\xeb\x01\n" +
 	"\n" +

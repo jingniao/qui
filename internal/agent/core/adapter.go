@@ -40,6 +40,7 @@ type RenderedConfig struct {
 	ProbeFingerprints map[string]string
 }
 type Probe struct {
+	SourceIP   string
 	OutboundID string
 	Address    string
 	URL        string

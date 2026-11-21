@@ -173,6 +173,31 @@ func TestUserAccessFeatureWritesOneInboundBoundToItsUsers(t *testing.T) {
 // carry a user credential, because no business data backs it and the next
 // render would silently drop it. The Owner has to publish the credential
 // through the users/inbounds they own.
+func TestReusedUserAccessPreservesInboundEgress(t *testing.T) {
+	f := newUserAccessFixture(t)
+	ctx := context.Background()
+	input := UserAccessInput{NodeID: f.nodeID, Summary: "Preserve egress", Protocol: "socks5", Listen: "0.0.0.0", Port: 1080}
+	if _, _, err := f.handler.EnsureUserAccess(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.proxies.Database.Exec(`UPDATE inbounds SET egress_source_ip='192.0.2.10' WHERE node_id=?`, f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.proxies.Database.Exec(`UPDATE nodes SET capabilities_json='{"coreName":"xray","coreVersion":"26.3.27","inboundEgressSourceSupported":true,"protocols":[{"protocol":"socks5","inbound":true}]}' WHERE id=?`, f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.handler.bindUserAccessInbound(ctx, input, []string{"user-1"}); err != nil {
+		t.Fatal(err)
+	}
+	inbound, err := f.proxies.InboundAtListener(ctx, f.nodeID, input.Protocol, input.Listen, input.Port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inbound.EgressSourceIP != "192.0.2.10" {
+		t.Fatalf("reusing inbound cleared its egress: %+v", inbound)
+	}
+}
+
 func TestRawRevisionRejectsRevisionOnlyUserCredentials(t *testing.T) {
 	state := desiredstate.State{SchemaVersion: 1, Revision: 1, NodeID: "node", Logging: desiredstate.Logging{DomainOnly: true},
 		Credentials: []desiredstate.Credential{{ID: "credential", Protocol: "http", Username: "manual-account", Secret: "manual-password"}},

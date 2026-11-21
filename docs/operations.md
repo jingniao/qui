@@ -139,6 +139,10 @@ systemctl start proxy-agent.service
 
 ## 9. 节点出站网络
 
+在代理节点高级选项选择「出口 IP」并发布；清空为「跟随服务器设置」。全部非 Block 流量固定所选地址，域名只解析该地址族；无该族地址、另一族 IP 字面量及回环目标连接失败。`inbound_egress_unsupported` 请升级入站使用的 Agent 核心，GOST 不支持。`network_unavailable` 请确认该地址仍配置在本机网卡上；失败保留旧配置。与服务器强制出站共用时需 helper 支持额外豁免。
+
+出口组按每个出口 IP 分别探测、分别选路，保留原有策略及失败处理；默认出口探测失败不会删掉其他出口 IP 的可用成员。尚无探测结果时沿用组的失败策略，探测入口保留并持续检测。面板显示的出站健康仍来自默认来源，不能用它代替指定出口 IP 的连通结果。
+
 > 注：旧示例配置（`deploy/examples/agent.yaml`、`panel.yaml`）中提及的签名发布下载与公钥配置仅适用于旧版工作进程自更新；现行 Agent 更新与排障见第 10 节与[部署与升级](deployment.md)。
 
 「节点详情 → 节点设置 → 出站网络」含两条独立能力，均在**下一次发布后生效**（留空清除）：
@@ -358,6 +362,10 @@ systemctl start proxy-panel.service
 撤除用 `POST /api/v1/canvas-schemes/{id}/remove`（带 `{updatedAt}`），外部引用或未收尾 `deployment_batch` 返 409，确认后立即删方案并下发 `auto: relay cleanup` 修订（只移除已删对象）。离线重连自动清，失败按 1/5/30 分钟退避重试（之后每 30 分钟，面板重启继续）。排查看「待清理」标签、`relayCleanupPending`/`relayCleanupCode` 与面板日志 `relay cleanup attempt failed`，勿以页面消失推定远端已停。
 
 ## 22. 通知与告警
+
+`node_offline` 通知与节点显示、订阅过滤共用确认离线规则。待登记、禁用和维护节点不发离线通知；维护期间保留已有离线事件状态。订阅排除经过任一禁用或维护受管节点的线路。关闭通知规则只停止通知，界面与订阅仍读取规则中的离线时限。
+
+面板启动后，通知 worker 先按规则的离线时限重新观察（至少 45 秒）。这段时间不发送新的离线告警，避免升级停机后在 Agent 重连前集中误报；已存在的离线事件保留并正常发送恢复通知，观察期后仍未恢复的节点正常告警。此观察期只控制新离线通知，不改变界面、订阅、指标或操作准入判断。
 
 每 60 秒评估一次：`node_offline` 每轮离线/恢复各一次（管理后台与订阅过滤共用持续时间，0 分钟须已断线/过期）；`cpu`/`memory`/`disk`、`public_ip`、`machine_traffic` 与 `system_alert` 沿用默认 30 分钟冷却，恢复不受限。渠道支持 Telegram Bot（2xx 须合法 JSON 且 `ok=true`）与 HTTPS Webhook（重定向亦须 HTTPS）；WARN 仅记渠道 ID 与错误码，不记 Token/正文：
 

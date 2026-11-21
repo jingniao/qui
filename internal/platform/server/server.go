@@ -938,6 +938,9 @@ func (s *nodeNotificationSources) Nodes(ctx context.Context) ([]notification.Nod
 	}
 	res := make([]notification.NodeSnapshot, 0, len(nodes))
 	for _, n := range nodes {
+		if !n.Enabled {
+			n.Status = "disabled"
+		}
 		lastHeartbeat, _ := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
 		if lastHeartbeat.IsZero() {
 			lastHeartbeat, _ = time.Parse(time.RFC3339, n.LastHeartbeat)
@@ -947,11 +950,13 @@ func (s *nodeNotificationSources) Nodes(ctx context.Context) ([]notification.Nod
 			addrs = append(addrs, a.Address)
 		}
 		res = append(res, notification.NodeSnapshot{
-			ID:            n.ID,
-			Name:          n.Name,
-			Status:        n.Status,
-			LastHeartbeat: lastHeartbeat,
-			Addresses:     addrs,
+			ID:               n.ID,
+			Name:             n.Name,
+			Status:           n.Status,
+			LastHeartbeat:    lastHeartbeat,
+			LastHeartbeatRaw: n.LastHeartbeat,
+			Maintenance:      n.Maintenance,
+			Addresses:        addrs,
 		})
 	}
 	return res, nil

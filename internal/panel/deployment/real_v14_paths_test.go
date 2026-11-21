@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"testing"
@@ -38,26 +37,13 @@ type v14Fixture struct {
 	name      string
 	mixedPort int
 	ca        string
-	ports     map[int]bool
 }
 
-// Reserve distinct numbers across simulated hosts as well as within each host.
-// The listeners are released before the real cores start, like the existing
-// real-core fixtures; bind failures are errors, never an allowed CI skip.
+// Keep simulated hosts outside the ephemeral range used by parallel listeners
+// and outgoing connections. FreePort also avoids reuse within this test process.
 func (f *v14Fixture) port(t *testing.T) int {
 	t.Helper()
-	for {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		p := l.Addr().(*net.TCPAddr).Port
-		l.Close()
-		if !f.ports[p] {
-			f.ports[p] = true
-			return p
-		}
-	}
+	return testutil.FreePort(t)
 }
 
 func v14Must(t *testing.T, err error) {
@@ -71,7 +57,7 @@ func v14Must(t *testing.T, err error) {
 // regressions locally instead of hiding them behind the real-core skip.
 func newV14Fixture(t *testing.T, path, primary string) *v14Fixture {
 	t.Helper()
-	f := &v14Fixture{h: newGostHosts(t), ports: map[int]bool{}}
+	f := &v14Fixture{h: newGostHosts(t)}
 	h := f.h
 	nodes := &node.Repository{Database: h.database}
 	for i, id := range []string{h.alpine, h.uk, h.us2} {

@@ -90,15 +90,37 @@ func TestRealOnlineStatisticsRetainASourceBetweenSamples(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	short, err := testutil.GateTunnel(proxy, origin, "short", "short-password", source)
+	// Own both ends of the short connection. Closing only the client can leave
+	// Xray's splice reader waiting on an echo server that has not received EOF;
+	// that is still a live upstream connection, not a retention failure.
+	shortOrigin, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	short.Close()
-	// The core still lists the address for a moment after the close; the sample
-	// taken here is what the retention window starts from.
+	defer shortOrigin.Close()
+	short, err := testutil.GateTunnel(proxy, shortOrigin.Addr().String(), "short", "short-password", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer short.Close()
+	if err := shortOrigin.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	shortPeer, err := shortOrigin.AcceptTCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shortPeer.Close()
+	// Capture a real live source before closing both ends. The following polls
+	// read the core directly without refreshing the observation retention store.
 	if got := keys(observe(), "short"); len(got) != 1 || got[0] != key {
 		t.Fatalf("the short connection was not caught: %v", got)
+	}
+	if err := short.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := shortPeer.Close(); err != nil {
+		t.Fatal(err)
 	}
 	deadline = time.Now().Add(8 * time.Second)
 	for {

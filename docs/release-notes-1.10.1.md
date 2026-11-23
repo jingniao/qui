@@ -21,3 +21,5 @@
 ## 验证与范围
 
 - 本版本不连接、不升级生产。发布前必须通过项目规定的 Linux、真实核心和 GitHub 全部门禁，并在同一提交上生成标签与附件。
+- 正式提交：9f529f27d51acb96916ba3cf802dabb2b969111c；本地 Linux check 与 213 项真实核心测试通过，GitHub check run 45123573030（重跑第 2 次）通过。
+- Release：https://github.com/jingniao/qui/releases/tag/v1.10.1；已发布 13 个附件，包含双架构归档、Agent 签名文件、SHA256SUMS 与 qui sing-box provenance。

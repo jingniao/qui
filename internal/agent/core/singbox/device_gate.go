@@ -74,7 +74,10 @@ func (a *Adapter) clash(ctx context.Context, method, path string) ([]byte, error
 	return data, nil
 }
 func (a *Adapter) sourceConnections(ctx context.Context) ([]sourceConnection, map[string]string, error) {
-	if a.process == nil || a.sourceWriter == nil {
+	if err := a.processErrorLocked(); err != nil {
+		return nil, nil, err
+	}
+	if a.sourceWriter == nil {
 		return nil, nil, errors.New("device observation unavailable")
 	}
 	data, err := a.clash(ctx, http.MethodGet, "/connections")
@@ -87,9 +90,15 @@ func (a *Adapter) sourceConnections(ctx context.Context) ([]sourceConnection, ma
 	if json.Unmarshal(data, &doc) != nil || doc.Connections == nil {
 		return nil, nil, errors.New("device observation API fields unavailable")
 	}
+	activeIDs := map[string]bool{}
+	unavailable := false
 	active := map[string]bool{}
 	list := []sourceConnection{}
 	for _, c := range *doc.Connections {
+		activeIDs[c.ID] = true
+		if _, exists := a.unavailableConnections[c.ID]; exists {
+			unavailable = true
+		}
 		ep, ok := sourceEndpoint(c)
 		if !ok || c.ID == "" {
 			return nil, nil, errors.New("device observation API fields unavailable")
@@ -99,6 +108,15 @@ func (a *Adapter) sourceConnections(ctx context.Context) ([]sourceConnection, ma
 		}
 		active[ep] = true
 		list = append(list, c)
+	}
+	for id, source := range a.unavailableConnections {
+		if !activeIDs[id] {
+			a.sourceWriter.ForgetSource(source)
+			delete(a.unavailableConnections, id)
+		}
+	}
+	if unavailable {
+		return nil, nil, errors.New("device observation source unavailable for pre-handover connections")
 	}
 	users, ok := a.sourceWriter.SourceUsers(active)
 	if !ok {
@@ -218,5 +236,35 @@ func (a *Adapter) tickDeviceGateLocked(ctx context.Context) error {
 		}
 	}
 	a.gateFailed = false
+	return nil
+}
+
+// Owner D3: no user/source map crosses the handover. Even replayed log lines
+// cannot assign a user to a connection already alive at attachment.
+func (a *Adapter) captureUnavailableConnectionsLocked(ctx context.Context) error {
+	a.unavailableConnections = map[string]string{}
+	if a.current.StatsEndpoint == "" || a.current.AccessContext == nil {
+		return nil
+	}
+	data, err := a.clash(ctx, http.MethodGet, "/connections")
+	if err != nil {
+		return err
+	}
+	var doc struct {
+		Connections *[]sourceConnection `json:"connections"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	if doc.Connections == nil {
+		return errors.New("device observation API fields unavailable")
+	}
+	for _, c := range *doc.Connections {
+		if c.ID == "" {
+			return errors.New("device observation connection identity unavailable")
+		}
+		source, _ := sourceEndpoint(c)
+		a.unavailableConnections[c.ID] = source
+	}
 	return nil
 }

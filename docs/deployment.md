@@ -168,12 +168,14 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.7.
 | Agent 服务 | `/etc/systemd/system/proxy-agent.service` | `/etc/init.d/proxy-agent`（`supervise-daemon`） |
 | 强制出站源地址 | `proxy-agent-host-network.service` + `.path` | `/etc/init.d/proxy-agent-host-network` + `host-network-watch`（`inotifyd`） |
 | 低端口 / 出站能力 | `AmbientCapabilities=CAP_NET_BIND_SERVICE` / `CAP_NET_ADMIN` | `capabilities="^cap_net_bind_service"` / `"^cap_net_admin"` |
-| 崩溃重启与停止 | `Restart=on-failure`（5s）、`TimeoutStopSec=90`、`KillMode=mixed` | `respawn_delay=5`、`retry="TERM/90/KILL/5"`、`rc_cgroup_cleanup="yes"` |
+| 崩溃重启与停止 | `Restart=on-failure`（5s）、`TimeoutStopSec=90`、`KillMode=process` | `respawn_delay=5`、`retry="TERM/90/KILL/5"`、`rc_cgroup_cleanup="no"` |
+| 停核屏障 | `ExecStopPost=+/usr/local/bin/proxy-agent --finish-core-stop --config /etc/proxy-agent/config.yaml`（root） | `stop_post` 以 root 执行 `/usr/local/bin/proxy-agent --finish-core-stop --config /etc/proxy-agent/config.yaml` |
 | 运行日志 / 启动故障 | `/var/lib/proxy-agent/logs/agent.log`（100 MiB）；启动错误见 `journalctl -u proxy-agent` | `/var/lib/proxy-agent/logs/agent.log`（100 MiB）；启动错误见 `/var/log/messages`（`logger`） |
 | 开机启动 | `systemctl enable` | `rc-update add … default` |
 
 - 均以 `proxy-agent` 运行（`no_new_privs`、`umask=077`）；OpenRC 无 systemd 的 `ProtectSystem`/`PrivateTmp` 等文件系统隔离。
-- 核心以 `Pdeathsig=SIGKILL` 启动，避免 Agent 退出后遗留占端口的孤儿核心。
+- Linux 核心独立于 Agent 存活，服务停止后由同一屏障确认 worker 退出并检查授权。仅有效更新授权及交接回执允许保留核心；普通 stop/restart、卸载、非更新崩溃仍停核，停核未确认须报失败。
+- Linux 核心以 `Setsid` 启动，不设 `Pdeathsig`；退出清理由上述授权检查与停核屏障负责。OpenRC 自动 respawn 不执行 `stop_post`，新 worker 因而在 lifecycle 锁内先执行同一已认证停核屏障，再恢复保留配置；有效 detached/adopting 交接仍走授权认领。
 - OpenRC 缺失有效 `/etc/machine-id` 时由 `install.sh --node` 自动补写（root 0444）；`agent.manifest` 第 10 行记为 `openrc`。服务命令对照见[运维手册](operations.md)第 1 节。
 
 ### 4.2 调优 helper 与自动续证
@@ -233,8 +235,14 @@ qui-update --version 1.7.5 --bundle proxy-control-1.7.5-linux-amd64.tar.gz --sum
 - **下载与校验**：从 GitHub Releases 拉取归档与 `SHA256SUMS` 校验后调用归档内 `install.sh` 原地替换程序、单元与脚本，保留配置、身份与数据库。受管 Agent 同时验证官方 Ed25519 签名清单（见第 5.3 节）。
 - **顺序与组件隔离**：先面板，再逐台节点。同机同时装有面板与节点时，省略 `--component` 默认先节点后面板；指定 `--component panel|agent` 后版本检查、启停、快照与回滚仅作用于该组件（共享工具随本次更新快照/恢复；`--component agent` 不可与 `--database` 合用）。
 - **数据库备份与预检（面板）**：停服后以 `.partial` + fsync + 逐字节校验备份至 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`（0600），再用目标程序只读执行 `--check-database <备份>`；跨迁移降级未带匹配备份时直接中止并列出可用备份。
-- **快照、健康检查与自动回滚**：停服后、`install.sh` 前把可能替换的文件与运行中的 `qui-update`/`service.sh` 副本快照到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700）并写阶段日志 `journal`（`prepared` → `started` → `committed`/`restored`）。启动后须 10 秒内 PID 不变才提交并清理快照；失败自动回滚并保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。
+- **快照、健康检查与自动回滚**：面板在停服后、`install.sh` 前快照；Agent 在停服前完成快照及交接准备（见下文）。可能替换的文件与运行中的 `qui-update`/`service.sh` 副本保存到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），阶段日志 `journal` 为 `prepared` → `started` → `committed`/`restored`。启动后须通过 10 秒 PID 不变的稳定检查才提交并清理快照；Agent 还须满足认领与实际 worker 摘要核对。失败自动回滚，面板保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。
 - **中断与开机恢复**：Ctrl-C / `SIGTERM` / `SIGHUP`（断线输出写 `/var/lib/proxycontrol-install/interrupted-update.log`）触发自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery`（在服务启动前运行，输出写 `update-recovery.log`）或下一次 `qui-update` 幂等完成恢复。互斥锁为 `/var/lib/proxycontrol-install/update.lock`。`pre-update-*` 与 `failed-update-*` 需确认无用后手工清理。
+
+**Agent 核心交接（目标版本 1.10.0）**：`qui-update` 先用 `--core-handover-protocol` 探测源、目标及实际受管 worker 的能力。源或目标不支持时明确提示“本次更新会中断连接”；pidfd 不可用时不交接，说明原因后按停核更新，不使用裸 PID 替代。第一次升级到本版本由旧 Agent 执行，仍会断线。
+
+支持交接时，流程为：停服前快照并保存带 SHA-256 校验的目标 helper 副本 → arm 授权 → stop → 确认 detached → 安装 → 启动 → 等待 adopted → 等服务稳定 → 查询并核对实际 worker 摘要（本地套接字未就绪时重试，最多 30 秒）→ 提交更新日志 → revoke 撤销授权。授权窗口为 300 秒 CLOCK_BOOTTIME。受管节点第二次 worker 切换同样单独授权并核对认领回执，受管 worker 接受 bootstrap 与 worker 两种作用域。配置或依赖确实变化仍走全核发布重启，不承诺这次连接持续。
+
+失败回滚先撤销授权，再停服务并执行同一 `--finish-core-stop` 屏障；确认核心退出后才恢复旧镜像。屏障失败则保留快照、helper 与运行现场，不继续覆盖文件或启动旧 Agent；中断与开机恢复同样遵守此顺序。交接输出及本机排障命令见[运维手册](operations.md#agent-核心交接排障)。
 
 ### 5.1 RC 与组件选择
 
@@ -309,7 +317,7 @@ Owner 在「系统管理 → 系统设置 → 系统信息 → 面板更新」�
 deploy/linux/uninstall.sh panel     # 或 agent
 ```
 
-普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载先恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元。
+普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载须先撤销全部交接授权，再停服并执行 `--finish-core-stop` 屏障确认核心退出；仅服务 inactive 不足以确认停核，屏障失败保留现场并中止卸载。旧 Agent 不支持协议时沿用其停核流程。Agent 卸载还须恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元。
 
 彻底清除使用 `qui`「卸载并清除全部数据」或 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可指定 `panel`/`agent`）：按记录先 Agent 后面板，须交互依次输入 `y`、`purge`（无免确认参数），删除配置、状态、备份与账号；不要先普通卸载再补 `--purge`。详见[运维手册](operations.md) §14。
 

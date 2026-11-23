@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/devicegate"
 	"strconv"
 	"strings"
@@ -25,6 +26,9 @@ func (a *Adapter) gateNow() time.Time {
 func (a *Adapter) SetDeviceGate(ctx context.Context, data []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.processErrorLocked(); err != nil {
+		return err
+	}
 	err := a.deviceGate.Set(data, a.gateNow())
 	if err != nil {
 		a.deviceGate.Clear()
@@ -158,6 +162,9 @@ func (a *Adapter) verifyRouting(ctx context.Context, tags []string, gateFree boo
 			return false
 		}
 	}
+	if gateFree && len(found) != len(tags) {
+		return false
+	}
 	return len(tags) > 0
 }
 
@@ -183,15 +190,14 @@ const gateProbeWindow = 5 * time.Second
 // gateProbeCache remembers the verification of one process and configuration.
 // A new process, stats epoch or configuration data is a different one.
 type gateProbeCache struct {
-	process *exec.Cmd
-	epoch   string
-	data    [sha256.Size]byte
-	at      time.Time
-	ok      bool
+	run  core.CoreRun
+	data [sha256.Size]byte
+	at   time.Time
+	ok   bool
 }
 
-func (p gateProbeCache) valid(process *exec.Cmd, epoch string, data [sha256.Size]byte, now time.Time) bool {
-	return p.process == process && p.epoch == epoch && p.data == data && now.Sub(p.at) < gateProbeWindow
+func (p gateProbeCache) valid(run core.CoreRun, data [sha256.Size]byte, now time.Time) bool {
+	return p.run == run && p.data == data && now.Sub(p.at) < gateProbeWindow
 }
 
 // probeDeviceGate reports whether the running core enforces the user and source
@@ -208,7 +214,7 @@ func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
 	}
 	digest := sha256.Sum256(a.current.Data)
 	now := a.gateNow()
-	if a.gateProbe.valid(a.process, a.statsEpoch, digest, now) {
+	if a.gateProbe.valid(a.runIdentityLocked(), digest, now) {
 		return a.gateProbe.ok
 	}
 	var doc struct {
@@ -222,13 +228,20 @@ func (a *Adapter) probeDeviceGate(ctx context.Context) bool {
 		tags = append(tags, rule.RuleTag)
 	}
 	ok := a.verifyRouting(ctx, tags, false)
-	a.gateProbe = gateProbeCache{process: a.process, epoch: a.statsEpoch, data: digest, at: now, ok: ok}
+	a.gateProbe = gateProbeCache{run: a.runIdentityLocked(), data: digest, at: now, ok: ok}
 	return ok
 }
 func (a *Adapter) tickDeviceGateLocked(ctx context.Context) error {
 	if a.process == nil || a.current.StatsEndpoint == "" {
 		return nil
 	}
+	if err := a.processErrorLocked(); err != nil {
+		return err
+	}
+	return a.applyDeviceGateLocked(ctx)
+}
+
+func (a *Adapter) applyDeviceGateLocked(ctx context.Context) error {
 	host, _, err := net.SplitHostPort(a.current.StatsEndpoint)
 	if err != nil || host != "127.0.0.1" {
 		return errors.New("device gate requires loopback")

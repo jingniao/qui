@@ -200,29 +200,142 @@ service_healthy() {
   return 0
 }
 
-# Opt an existing node into supervised web Agent upgrades. Failure is deliberately
-# non-fatal to the caller: the service is restored in standalone mode and the
-# failed evidence is retained for diagnosis.
+# Root-only CLI calls must not inherit the updater's locks/report descriptors.
+qui_core_cli() {
+  local binary=$1 config=$2
+  shift 2
+  "$binary" --config "$config" "$@" 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+}
+
+# 2 means the legacy Go flag parser rejected this exact capability flag.
+# All other failures, including malformed successful output, are errors.
+qui_core_handover_protocol() {
+  local output='' status=0
+  output=$("$1" --core-handover-protocol 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-) || status=$?
+  if ((status == 0)) && [[ $output == 1 ]]; then return 0; fi
+  if ((status != 0)) && [[ $output == *'flag provided but not defined: -core-handover-protocol'* ]]; then
+    return 2
+  fi
+  printf '核心交接能力探测失败（%s）：%s\n' "$1" "$output" >&2
+  return 1
+}
+
+# 2 is the explicitly approved stop-and-update path when pidfd is unavailable.
+# arm probes pidfd before writing authorization; all other errors remain fatal.
+qui_core_handover_arm() {
+  local output='' status=0
+  output=$("$@" 2>&1) || status=$?
+  if ((status == 0)); then printf '%s\n' "$output"; return 0; fi
+  if [[ $output == *core_handover_unsupported* ]]; then
+    printf '核心交接不可用：%s；本次更新会中断连接，按停核更新。\n' "$output" >&2
+    return 2
+  fi
+  printf '%s\n' "$output" >&2
+  return 1
+}
+
+# The target CLI returns a digest, not a worker path. Probe the matching running
+# image through procfs; never guess the configured data directory or image path.
+# These PIDs are used only to read/probe executables, never to send signals.
+qui_core_handover_source() {
+  local binary=$1 digest=$2 actual='' main='' child='' children='' children_file='' thread_children=''
+  actual=$(sha256sum -- "$binary") || return 1
+  if [[ ${actual%% *} == "$digest" ]]; then
+    qui_core_handover_protocol "$binary"
+    return $?
+  fi
+  main=$(service_main_pid proxy-agent) || return 1
+  # Go may create the worker from any OS thread, so inspect every task's children.
+  for children_file in "/proc/$main"/task/*/children; do
+    thread_children=$(cat -- "$children_file") || return 1
+    children+=" $thread_children"
+  done
+  for child in $main $children; do
+    actual=$(sha256sum -- "/proc/$child/exe") || return 1
+    if [[ ${actual%% *} == "$digest" ]]; then
+      qui_core_handover_protocol "/proc/$child/exe"
+      return $?
+    fi
+  done
+  printf '无法确认实际 Agent 镜像的交接能力：%s\n' "$digest" >&2
+  return 1
+}
+
+qui_core_handover_wait() {
+  local binary=$1 config=$2 request=$3 state='' waited=0 first='' pid=''
+  while ((waited < 300)); do
+    if service_is_active proxy-agent && first=$(service_main_pid proxy-agent); then break; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  [[ -n $first ]] || { printf 'Agent 未提供可观察的服务进程。\n' >&2; return 1; }
+  # The Go request enforces the 300-second CLOCK_BOOTTIME deadline. This polling
+  # limit also bounds a helper that keeps returning an intermediate state.
+  while ((waited < 300)); do
+    service_is_active proxy-agent || return 1
+    pid=$(service_main_pid proxy-agent) || return 1
+    [[ $pid == "$first" ]] || { printf '认领期间 Agent 重启。\n' >&2; return 1; }
+    state=$(qui_core_cli "$binary" "$config" --core-handover-status --request "$request") || return 1
+    case $state in
+      adopted) return 0;;
+      armed|prepared|detached|adopting) ;;
+      failed|stopped|expired) printf '核心交接失败：%s\n' "$state" >&2; return 1;;
+      *) printf '核心交接状态无效：%s\n' "$state" >&2; return 1;;
+    esac
+    sleep 1
+    waited=$((waited + 1))
+  done
+  printf '等待核心认领超时。\n' >&2
+  return 1
+}
+
+# A SIGKILL cannot run the initialization trap. The next update/enable attempt
+# or boot finds its retained helper and revokes preservation before recovery.
+qui_core_handover_recover_web() {
+  local registry=$1 mode=$2 transaction='' helper='' expected='' actual=''
+  for transaction in "$registry"/web-handover.*; do
+    [[ -e $transaction || -L $transaction ]] || continue
+    [[ -d $transaction && ! -L $transaction && $(stat -c '%u:%a' -- "$transaction") == 0:700 ]] || return 1
+    helper=$transaction/core-stop-helper
+    [[ -f $helper && ! -L $helper && $(stat -c '%u:%a' -- "$helper") == 0:500 ]] || return 1
+    [[ -f $transaction/sha256 && ! -L $transaction/sha256 && $(stat -c '%u:%a' -- "$transaction/sha256") == 0:600 ]] || return 1
+    expected=$(cat -- "$transaction/sha256") || return 1
+    actual=$(sha256sum -- "$helper") || return 1
+    [[ $expected =~ ^[0-9a-f]{64}$ && ${actual%% *} == "$expected" ]] || return 1
+    qui_core_cli "$helper" /etc/proxy-agent/config.yaml --core-handover-revoke-all --reason recovery || return 1
+    if [[ $mode != boot ]]; then service_stop proxy-agent || return 1; fi
+    qui_core_cli "$helper" /etc/proxy-agent/config.yaml --finish-core-stop || return 1
+    rm -rf -- "$transaction" || return 1
+    printf '已撤销中断的网页初始化授权并确认停核；初始化状态保留，需重新启用网页升级。\n'
+  done
+}
+
+# Restore standalone mode only after the caller has confirmed the stop barrier.
+# Every failed move/start remains visible and preserves the retained helper.
 agent_web_upgrade_failed() {
   local data=$1 stamp backup path
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   backup="$data/web-upgrade-failed-$stamp"
-  mkdir -p -- "$backup" && chmod 0700 -- "$backup"
+  mkdir -p -- "$backup" && chmod 0700 -- "$backup" || return 1
   for path in "$data/identity/agent-supervisor.enc" "$data/identity/agent-release-checkpoint.enc" \
     "$data/agent-release-history" "$data/releases/agent-installed" "$data/releases/agent-candidates" "$data/releases/agent-local-candidates" \
     "$data/agent-jobs" "$data/identity/agent-jobs-checkpoint.enc" "$data/identity/agent-supervision-init.pending"; do
     [[ -e $path || -L $path ]] || continue
-    mv -- "$path" "$backup/" || true
+    mv -- "$path" "$backup/" || return 1
   done
-  chown -R proxy-agent:proxy-agent -- "$backup" 2>/dev/null || true
-  service_start proxy-agent || true
-  service_healthy proxy-agent 10 || true
+  chown -R proxy-agent:proxy-agent -- "$backup" || return 1
+  service_start proxy-agent && service_healthy proxy-agent 10 || return 1
   printf '网页升级未启用，节点仍按普通模式运行；失败现场在 %s\n' "$backup" >&2
-  return 1
+  return 0
 }
 
-agent_enable_web_upgrade() {
-  local data marker pending baseline waited=0
+agent_enable_web_upgrade() (
+  local data marker pending baseline waited=0 binary=/usr/local/bin/proxy-agent
+  local config=/etc/proxy-agent/config.yaml supported=false protocol_status=0
+  local target='' request='' helper='' transaction='' state='' web_pending=false
+  local recovery_reason=rollback exit_status=0 helper_digest='' binary_digest=''
+  local updater_pid=$BASHPID
+  qui_core_handover_recover_web /var/lib/proxycontrol-install interactive || return 1
   data=${QUI_AGENT_DATA:-/var/lib/proxy-agent}
   marker="$data/identity/agent-supervisor.enc"
   pending="$data/identity/agent-supervision-init.pending"
@@ -249,18 +362,93 @@ agent_enable_web_upgrade() {
       return 0
     fi
   done
+  qui_core_handover_protocol "$binary" || protocol_status=$?
+  case $protocol_status in
+    0)
+      target=$(qui_core_cli "$binary" "$config" --core-handover-target) || return 1
+      [[ $target =~ ^[0-9a-f]{64}$ ]] || return 1
+      protocol_status=0
+      qui_core_handover_source "$binary" "$target" || protocol_status=$?
+      case $protocol_status in 0) supported=true;; 2) ;; *) return 1;; esac
+      # A retained copy survives failed initialization and is removed only after
+      # adoption or a confirmed stop barrier. It never lives in PrivateTmp.
+      transaction=$(mktemp -d /var/lib/proxycontrol-install/web-handover.XXXXXXXX) || return 1
+      chmod 0700 -- "$transaction" || return 1
+      helper=$transaction/core-stop-helper
+      install -o root -g root -m 0500 -- "$binary" "$helper" || return 1
+      helper_digest=$(sha256sum -- "$helper") || return 1
+      binary_digest=$(sha256sum -- "$binary") || return 1
+      [[ ${helper_digest%% *} == "${binary_digest%% *}" ]] || return 1
+      printf '%s\n' "${helper_digest%% *}" > "$transaction/sha256" || return 1
+      chmod 0600 -- "$transaction/sha256" || return 1
+      sync -f -- "$helper" && sync -f -- "$transaction/sha256" && sync -f -- "$transaction" \
+        && sync -f -- /var/lib/proxycontrol-install || return 1
+      ;;
+    2) ;;
+    *) return 1;;
+  esac
+  if ! $supported; then printf '首次启用网页升级按停核流程执行，本次更新会中断连接。\n'; fi
+  # Isolate traps from update.sh/node-install.sh. A signal before start must
+  # revoke preservation before any fallback moves the supervised state.
+  trap 'recovery_reason=recovery; exit 130' INT
+  trap 'recovery_reason=recovery; exit 143' TERM
+  trap 'recovery_reason=recovery; exit 129' HUP
+  trap '
+    exit_status=$?
+    trap "" INT TERM HUP
+    if $web_pending; then
+      if [[ -n $helper ]]; then
+        if [[ $recovery_reason == recovery || -z $request ]]; then
+          if [[ $recovery_reason == recovery ]]; then
+            qui_core_cli "$helper" "$config" --core-handover-revoke-all --reason recovery || exit 1
+          else
+            qui_core_cli "$helper" "$config" --core-handover-revoke-all --reason abort || exit 1
+          fi
+        else
+          qui_core_cli "$helper" "$config" --core-handover-revoke --request "$request" --reason rollback || exit 1
+        fi
+      fi
+      service_stop proxy-agent || exit 1
+      if [[ -n $helper ]]; then qui_core_cli "$helper" "$config" --finish-core-stop || exit 1; fi
+      agent_web_upgrade_failed "$data" || exit 1
+      exit_status=1
+    fi
+    if [[ -n $transaction ]]; then rm -rf -- "$transaction" || exit 1; fi
+    exit "$exit_status"
+  ' EXIT
+  web_pending=true
+  if $supported; then
+    local handover_arm_status=0
+    request=$(qui_core_handover_arm qui_core_cli "$helper" "$config" --core-handover-arm --scope bootstrap \
+      --transaction "${transaction##*/}" --target-sha256 "$target" --updater-pid "$updater_pid") || handover_arm_status=$?
+    case $handover_arm_status in
+      0) [[ -n $request && $request != *$'\n'* ]] || return 1;;
+      2) supported=false; request='';;
+      *) return 1;;
+    esac
+  fi
   service_stop proxy-agent || return 1
+  if [[ -n $request ]]; then
+    state=$(qui_core_cli "$helper" "$config" --core-handover-status --request "$request") || return 1
+    [[ $state == detached ]] || { printf '网页升级初始化未确认 detached：%s\n' "$state" >&2; return 1; }
+  elif [[ -n $helper ]]; then
+    qui_core_cli "$helper" "$config" --core-handover-revoke-all --reason abort \
+      && qui_core_cli "$helper" "$config" --finish-core-stop || return 1
+  fi
   if ! (umask 077; runuser -u proxy-agent -- /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --initialize-agent-history); then
-    agent_web_upgrade_failed "$data"
     return 1
   fi
-  if ! service_start proxy-agent || ! service_healthy proxy-agent 10; then
-    service_stop proxy-agent || true
-    agent_web_upgrade_failed "$data"
-    return 1
+  service_start proxy-agent || return 1
+  if [[ -n $request ]]; then
+    qui_core_handover_wait "$helper" "$config" "$request" || return 1
   fi
+  service_healthy proxy-agent 10 || return 1
+  if [[ -n $request ]]; then
+    qui_core_cli "$helper" "$config" --core-handover-revoke --request "$request" --reason done || return 1
+  fi
+  web_pending=false
   printf '网页升级已启用\n'
-}
+)
 
 # Print a command that shows the last 50 log lines of a service. Both programs
 # write to stdout and are collected by the host logger: journald on systemd, and

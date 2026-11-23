@@ -11,7 +11,7 @@ func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	}
 	defer a.mu.Unlock()
 	if a.current.UserStatsEndpoint != "" && a.statsEpoch != "" {
-		return a.counterSources.Status(a.statsEpoch, a.current.Revision, len(a.current.StatsAccounts), a.process != nil)
+		return a.counterSources.Status(a.statsEpoch, a.current.Revision, len(a.current.StatsAccounts), a.runningChildLocked())
 	}
 	// Official sing-box builds cannot attribute traffic to a user (plan D5), so
 	// the per-user source is reported as unavailable, never as a fabricated zero.

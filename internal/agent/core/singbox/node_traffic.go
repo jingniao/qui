@@ -58,7 +58,14 @@ func (t *nodeTotals) delta(current clashConnectionTotals) (uint64, uint64) {
 func (a *Adapter) NodeTrafficTotals(ctx context.Context) (uint64, uint64, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.process == nil || a.current.StatsEndpoint == "" || a.statsSecret == "" {
+	if err := a.processErrorLocked(); err != nil {
+		return 0, 0, err
+	}
+	return a.nodeTrafficTotalsLocked(ctx, a.process != nil)
+}
+
+func (a *Adapter) nodeTrafficTotalsLocked(ctx context.Context, running bool) (uint64, uint64, error) {
+	if !running || a.current.StatsEndpoint == "" || a.statsSecret == "" {
 		return 0, 0, errors.New("sing-box node traffic totals unavailable")
 	}
 	host, _, err := net.SplitHostPort(a.current.StatsEndpoint)

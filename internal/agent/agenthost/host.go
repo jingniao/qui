@@ -173,6 +173,9 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger, l
 		}
 	}()
 	if controlOnly {
+		if err := agentprocess.ConfirmCoresStopped(c.DataDirectory); err != nil {
+			return err
+		}
 		if !r.Jobs || baselinePending && baseline.Request.Revision != revision || state.Phase == "failed_closed" && state.Revision != revision {
 			return ErrState
 		}
@@ -197,12 +200,15 @@ func Run(ctx context.Context, configPath, version string, logger *slog.Logger, l
 		}
 		if _, err := installer.Recover(ctx, driver); err != nil {
 			process = driver.Process()
-			if process != nil {
+			if process != nil || driver.UnconfirmedStop() {
 				return errors.Join(err, agentprocess.ErrStopUnconfirmed)
 			}
 			retained, found, readErr := history.Installation("proxy-agent")
 			if readErr != nil || !found || retained.Phase != "failed_closed" || retained.Current != state.Current || !r.Jobs {
 				return errors.Join(err, readErr)
+			}
+			if stopErr := agentprocess.ConfirmCoresStopped(c.DataDirectory); stopErr != nil {
+				return errors.Join(err, stopErr)
 			}
 			process, readErr = agentprocess.StartControlOnly(ctx, images, retained.Current, configPath, node.NodeID, revision, required, logs)
 			if readErr != nil {

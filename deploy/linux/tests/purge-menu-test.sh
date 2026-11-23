@@ -52,7 +52,8 @@ FAKES
   for c in "$@"; do
     mkdir -p "$R/etc/proxy-$c" "$R/var/lib/proxy-$c/tuning"
     printf 'http_address: :22550\ngrpc_address: :18880\n' > "$R/etc/proxy-$c/config.yaml"
-    printf '#!/bin/sh\nexit 17\n' > "$R/usr/local/bin/proxy-$c"
+    # The Agent answers the local core-handover contract uninstall relies on.
+    printf '#!/bin/sh\ncase " $* " in\n  *" --core-handover-protocol "*) echo 1; exit 0;;\n  *" --core-handover-revoke-all "*|*" --finish-core-stop "*) echo "$*" >> "%s/calls"; exit 0;;\nesac\nexit 17\n' "$R" > "$R/usr/local/bin/proxy-$c"
     chmod 755 "$R/usr/local/bin/proxy-$c"
     unit=$R/etc/systemd/system/proxy-$c.service
     [[ $INIT != openrc ]] || unit=$R/etc/init.d/proxy-$c
@@ -241,7 +242,7 @@ for selection in agent panel all; do
   cp "$R/service.sh" "$R/usr/local/lib/proxycontrol/service.sh"
   for c in panel agent; do
     if [[ -f $R/usr/local/bin/proxy-$c ]]; then
-      printf '#!/bin/sh\necho fixture-version\n' > "$R/usr/local/bin/proxy-$c"
+      printf '#!/bin/sh\ncase " $* " in\n  *" --core-handover-protocol "*) echo 1; exit 0;;\n  *" --core-handover-revoke-all "*|*" --finish-core-stop "*) exit 0;;\nesac\necho fixture-version\n' > "$R/usr/local/bin/proxy-$c"
     fi
   done
   # passwd lookup is a boundary fact; group lookup remains the account fake.

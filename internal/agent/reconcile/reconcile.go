@@ -66,6 +66,7 @@ type Reconciler struct {
 	componentHolds         map[string]bool
 	componentHoldsInvalid  map[string]bool
 	controlOnly            bool
+	startupErr             error
 }
 
 func New(directory, nodeID string, adapter core.Adapter) (*Reconciler, error) {

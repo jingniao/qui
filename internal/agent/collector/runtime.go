@@ -18,6 +18,7 @@ type Runtime struct {
 	aggregator          *Aggregator
 	incoming            chan access.Rollup
 	done                chan struct{}
+	shutdownErr         error // published by closing done
 	dropped             atomic.Uint64
 	rejected            atomic.Uint64
 	logger              *slog.Logger
@@ -64,6 +65,17 @@ func (r *Runtime) Submit(record access.Rollup) error {
 }
 func (r *Runtime) Reject() { r.rejected.Add(1); r.increment(&r.unattributed) }
 func (r *Runtime) Wait()   { <-r.done }
+
+// Drain returns the actual shutdown flush result after the caller has stopped
+// log producers and cancelled Run. Closing done publishes shutdownErr.
+func (r *Runtime) Drain(ctx context.Context) error {
+	select {
+	case <-r.done:
+		return r.shutdownErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 func (r *Runtime) flush(ctx context.Context) error {
 	if r.aggregator.Len() == 0 {
 		return nil
@@ -139,6 +151,7 @@ func (r *Runtime) Run(ctx context.Context) {
 				default:
 					flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					err := r.flush(flushCtx)
+					r.shutdownErr = err
 					cancel()
 					if err != nil {
 						r.logger.Error("telemetry shutdown persistence failed")

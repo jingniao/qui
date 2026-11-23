@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
+
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
@@ -101,7 +101,7 @@ func onlineAdapter(endpoint string) *Adapter {
 		statsEpoch: "online-epoch",
 		// A running process is what makes the online statistics readable; no
 		// process is started in this fixture.
-		process: &exec.Cmd{},
+		process: runningHandle{},
 		current: core.RenderedConfig{
 			NodeID: "node", Revision: 4, StatsEndpoint: endpoint, OnlineStats: true,
 			StatsAccounts: map[string]traffic.Counter{
@@ -345,3 +345,15 @@ func TestOnlineSnapshotRejectsInvalidUpstreamCounts(t *testing.T) {
 		t.Fatal("out-of-range online count accepted", sample, err)
 	}
 }
+
+// runningHandle stands in for the live core process that &exec.Cmd{} used to
+// represent in these fixtures before the adapter held a core.ProcessHandle.
+type runningHandle struct{}
+
+func (runningHandle) Identity() core.ProcessIdentity        { return core.ProcessIdentity{} }
+func (runningHandle) Environment() core.OSEnvironment       { return core.OSEnvironment{} }
+func (runningHandle) ExitObservation() core.ExitObservation { return core.ExitObservation{} }
+func (runningHandle) Done() <-chan struct{}                 { return nil }
+func (runningHandle) Detached() bool                        { return false }
+func (runningHandle) Stop(context.Context) error            { return nil }
+func (runningHandle) Detach() error                         { return nil }

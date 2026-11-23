@@ -1,6 +1,7 @@
 # Finish or roll back an update that qui-update could not finish, before the
 # services of this platform start. qui-update keeps
-# /var/lib/proxycontrol-install/rollback.* only while an update is in progress and
+# /var/lib/proxycontrol-install/rollback.* (or web-handover.* for first enable)
+# only while an update is in progress and
 # removes it once the update or the rollback has succeeded, so the condition makes
 # this unit a no-op on every other boot instead of something that has to be checked
 # by hand.
@@ -14,7 +15,8 @@
 # the services still start on whatever is installed.
 [Unit]
 Description=Proxy Control: finish or roll back an interrupted qui-update
-ConditionPathExistsGlob=/var/lib/proxycontrol-install/rollback.*/journal
+ConditionPathExistsGlob=|/var/lib/proxycontrol-install/rollback.*/journal
+ConditionPathExistsGlob=|/var/lib/proxycontrol-install/web-handover.*
 After=local-fs.target
 Before=proxy-agent.service proxy-panel.service proxy-agent-host-network.service proxy-agent-host-network.path proxy-agent-tuning.service proxy-agent-tuning.path proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service
 

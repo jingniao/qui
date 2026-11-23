@@ -31,18 +31,23 @@ type Adapter struct {
 	Directory string
 	NodeID    string
 
-	mu          sync.Mutex
-	hooks       core.RuntimeHooks
-	process     *exec.Cmd
-	done        chan error
-	stopPending bool
-	startedAt   time.Time
-	log         childLog
-	marker      core.RunMarker
-	current     core.RenderedConfig
-	history     map[int64]core.RenderedConfig
-	sources     map[string]bool
-	metrics     metricsStatus
+	mu                   sync.Mutex
+	hooks                core.RuntimeHooks
+	process              core.ProcessHandle
+	runtimeMaterial      *core.RuntimeMaterial
+	handoverPrepared     bool
+	detached             bool
+	adopting             bool
+	handoverDependencies map[string]string
+	stopPending          bool
+	startedAt            time.Time
+	log                  childLog
+	marker               core.RunMarker
+	current              core.RenderedConfig
+	history              map[int64]core.RenderedConfig
+	sources              map[string]bool
+	metrics              metricsStatus
+	counterSources       core.CounterSources
 }
 
 // metricsStatus is the traffic-source state of the running epoch. A failed scrape
@@ -118,6 +123,7 @@ func (a *Adapter) ValidateExecutable(ctx context.Context, path string, configura
 type childLog struct {
 	mu   sync.Mutex
 	data []byte
+	path string
 }
 
 const childLogLimit = 4096
@@ -136,12 +142,16 @@ func (l *childLog) reset() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.data = nil
+	l.path = ""
 }
 
-func (l *childLog) tail() string {
+func (l *childLog) tail() (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return strings.TrimSpace(string(l.data))
+	if l.path != "" {
+		return readErrorLogTail(l.path)
+	}
+	return strings.TrimSpace(string(l.data)), nil
 }
 
 var _ io.Writer = (*childLog)(nil)
@@ -236,61 +246,66 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 	if err != nil {
 		return err
 	}
+	command := exec.Command(absolute, "-C", filepath.Join(a.Directory, ConfigFile))
+	command.Env = core.CoreEnvironment()
+	command.SysProcAttr = core.CoreProcessAttributes()
+	if err := a.claimRuntimeLocked(ctx, configuration, epoch, absolute, command); err != nil {
+		return errors.Join(err, a.discardUnstartedRuntimeLocked())
+	}
 	if err := writeConfig(a.Directory, data); err != nil {
-		return err
+		return errors.Join(err, a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
 	}
 	// A killed core leaves its socket file behind and cannot bind over it.
 	socket := filepath.Join(a.Directory, MetricsSocket)
 	if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	// Record the pending child before it exists, so a crash in the start window
-	// cannot leave an orphan core without a durable marker.
-	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
-		return err
+		return errors.Join(err, a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
 	}
 	a.log.reset()
-	command := exec.Command(absolute, "-C", filepath.Join(a.Directory, ConfigFile))
-	command.Env = core.CoreEnvironment()
-	// The core must also die with the Agent when the supervisor only signals the
-	// Agent PID (OpenRC supervise-daemon).
-	command.SysProcAttr = core.CoreProcessAttributes()
 	command.Stdout = io.Discard
-	// Only warn lines are rendered, so the bounded tail is the diagnostic of a
-	// refused start and nothing else.
-	command.Stderr = &a.log
-	if err := command.Start(); err != nil {
-		return errors.Join(err, a.runMarker().Abandon())
+	if err := a.openErrorLogLocked(command); err != nil {
+		return errors.Join(err, a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
 	}
-	a.startedAt = time.Now()
-	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
+	outputOpen := true
+	defer func() {
+		if outputOpen {
+			resultErr = errors.Join(resultErr, closeCommandErrorLog(command))
+		}
+	}()
+	if err := command.Start(); err != nil {
+		return errors.Join(err, a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
+	}
+	a.startedAt = time.Now().UTC()
+	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
+		return errors.Join(err, a.reapUnboundLocked(command))
+	}
+	handle, err := core.NewChildProcessHandle(command, *a.marker.Run)
+	if err != nil {
+		return errors.Join(err, a.reapUnboundLocked(command))
+	}
+	a.process, a.marker.Handle = handle, handle
 	accepted := false
 	defer func() {
-		if accepted {
-			return
+		if !accepted {
+			resultErr = errors.Join(resultErr, a.forceStopLocked())
 		}
-		// Kill and prove the exit, or keep the exact child so no replacement can
-		// start for it.
-		_ = command.Process.Kill()
-		if reapErr := core.ReapProcess(done, core.StopReapTimeout); reapErr != nil {
-			a.process, a.done, a.stopPending = command, done, true
-			resultErr = errors.Join(resultErr, reapErr)
-			return
-		}
-		resultErr = errors.Join(resultErr, a.runMarker().ConfirmExit())
 	}()
-	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
+	outputOpen = false
+	if err := closeCommandErrorLog(command); err != nil {
 		return err
 	}
-	if err := settle(ctx, command.Process.Pid, done, configuration, socket, a.log.tail); err != nil {
+	if err := settle(ctx, handle, configuration, socket, a.log.tail); err != nil {
 		return err
 	}
 	// The socket lives inside the 0700 runtime directory; its own mode is tightened
 	// too, where the platform keeps unix socket permissions. A platform that does
 	// not is the one GOST is not installed on, so the failure is not fatal here.
 	_ = os.Chmod(socket, 0600)
-	a.process, a.done = command, done
+	if err := a.activateRuntimeLocked(); err != nil {
+		return err
+	}
+	if err := a.handoverAliveLocked(); err != nil {
+		return err
+	}
 	a.current = configuration
 	a.sources = forwardServiceNames(config)
 	a.metrics = metricsStatus{}
@@ -306,12 +321,13 @@ func (a *Adapter) stopLocked() error {
 	if a.process == nil {
 		return a.lifecycleReadyLocked()
 	}
-	select {
-	case <-a.done:
-		a.process, a.done, a.stopPending = nil, nil, false
-		a.sources = nil
-		return a.runMarker().ConfirmExit()
-	default:
+	if a.process.Detached() {
+		return core.ErrProcessDetached
+	}
+	if exit := a.process.ExitObservation(); exit.Exited {
+		return a.finishExitLocked()
+	} else if exit.Err != nil {
+		return exit.Err
 	}
 	if a.hooks.TrafficSink != nil && len(a.sources) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -322,23 +338,17 @@ func (a *Adapter) stopLocked() error {
 }
 
 func (a *Adapter) forceStopLocked() error {
+	a.handoverPrepared = false
 	if a.process == nil {
 		return a.lifecycleReadyLocked()
 	}
-	if err := a.process.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		// Killing failed for a reason other than the child already being gone, so
-		// its exit is unconfirmed: keep the original child and refuse a
-		// replacement start.
+	ctx, cancel := context.WithTimeout(context.Background(), core.StopReapTimeout)
+	defer cancel()
+	if err := a.process.Stop(ctx); err != nil {
 		a.stopPending = true
 		return err
 	}
-	if err := core.ReapProcess(a.done, core.StopReapTimeout); err != nil {
-		a.stopPending = true
-		return err
-	}
-	a.process, a.done, a.stopPending = nil, nil, false
-	a.sources = nil
-	return a.runMarker().ConfirmExit()
+	return a.finishExitLocked()
 }
 
 func (a *Adapter) Close() error {
@@ -361,7 +371,7 @@ func (a *Adapter) UnconfirmedStop() bool {
 	if a.stopPending {
 		return true
 	}
-	observation, err := a.runMarker().Observe(a.process != nil)
+	observation, err := a.runMarker().Observe(a.runningChildLocked())
 	return err != nil || observation == core.CoreRunBlocked
 }
 
@@ -370,13 +380,11 @@ func (a *Adapter) UnconfirmedStop() bool {
 func (a *Adapter) CoreStartedAt() time.Time {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.process == nil {
+	if !a.runningChildLocked() {
 		return time.Time{}
 	}
 	return a.startedAt
 }
-
-func (a *Adapter) lifecycleReadyLocked() error { return a.runMarker().Ready(a.process != nil) }
 
 // SampleTraffic reports the cumulative node counters of the running process to the
 // existing traffic sink. GOST has no account counter, so this is the node total and
@@ -387,11 +395,20 @@ func (a *Adapter) SampleTraffic(ctx context.Context) error {
 	return a.sampleTrafficLocked(ctx)
 }
 
-func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
+func (a *Adapter) sampleTrafficLocked(ctx context.Context) (sampleErr error) {
+	defer func() {
+		if sampleErr != nil {
+			a.metrics.failed = true
+			a.counterSources.Failure(a.marker.Epoch)
+		}
+	}()
+	if err := a.processErrorLocked(); err != nil {
+		return err
+	}
 	if a.process == nil || a.hooks.TrafficSink == nil {
 		return nil
 	}
-	upload, download, err := readMetrics(ctx, filepath.Join(a.Directory, MetricsSocket), a.sources)
+	upload, download, err := readMetricsSources(ctx, filepath.Join(a.Directory, MetricsSocket), a.sources, &a.counterSources, a.marker.Epoch)
 	if err != nil {
 		a.metrics.failed = true
 		return err
@@ -401,7 +418,10 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return a.hooks.TrafficSink(ctx, []traffic.Counter{counter})
+	if err := a.hooks.TrafficSink(ctx, []traffic.Counter{counter}); err != nil {
+		return err
+	}
+	return a.persistSampleRuntimeLocked()
 }
 
 // CollectStats is the same node total as a single batch, for callers that read the
@@ -409,6 +429,9 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 func (a *Adapter) CollectStats(ctx context.Context) (core.StatsBatch, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.processErrorLocked(); err != nil {
+		return core.StatsBatch{}, err
+	}
 	if a.process == nil {
 		return core.StatsBatch{}, errors.New("core not running")
 	}
@@ -427,7 +450,7 @@ func (a *Adapter) CollectStats(ctx context.Context) (core.StatsBatch, error) {
 func (a *Adapter) TrafficSourceStatus() *pb.TrafficSourceStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	running := a.process != nil
+	running := a.runningChildLocked()
 	// An idle core (installed, no forward assigned) or one whose run marker is
 	// gone has no process identity to attribute counters to; like Xray without a
 	// statistics epoch, that is "unavailable", which the panel accepts without one.

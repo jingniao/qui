@@ -108,16 +108,15 @@ func (r *jobRunner) recoverJob(job agentjobs.Job, current updater.Installation) 
 	}
 	if r.process != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		stopErr := r.process.Stop(stopCtx)
+		stopErr := r.process.StopWithoutHandover(stopCtx)
 		cancel()
-		if !r.process.Stopped() {
+		if stopErr != nil || !r.process.Stopped() {
 			return release.UpdateResult{}, errors.Join(agentprocess.ErrStopUnconfirmed, stopErr)
 		}
 		r.process = nil
-		if stopErr != nil {
-			_ = r.restartProtected(current.Current, revision)
-			return jobResult(request, "failed_closed", "recovery_failed", current.Current), nil
-		}
+	}
+	if err := agentprocess.ConfirmCoresStopped(r.directory); err != nil {
+		return release.UpdateResult{}, err
 	}
 	owner, err := lifecycle.Try(r.directory)
 	if err != nil {
@@ -147,15 +146,18 @@ func (r *jobRunner) recoverJob(job agentjobs.Job, current updater.Installation) 
 		recovered, err = installer.Recover(r.ctx, driver)
 	}
 	r.process = driver.Process()
-	if r.process != nil && r.process.Stopping() && !r.process.Stopped() {
+	if driver.UnconfirmedStop() {
 		return release.UpdateResult{}, errors.Join(agentprocess.ErrStopUnconfirmed, err)
 	}
 	if err != nil || r.process == nil {
 		// A retained worker may keep the control channel available while its
 		// accounting protection closes proxy listeners. It is not recovery success.
 		if r.process == nil {
-			_ = r.restartProtected(current.Current, revision)
+			if restartErr := r.restartProtected(current.Current, revision); restartErr != nil {
+				return release.UpdateResult{}, errors.Join(err, restartErr)
+			}
 		}
+		r.recordLocalFailure(request.ID, err)
 		return jobResult(request, "failed_closed", "recovery_failed", current.Current), nil
 	}
 	if recovered.Phase == "committed" {

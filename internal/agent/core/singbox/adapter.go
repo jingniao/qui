@@ -21,6 +21,7 @@ import (
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/scheduler"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,13 +30,15 @@ import (
 var ErrTelemetryUnavailable = errors.New("sing-box native account/connection telemetry has not been adapted for this build")
 
 type Adapter struct {
-	Ports              *core.PortAllocator
-	startedAt          time.Time
-	connectionObserver observer.Store
-	deviceGate         gate.Lease
-	sourceWriter       *collector.SingboxWriter
-	gateFailed         bool
-	Path, Directory    string
+	Ports                  *core.PortAllocator
+	startedAt              time.Time
+	connectionObserver     observer.Store
+	deviceGate             gate.Lease
+	sourceWriter           *collector.SingboxWriter
+	outputTail             runtimeTail
+	unavailableConnections map[string]string
+	gateFailed             bool
+	Path, Directory        string
 	// RuleSets downloads the native rule set files; nil uses the defaults.
 	RuleSets               *rulesets.Fetcher
 	NodeID                 string
@@ -58,8 +61,11 @@ type Adapter struct {
 	nativeServerSettings   desiredstate.CoreSettingsCapability
 	probePorts             map[string]int
 	outboundHealth         map[string]scheduler.Health
-	process                *exec.Cmd
-	done                   chan error
+	process                core.ProcessHandle
+	runtimeMaterial        *core.RuntimeMaterial
+	handoverPrepared       bool
+	detached               bool
+	adopting               bool
 	stopPending            bool
 	marker                 core.RunMarker
 	current                core.RenderedConfig
@@ -194,6 +200,17 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	}
 	if a.Ports != nil {
 		options.privatePorts = a.Ports.Ports()
+	} else {
+		if a.statsPort != 0 {
+			options.privatePorts = append(options.privatePorts, a.statsPort)
+		}
+		if a.userStatsPort != 0 {
+			options.privatePorts = append(options.privatePorts, a.userStatsPort)
+		}
+		for _, port := range a.probePorts {
+			options.privatePorts = append(options.privatePorts, port)
+		}
+		sort.Ints(options.privatePorts)
 	}
 	if a.Directory != "" {
 		if absolute, err := filepath.Abs(rulesets.Dir(a.Directory)); err == nil {
@@ -358,86 +375,63 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 		return err
 	}
 	defer os.Remove(path)
-	// Record the pending child before it exists so no start-window crash can
-	// leave an orphan core without a durable marker.
-	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
-		return err
-	}
 	command := exec.Command(executable, "run", "--disable-color", "-c", path)
-	// Plain TCP listeners only (CVE-2026-98432 needs an MPTCP listener).
 	command.Env = core.CoreEnvironment()
-	// The core must also die with the Agent when the supervisor only signals the
-	// Agent PID (OpenRC supervise-daemon): the kernel kills the core with the
-	// starting thread.
 	command.SysProcAttr = core.CoreProcessAttributes()
-	command.Stdout = io.Discard
-	if configuration.AccessContext != nil && a.hooks.AccessSink != nil {
-		a.sourceWriter = collector.NewSingboxWriter(configuration.AccessContext, a.hooks.AccessSink, a.hooks.AccessRejected)
-		command.Stdout = a.sourceWriter
+	if err := a.claimRuntimeLocked(ctx, configuration, epoch, executable, command); err != nil {
+		return errors.Join(err, a.discardUnstartedRuntimeLocked())
 	}
+	if err := a.openOutputLocked(command, configuration); err != nil {
+		return errors.Join(err, a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
+	}
+	outputOpen := true
+	defer func() {
+		if outputOpen {
+			resultErr = errors.Join(resultErr, closeCommandOutput(command))
+		}
+	}()
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
-		abandonErr := a.runMarker().Abandon()
-		return errors.Join(err, abandonErr)
+		return errors.Join(err, a.closeOutputLocked(), a.runMarker().Abandon(), a.discardUnstartedRuntimeLocked())
 	}
-	a.startedAt = time.Now()
-	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
+	a.startedAt = time.Now().UTC()
+	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
+		return errors.Join(err, a.reapUnboundLocked(command))
+	}
+	handle, err := core.NewChildProcessHandle(command, *a.marker.Run)
+	if err != nil {
+		return errors.Join(err, a.reapUnboundLocked(command))
+	}
+	a.process, a.marker.Handle = handle, handle
 	accepted := false
 	defer func() {
 		if !accepted {
-			_ = command.Process.Kill()
-			if reapErr := core.ReapProcess(done, core.StopReapTimeout); reapErr != nil {
-				// Retain the exact child: an unconfirmed stop must refuse any
-				// replacement start.
-				a.process = command
-				a.done = done
-				a.stopPending = true
-				resultErr = errors.Join(resultErr, reapErr)
-				return
-			}
-			confirmErr := a.runMarker().ConfirmExit()
-			resultErr = errors.Join(resultErr, confirmErr)
+			resultErr = errors.Join(resultErr, a.forceStopLocked())
 		}
 	}()
-	// Bind the exact launched child's OS identity. Failure keeps a marker that a
-	// later parent must treat as unknown rather than a clean exit.
-	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
+	outputOpen = false
+	if err := closeCommandOutput(command); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		select {
-		case err := <-done:
-			accepted = true
-			confirmErr := a.runMarker().ConfirmExit()
-			if err == nil {
-				err = errors.New("sing-box stopped during startup")
-			}
-			return errors.Join(err, confirmErr)
-		default:
+		if exit := handle.ExitObservation(); exit.Exited || exit.Err != nil {
+			return errors.Join(errors.New("sing-box stopped during startup"), exit.Err)
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if configurationHealth(configuration, command.Process.Pid) == nil {
+		if configurationHealth(configuration, handle.Identity().PID) == nil {
 			timer := time.NewTimer(150 * time.Millisecond)
 			select {
-			case err := <-done:
+			case <-handle.Done():
 				timer.Stop()
-				accepted = true
-				confirmErr := a.runMarker().ConfirmExit()
-				if err == nil {
-					err = errors.New("sing-box stopped during startup health")
-				}
-				return errors.Join(err, confirmErr)
+				return errors.Join(errors.New("sing-box stopped during startup health"), handle.ExitObservation().Err)
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
 			case <-timer.C:
 			}
-			a.process = command
-			a.done = done
 			for id := range a.outboundHealth {
 				if a.current.ProbeFingerprints[id] != configuration.ProbeFingerprints[id] {
 					delete(a.outboundHealth, id)
@@ -445,6 +439,14 @@ func (a *Adapter) startLocked(ctx context.Context, configuration core.RenderedCo
 			}
 			a.current = configuration
 			a.statsEpoch = epoch
+			a.deviceGate.Clear()
+			a.unavailableConnections = nil
+			if err := a.activateRuntimeLocked(); err != nil {
+				return err
+			}
+			if err := a.handoverAliveLocked(); err != nil {
+				return err
+			}
 			accepted = true
 			return nil
 		}
@@ -463,21 +465,16 @@ func (a *Adapter) stopLocked() error {
 	if a.process == nil {
 		return a.lifecycleReadyLocked()
 	}
-	select {
-	case <-a.done:
-		a.process = nil
-		a.done = nil
-		a.stopPending = false
-		return a.runMarker().ConfirmExit()
-	default:
+	if a.process.Detached() {
+		return core.ErrProcessDetached
 	}
-	if a.hooks.TrafficSink != nil && (a.current.StatsEndpoint != "" || a.current.UserStatsEndpoint != "") {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := a.sampleTrafficLocked(ctx)
-		cancel()
-		if err != nil {
-			return errors.New("final traffic sample could not be persisted")
-		}
+	if exit := a.process.ExitObservation(); exit.Exited {
+		return a.finishExitLocked()
+	} else if exit.Err != nil {
+		return exit.Err
+	}
+	if err := a.finalTrafficSampleLocked(); err != nil {
+		return err
 	}
 	if err := a.forceStopLocked(); err != nil {
 		return err
@@ -485,28 +482,33 @@ func (a *Adapter) stopLocked() error {
 	return nil
 }
 
+func (a *Adapter) finalTrafficSampleLocked() error {
+	if a.hooks.TrafficSink != nil && (a.current.StatsEndpoint != "" || a.current.UserStatsEndpoint != "") {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := a.sampleCountersLocked(ctx)
+		if err == nil {
+			err = a.persistSampleRuntimeLocked()
+		}
+		cancel()
+		if err != nil {
+			return fmt.Errorf("final traffic sample could not be persisted: %w", err)
+		}
+	}
+	return nil
+}
+
 func (a *Adapter) forceStopLocked() error {
+	a.handoverPrepared = false
 	if a.process == nil {
 		return a.lifecycleReadyLocked()
 	}
-	if err := a.process.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		// Killing failed for a reason other than the child already being gone, so
-		// its exit is unconfirmed. Keep the original child and the original Kill
-		// error, and mark the stop pending so callers refuse a replacement start
-		// and leave the accounting run unresolved.
+	ctx, cancel := context.WithTimeout(context.Background(), core.StopReapTimeout)
+	defer cancel()
+	if err := a.process.Stop(ctx); err != nil {
 		a.stopPending = true
 		return err
 	}
-	if err := core.ReapProcess(a.done, core.StopReapTimeout); err != nil {
-		// Keep the original child and mark the stop unconfirmed so callers refuse
-		// a replacement start and leave the accounting run unresolved.
-		a.stopPending = true
-		return err
-	}
-	a.process = nil
-	a.done = nil
-	a.stopPending = false
-	return a.runMarker().ConfirmExit()
+	return a.finishExitLocked()
 }
 
 // UnconfirmedStop reports that the last forced stop could not confirm the exact
@@ -547,32 +549,36 @@ func (a *Adapter) Rollback(ctx context.Context, revision int64) error {
 func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.process == nil {
+		return a.healthLocked(ctx, nil, 0)
+	}
+	if a.process.Detached() {
+		return core.HealthStatus{}, core.ErrProcessDetached
+	}
+	exit := a.process.ExitObservation()
+	return a.healthLocked(ctx, &exit, a.process.Identity().PID)
+}
+func (a *Adapter) healthLocked(ctx context.Context, exit *core.ExitObservation, pid int) (core.HealthStatus, error) {
 	status := core.HealthStatus{CheckedAt: time.Now().UTC()}
 	if err := ctx.Err(); err != nil {
 		return status, err
 	}
-	if a.process == nil {
+	if exit == nil {
 		if err := a.lifecycleReadyLocked(); err != nil {
 			return status, err
 		}
 		return status, errors.New("sing-box core is stopped")
 	}
-	select {
-	case exit := <-a.done:
-		a.process = nil
-		a.done = nil
-		a.stopPending = false
-		confirmErr := a.runMarker().ConfirmExit()
-		if confirmErr != nil {
-			return status, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
-		}
-		if exit != nil {
-			return status, fmt.Errorf("sing-box core exited: %w", exit)
-		}
-		return status, errors.New("sing-box core exited")
-	default:
+	if exit.Exited {
+		return status, errors.Join(errors.New("sing-box core exited"), exit.Err, a.finishExitLocked())
 	}
-	if err := configurationHealth(a.current, a.process.Process.Pid); err != nil {
+	if exit.Err != nil {
+		return status, exit.Err
+	}
+	if err := a.tailErrorLocked(); err != nil {
+		return status, err
+	}
+	if err := configurationHealth(a.current, pid); err != nil {
 		return status, err
 	}
 	status.Healthy = true

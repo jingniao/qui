@@ -19,16 +19,20 @@ import (
 // MultiRuntime is one revision transaction over independent, fixed adapters.
 // Ordering is config ordering; the first user adapter is the compatibility primary.
 type MultiRuntime struct {
-	hooks       RuntimeHooks
-	history     map[int64]RenderedConfig
-	mu          sync.Mutex
-	primary     string
-	names       []string
-	runtimes    map[string]Runtime
-	current     map[string]RenderedConfig
-	expected    map[string]bool
-	ports       *PortAllocator
-	initialized bool
+	hooks            RuntimeHooks
+	history          map[int64]RenderedConfig
+	mu               sync.Mutex
+	primary          string
+	names            []string
+	runtimes         map[string]Runtime
+	current          map[string]RenderedConfig
+	expected         map[string]bool
+	ports            *PortAllocator
+	initialized      bool
+	handoverBusy     bool
+	handoverErr      error
+	handoverPrepared []string
+	startupOnly      map[string]bool
 }
 
 var ErrNoUserCore = errors.New("no user core is enabled for an inbound without an explicit core")
@@ -182,7 +186,7 @@ func (m *MultiRuntime) render(ctx context.Context, s desiredstate.State) (Render
 				return RenderedConfig{}, ErrNoUserCore
 			}
 		}
-		if m.runtimes[name] == nil {
+		if m.runtimes[name] == nil || m.startupOnly[name] {
 			return RenderedConfig{}, fmt.Errorf("inbound assigns unavailable core %s", name)
 		}
 		// The GOST-only forward options are checked against the resolved core, so
@@ -272,6 +276,9 @@ func (m *MultiRuntime) validate(ctx context.Context, c RenderedConfig) error {
 func (m *MultiRuntime) Apply(ctx context.Context, c RenderedConfig) (ApplyResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.handoverBusy || m.handoverErr != nil {
+		return ApplyResult{Revision: c.Revision}, errors.Join(ErrHandoverConflict, m.handoverErr)
+	}
 	r := ApplyResult{Revision: c.Revision}
 	if err := m.validate(ctx, c); err != nil {
 		r.Code = "validation_failed"
@@ -363,7 +370,11 @@ func (m *MultiRuntime) coreHealthsLocked(ctx context.Context) []CoreHealth {
 		r := m.runtimes[name]
 		status := &pb.CoreStatus{Name: name, Healthy: true}
 		var reason error
-		if m.expected[name] {
+		if m.handoverErr != nil {
+			status.Healthy, status.Error = false, HandoverFailureCode(m.handoverErr)
+			reason = m.handoverErr
+		}
+		if m.expected[name] && m.handoverErr == nil {
 			h, err := r.Health(ctx)
 			status.Healthy = err == nil && h.Healthy
 			if !status.Healthy {
@@ -400,6 +411,12 @@ func (m *MultiRuntime) CoreStatuses(ctx context.Context) []*pb.CoreStatus {
 	return statuses
 }
 func (m *MultiRuntime) Health(ctx context.Context) (HealthStatus, error) {
+	m.mu.Lock()
+	blocked := m.handoverErr
+	m.mu.Unlock()
+	if blocked != nil {
+		return HealthStatus{CheckedAt: time.Now()}, blocked
+	}
 	h := HealthStatus{Healthy: true, CheckedAt: time.Now()}
 	var err error
 	for _, item := range m.CoreHealths(ctx) {
@@ -413,6 +430,9 @@ func (m *MultiRuntime) Health(ctx context.Context) (HealthStatus, error) {
 func (m *MultiRuntime) RestoreCore(ctx context.Context, name string, state desiredstate.State) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.handoverBusy || m.handoverErr != nil {
+		return errors.Join(ErrHandoverConflict, m.handoverErr)
+	}
 	if m.runtimes[name] == nil {
 		return errors.New("unknown core")
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"proxycontrol/internal/agent/configuration"
@@ -15,12 +16,14 @@ import (
 
 	"proxycontrol/internal/agent/agentjobs"
 	"proxycontrol/internal/agent/agentprocess"
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/identity"
 	"proxycontrol/internal/agent/lifecycle"
 	"proxycontrol/internal/agent/reconcile"
 	"proxycontrol/internal/agent/storage"
 	"proxycontrol/internal/agent/updater"
 	"proxycontrol/internal/platform/config"
+	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/agentstorage"
 	"proxycontrol/pkg/contracts/release"
 )
@@ -185,6 +188,9 @@ func (r *jobRunner) restart(image updater.Image, revision int64) error {
 	if r.process != nil {
 		return agentprocess.ErrStopUnconfirmed
 	}
+	if err := agentprocess.ConfirmCoresStopped(r.directory); err != nil {
+		return err
+	}
 	if err := r.refreshRequired(); err != nil {
 		return err
 	}
@@ -223,6 +229,9 @@ func (r *jobRunner) restart(image updater.Image, revision int64) error {
 }
 
 func (r *jobRunner) restartProtected(image updater.Image, revision int64) error {
+	if err := agentprocess.ConfirmCoresStopped(r.directory); err != nil {
+		return err
+	}
 	if err := r.refreshRequired(); err != nil {
 		return err
 	}
@@ -410,13 +419,32 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	if startErr != nil || closeErr != nil {
 		return release.UpdateResult{}, errors.Join(startErr, closeErr)
 	}
+	var handover *core.HandoverRequest
+	if runtime.GOOS == "linux" && strings.HasPrefix(request.ID, localJobPrefix) {
+		armed, loadErr := core.LoadHandoverRequest()
+		if loadErr == nil && armed.Scope == "worker" && armed.TransactionID == request.ID && armed.TargetAgentSHA256 == preflight.Image.SHA256 {
+			handover = armed
+		} else if !errors.Is(loadErr, os.ErrNotExist) {
+			slog.Warn("worker core handover not authorized", "transaction", request.ID, "error", errors.Join(core.ErrHandoverConflict, loadErr))
+		}
+	}
 	stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	stopErr := r.process.Stop(stopCtx)
+	var stopErr error
+	if handover != nil {
+		stopErr = r.process.StopForHandover(stopCtx, *handover, r.nodeID, request.ID, preflight.Image.SHA256)
+	} else {
+		stopErr = r.process.StopWithoutHandover(stopCtx)
+	}
 	cancel()
-	if !r.process.Stopped() {
+	if stopErr != nil || !r.process.Stopped() {
 		return release.UpdateResult{}, errors.Join(agentprocess.ErrStopUnconfirmed, stopErr)
 	}
 	r.process = nil
+	if handover == nil {
+		if err := agentprocess.ConfirmCoresStopped(r.directory); err != nil {
+			return release.UpdateResult{}, err
+		}
+	}
 	if r.ctx.Err() != nil {
 		return release.UpdateResult{}, r.ctx.Err()
 	}
@@ -429,10 +457,6 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	closeErr = owner.Close()
 	if inspectErr != nil || identityErr != nil || closeErr != nil {
 		return release.UpdateResult{}, errors.Join(inspectErr, identityErr, closeErr)
-	}
-	if stopErr != nil {
-		r.recordLocalFailure(request.ID, errors.Join(stopErr, r.restartProtected(current.Current, revision)))
-		return jobResult(request, "failed_closed", "installation_failed", current.Current), nil
 	}
 	if revision != request.Revision {
 		if err := r.restart(current.Current, revision); err != nil {
@@ -457,6 +481,13 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	}
 	installer := &updater.Installer{History: r.history, Directory: images, RecordFailure: r.persistLocalCause}
 	driver.EnableAgentUpdates()
+	if handover != nil {
+		key, err := vault.FromKey(r.key)
+		if err != nil {
+			return release.UpdateResult{}, err
+		}
+		driver.EnableCoreHandover(*handover, key)
+	}
 	if preflight.Contract.AgentRecoveryProtocol == 1 {
 		originalProbe, probeErr := updater.ProbeAgentImage(r.ctx, images, current.Current, r.required)
 		if probeErr == nil && originalProbe.Contract.AgentRecoveryProtocol == 1 {
@@ -466,7 +497,7 @@ func (r *jobRunner) execute(job agentjobs.Job) (release.UpdateResult, error) {
 	installed, applyErr := installer.Apply(r.ctx, driver, request.ID, revision, candidate, policy)
 	r.recordLocalFailure(request.ID, applyErr)
 	r.process = driver.Process()
-	if r.process != nil && r.process.Stopping() && !r.process.Stopped() {
+	if driver.UnconfirmedStop() {
 		return release.UpdateResult{}, errors.Join(agentprocess.ErrStopUnconfirmed, applyErr)
 	}
 	switch installed.Phase {

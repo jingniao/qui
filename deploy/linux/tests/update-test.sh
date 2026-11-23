@@ -186,6 +186,11 @@ service_healthy() {
 
 service_log_hint() { printf 'fake log of %s\n' "$1"; }
 
+# The fake Agent programs predate core handover: the probe reports the legacy
+# flag rejection (2) and no first-enable handover transaction is ever pending.
+qui_core_handover_protocol() { fake_log "core-handover-protocol $1"; return 2; }
+qui_core_handover_recover_web() { return 0; }
+
 # The Agent fixtures use ordinary mode; execute their status query within the
 # same isolated installation instead of requiring a real host service account.
 runuser() {

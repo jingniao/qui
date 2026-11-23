@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"proxycontrol/internal/agent/core"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ const (
 // readMetrics fetches the Prometheus text from the private unix socket and sums
 // both transfer counters over the given services.
 func readMetrics(ctx context.Context, socket string, services map[string]bool) (uint64, uint64, error) {
+	return readMetricsSources(ctx, socket, services, nil, "")
+}
+func readMetricsSources(ctx context.Context, socket string, services map[string]bool, sources *core.CounterSources, epoch string) (uint64, uint64, error) {
 	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
@@ -54,7 +58,7 @@ func readMetrics(ctx context.Context, socket string, services map[string]bool) (
 	if response.StatusCode != http.StatusOK {
 		return 0, 0, errors.New("gost metrics socket rejected the request")
 	}
-	return parseMetrics(io.LimitReader(response.Body, maxMetricsBytes), services)
+	return parseMetricsSources(io.LimitReader(response.Body, maxMetricsBytes), services, sources, epoch)
 }
 
 // parseMetrics streams the Prometheus text exposition and returns the summed input
@@ -62,6 +66,10 @@ func readMetrics(ctx context.Context, socket string, services map[string]bool) (
 // services are skipped; a malformed line is an error rather than a silently
 // smaller total.
 func parseMetrics(reader io.Reader, services map[string]bool) (uint64, uint64, error) {
+	return parseMetricsSources(reader, services, nil, "")
+}
+func parseMetricsSources(reader io.Reader, services map[string]bool, sources *core.CounterSources, epoch string) (uint64, uint64, error) {
+	directions := map[string]uint8{}
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 4096), 64<<10)
 	var upload, download uint64
@@ -86,6 +94,10 @@ func parseMetrics(reader io.Reader, services map[string]bool) (uint64, uint64, e
 		if err != nil {
 			return 0, 0, err
 		}
+		// GOST creates each direction's series lazily (a forward whose target never
+		// answers has only input), so a source is tracked by presence: either series
+		// marks the service as observed. A once-seen service must keep appearing.
+		directions[labels["service"]] = 3
 		target := &upload
 		if name == outputMetric {
 			target = &download
@@ -97,6 +109,11 @@ func parseMetrics(reader io.Reader, services map[string]bool) (uint64, uint64, e
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, 0, errors.New("gost metrics answer is unreadable")
+	}
+	if sources != nil {
+		if err := sources.Observe(epoch, directions); err != nil {
+			return 0, 0, err
+		}
 	}
 	return upload, download, nil
 }

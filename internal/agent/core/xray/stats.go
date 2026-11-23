@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"proxycontrol/internal/agent/collector"
@@ -188,7 +189,7 @@ func readSample(ctx context.Context, configuration core.RenderedConfig, epoch st
 	for _, pattern := range patterns {
 		response, err := stats.NewStatsServiceClient(connection).QueryStats(queryCtx, &stats.QueryStatsRequest{Pattern: pattern, Reset_: false})
 		if err != nil {
-			return nil, core.StatsBatch{}, errors.New("core statistics query failed")
+			return nil, core.StatsBatch{}, fmt.Errorf("core statistics query failed: %w", err)
 		}
 		if len(response.Stat) > 16384 {
 			return nil, core.StatsBatch{}, errors.New("core statistics response exceeds account limit")
@@ -284,12 +285,26 @@ func (a *Adapter) SampleTraffic(ctx context.Context) error {
 	return a.sampleTrafficLocked(ctx)
 }
 func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
+	if err := a.processErrorLocked(); err != nil {
+		return err
+	}
 	if a.process == nil {
 		return nil
 	}
 	if a.TrafficSink == nil || a.current.StatsEndpoint == "" {
 		return nil
 	}
+	if err := a.sampleCountersLocked(ctx); err != nil {
+		return err
+	}
+	if err := a.persistSampleRuntimeLocked(); err != nil {
+		a.counterSources.Failure(a.statsEpoch)
+		return err
+	}
+	return nil
+}
+
+func (a *Adapter) sampleCountersLocked(ctx context.Context) error {
 	// Forward inbound bytes carry no account, so they reach the node total as a
 	// separate node-only batch after the account batch.
 	counters, node, err := readSample(ctx, a.current, a.statsEpoch, &a.counterSources)
@@ -300,6 +315,7 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 		return err
 	}
 	if err := core.SaveAccountAndNode(ctx, a.TrafficSink, "xray", a.statsEpoch, a.current.Revision, counters, node); err != nil {
+		a.counterSources.Failure(a.statsEpoch)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -313,6 +329,9 @@ func (a *Adapter) TrafficCounters(ctx context.Context) ([]traffic.Counter, error
 	defer a.mu.Unlock()
 	if a.process == nil {
 		return nil, errors.New("core not running")
+	}
+	if err := a.processErrorLocked(); err != nil {
+		return nil, err
 	}
 	return readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
 }

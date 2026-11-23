@@ -255,7 +255,7 @@ func (a *Adapter) Probe(ctx context.Context) error {
 			return ctx.Err()
 		}
 		a.mu.Lock()
-		if a.statsEpoch == epoch && a.process != nil {
+		if a.statsEpoch == epoch && a.runningChildLocked() && !a.handoverPrepared {
 			if a.outboundHealth == nil {
 				a.outboundHealth = map[string]scheduler.Health{}
 			}

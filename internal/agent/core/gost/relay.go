@@ -95,6 +95,11 @@ func (a *Adapter) writeMaterial(inboundID, half, certificate, key, ca string) (*
 	}
 	paths := &TLS{CertFile: filepath.Join(directory, "cert.pem"), KeyFile: filepath.Join(directory, "key.pem"), CAFile: filepath.Join(directory, "ca.pem")}
 	for path, data := range map[string]string{paths.CertFile: certificate, paths.KeyFile: key, paths.CAFile: ca} {
+		// During startup comparison, existing live inputs must remain untouched.
+		// Missing/changed bytes are exposed by native validation and digest checks.
+		if _, live := a.handoverDependencies[path]; live {
+			continue
+		}
 		if err := writeMaterialFile(path, data); err != nil {
 			return nil, err
 		}

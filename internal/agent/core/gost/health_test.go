@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -51,8 +50,8 @@ func TestHealthReportsAListenerFailure(t *testing.T) {
 			if tc.packet {
 				configuration = core.RenderedConfig{UDPHealthEndpoints: []string{endpoint}}
 			}
-			adapter := &Adapter{Directory: t.TempDir(), process: &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}, current: configuration}
-			_, err := adapter.Health(ctx)
+			adapter := &Adapter{Directory: t.TempDir(), current: configuration}
+			_, err := adapter.healthLocked(ctx, &core.ExitObservation{}, os.Getpid())
 			if !errors.Is(err, core.ErrListenerUnavailable) {
 				t.Fatalf("%s listener failure: %v", tc.name, err)
 			}

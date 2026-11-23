@@ -40,3 +40,16 @@ func (w *SingboxWriter) SourceUsers(active map[string]bool) (map[string]string, 
 	}
 	return result, true
 }
+
+// ForgetSource retires a pre-handover connection's volatile attribution. A new
+// connection reusing its tuple must establish its own authenticated log source.
+func (w *SingboxWriter) ForgetSource(source string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.sources, source)
+	for _, entry := range w.pending {
+		if entry.source == source {
+			entry.source = ""
+		}
+	}
+}

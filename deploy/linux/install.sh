@@ -791,6 +791,28 @@ if [[ $component == panel ]]; then
   printf '%s\n' "$database" > "$stage/panel-database"
 fi
 
+# A stopped service can still own detached cores. Before publishing anything,
+# the verified candidate must either validate that authorization or stop them.
+# Managed replacement has its own agenthost worker-stop transaction.
+if [[ $component == agent && -f $record && -z $replacement_token && -z $replacement_manifest ]]; then
+  chmod 0500 -- "$stage/program"
+  core_protocol_status=0
+  qui_core_handover_protocol "$stage/program" || core_protocol_status=$?
+  case $core_protocol_status in
+    0) qui_core_cli "$stage/program" "$etc/config.yaml" --finish-core-stop \
+         || fail '安装前停核屏障未确认，禁止覆盖文件。';;
+    2)
+      # A legacy target can still be installed after the source helper proves
+      # that everything stopped. Keep using it before the first publish.
+      qui_core_handover_protocol "$target" \
+        || fail '源和候选无法提供可用的停核屏障，禁止覆盖文件。'
+      qui_core_cli "$target" "$etc/config.yaml" --core-handover-revoke-all --reason abort \
+        && qui_core_cli "$target" "$etc/config.yaml" --finish-core-stop \
+        || fail '旧目标安装前停核未确认，禁止覆盖文件。'
+      printf '目标不支持核心交接，按停核安装；本次更新会中断连接。\n';;
+    *) fail '安装候选交接能力探测失败。';;
+  esac
+fi
 publishing_started=true
 publish "$stage/program" "$target" root root 0755
 publish "$stage/unit" "$unit" root root "$service_mode"

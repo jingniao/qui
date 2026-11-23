@@ -13,8 +13,8 @@
 #   Restart=on-failure,RestartSec=5
 #                             -> supervisor=supervise-daemon, respawn_delay=5
 #   TimeoutStopSec=90         -> retry=TERM/90/KILL/5
-#   KillMode=mixed            -> rc_cgroup_cleanup=yes (the leftover processes in
-#                                the service cgroup are killed after stop)
+#   KillMode=process          -> rc_cgroup_cleanup=no (only the Agent is signalled)
+#   ExecStopPost=+...         -> stop_post runs the same root stop barrier
 #   CapabilityBoundingSet/AmbientCapabilities=CAP_NET_BIND_SERVICE
 #                             -> capabilities="^cap_net_bind_service" (the ^ marks
 #                                the capability ambient, so the cores the Agent
@@ -52,10 +52,14 @@ no_new_privs="yes"
 respawn_delay=5
 respawn_max=0
 retry="TERM/90/KILL/5"
-rc_cgroup_cleanup="yes"
+rc_cgroup_cleanup="no"
 rc_ulimit="-n 524288"
 output_logger="logger -t proxy-agent -p daemon.info"
 error_logger="logger -t proxy-agent -p daemon.err"
+
+stop_post() {
+  /usr/local/bin/proxy-agent --finish-core-stop --config /etc/proxy-agent/config.yaml
+}
 
 start_pre() {
   # checkpath only creates what is missing and enforces the owner and mode, so

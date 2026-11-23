@@ -29,7 +29,18 @@ func (a *Adapter) ConnectionSnapshot(ctx context.Context) (traffic.ConnectionSna
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var sample traffic.ConnectionSnapshot
-	if a.process == nil || !a.current.OnlineStats || a.current.StatsEndpoint == "" || a.statsEpoch == "" {
+	if err := a.processErrorLocked(); err != nil {
+		return sample, err
+	}
+	if a.process == nil {
+		return sample, errors.New("core online statistics unavailable")
+	}
+	return a.connectionSnapshotLocked(ctx)
+}
+
+func (a *Adapter) connectionSnapshotLocked(ctx context.Context) (traffic.ConnectionSnapshot, error) {
+	var sample traffic.ConnectionSnapshot
+	if !a.current.OnlineStats || a.current.StatsEndpoint == "" || a.statsEpoch == "" {
 		return sample, errors.New("core online statistics unavailable")
 	}
 	host, _, err := net.SplitHostPort(a.current.StatsEndpoint)

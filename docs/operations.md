@@ -130,7 +130,7 @@ systemctl start proxy-agent.service
 
 字段与保留策略见[项目说明书 §26.7](project-spec.md#267-访问记录和流量)。运维要点：
 
-- **Xray 访问日志**（`/var/lib/proxy-agent/runtime/xray/access.log`）：瞬时文件，每 ~100 ms 读后清空（停核再清），超 **20 MiB** 截断；备份无需保留。sing-box 从 debug 级别核心日志提取访问记录。
+- **Xray / sing-box 访问日志**：Xray 位于 `/var/lib/proxy-agent/runtime/xray/access.log`，sing-box 从 debug 级别核心日志提取访问记录。Linux 文件 tail 每 ~100 ms 只交出完整行，半行留在文件直到补全，追平后清空；**20 MiB** 隐私截断会记录结构化丢弃事实。更新空窗允许文件积压，认领从完整行 checkpoint 接读，访问记录允许少量重复或缺失；备份无需保留。Windows 保留原读取行为。
 - **本地 spool 与保留**：spool 上限 **100 MiB**，满时优先淘汰最旧允许记录、保阻断与流量，断线续传按 ACK 删除。默认保留允许 30 天、阻断 90 天、小时流量 90 天、日流量长期；每域名字节未知为 NULL（显示“—”），跨中转“配置出口”不代表确认实际出口。
 
 ## 8. 出口组与代理链
@@ -179,6 +179,22 @@ OpenRC 替换为 `rc-service proxy-agent-host-network status|restart` 与 `grep 
   - **路径与日志**：请求 `/var/lib/proxy-agent/system-update/request.json`；root 受理 `/var/lib/proxycontrol-install/agent-system-updates/<attempt-id>/`；只读状态/输出 `/var/lib/proxy-agent-update/<attempt-id>/`。日志分块 ACK，**不入 100 MiB 轮转且无自动截断**，确认终态留证后再清理。
   - **断电与 `unconfirmed`**：提交引导快照后断电，桥接核验 PID/启动时间/boot ID 后经只读 `--agent-install-receipt ID --agent-manifest FILE` 收敛终态；缺退出收据保持「结果待确认」，阻塞发布/核心更新/删除接替/备份恢复，绝不按耗时或版本号猜成功；明确失败且满足恢复条件才可重提同目标。`dispatchError` 仅表示本机投递失败。既有旧工作进程任务按原回执收尾，不再新建。
 - **退出受管模式**：停服后将 `internal/agent/agenthost/state.go` 所列受管路径（含 `releases/agent-local-candidates/`）移走备份再启服；遗留 `agent-local.sock` 下次监督启动自动清理。
+
+### Agent 核心交接排障
+
+目标版本 1.10.0 的 Linux 更新可经授权保留并认领核心，普通 stop/restart、卸载与非更新崩溃仍停核。`qui-update` 输出“核心交接已认领并提交”表示该次认领和更新提交成功；“核心未确认 detached”表示旧 Agent 未确认脱离，更新进入失败回滚，须保留快照与 helper 查看原因。源或目标不支持协议、pidfd 不可用时按停核更新并提示；第一次从旧 Agent 升级仍会断线。既有验收与未实测项见[交接设计 §9](core-handover-plan.md#9-实施与验收结果2026-11-22)。
+
+Agent 日志中的 `core handover not authorized ...`（含 worker 相关同类 WARN）表示授权被拒，查看 `error` 中的具体原因：`OS environment is incomplete` / `OS environment differs` 对应 host、boot、PID namespace 环境缺失或不一致；`node differs`、`source Agent ... is not ...`、`target Agent ... is not ...`、`transaction ... is not ...`、`scope ... is not ...` 分别对应节点、源 PID/启动 token、目标镜像摘要、事务与作用域不匹配。`core_handover_expired` 表示 300 秒授权窗口失效，或更新进程已退出、PID 启动 token 不符。引导与 worker 两次切换均须有匹配授权，不能靠残留回执继续保留核心。
+
+`core_traffic_tail_unavailable` 是本机结构化 WARN：核心在交接空窗内死亡，最后成功采样之后的尾部流量无法取得。只保留已确认的累计值，不估算、不补零，也不产生新的面板告警。
+
+以下均为 root 本机固定命令，通过 `proxy-agent --config /etc/proxy-agent/config.yaml` 调用：
+
+| 参数 | 用途 |
+| --- | --- |
+| `--core-handover-status --request <请求ID>` | 读取该请求的交接状态，如 armed、prepared、detached、adopting、adopted、failed、stopped、expired |
+| `--core-handover-revoke-all --reason <原因>` | 撤销全部交接授权；回滚、卸载与人工停核前使用，本命令本身不停止核心 |
+| `--finish-core-stop` | 停服后确认 worker 已退出，并按进程身份处理核心；有效授权和回执允许保留，其余路径确认停核。需要停核时先撤销授权；屏障失败保留现场，禁止继续恢复旧镜像或删除数据 |
 
 ### 面板网页更新
 

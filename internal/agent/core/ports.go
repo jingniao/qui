@@ -15,6 +15,29 @@ type PortAllocator struct {
 	public  map[int]bool
 }
 
+// AdoptPrivatePorts registers the complete restored set before any Render.
+// Ports are already bound by live cores, so this method deliberately never binds.
+// The caller supplies all cores in one batch; duplicates include cross-core
+// purpose conflicts and are rejected without changing the allocator.
+func (p *PortAllocator) AdoptPrivatePorts(ports []int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	next := map[int]bool{}
+	for _, port := range ports {
+		if port < 1 || port > 65535 || next[port] || p.private[port] || p.public[port] {
+			return errors.New("adopted private port is invalid or conflicts with a reservation")
+		}
+		next[port] = true
+	}
+	if p.private == nil {
+		p.private = map[int]bool{}
+	}
+	for port := range next {
+		p.private[port] = true
+	}
+	return nil
+}
+
 func (p *PortAllocator) ReserveAdditionalInbounds(ports []int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

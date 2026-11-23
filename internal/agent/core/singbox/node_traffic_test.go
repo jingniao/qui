@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"proxycontrol/pkg/contracts/traffic"
 	"strconv"
 	"strings"
@@ -58,7 +57,7 @@ func clashFixture(t *testing.T, secret string) (*clashTotalsFixture, string) {
 
 func clashAdapter(endpoint, secret string) *Adapter {
 	return &Adapter{
-		NodeID: "node", statsSecret: secret, process: &exec.Cmd{},
+		NodeID: "node", statsSecret: secret,
 		current: core.RenderedConfig{NodeID: "node", Revision: 2, StatsEndpoint: endpoint},
 	}
 }
@@ -68,19 +67,19 @@ func TestNodeTrafficTotalsDiffClashCounters(t *testing.T) {
 	adapter := clashAdapter(endpoint, "secret-value")
 	ctx := context.Background()
 	fixture.set(100, 200)
-	upload, download, err := adapter.NodeTrafficTotals(ctx)
+	upload, download, err := adapter.nodeTrafficTotalsLocked(ctx, true)
 	if err != nil || upload != 100 || download != 200 {
 		t.Fatal("first node total did not report the core's own counters", upload, download, err)
 	}
 	fixture.set(150, 400)
-	upload, download, err = adapter.NodeTrafficTotals(ctx)
+	upload, download, err = adapter.nodeTrafficTotalsLocked(ctx, true)
 	if err != nil || upload != 150 || download != 400 {
 		t.Fatal("node total did not add the observed delta", upload, download, err)
 	}
 	// A core restart resets the Clash totals. The baseline restarts with them:
 	// no negative delta, and the new process's bytes are not double counted.
 	fixture.set(10, 20)
-	upload, download, err = adapter.NodeTrafficTotals(ctx)
+	upload, download, err = adapter.nodeTrafficTotalsLocked(ctx, true)
 	if err != nil || upload != 160 || download != 420 {
 		t.Fatal("node total mishandled a counter restart", upload, download, err)
 	}
@@ -89,7 +88,7 @@ func TestNodeTrafficTotalsDiffClashCounters(t *testing.T) {
 func TestNodeTrafficTotalsAreUnknownWithoutACloudApiSecret(t *testing.T) {
 	_, endpoint := clashFixture(t, "secret-value")
 	ctx := context.Background()
-	if upload, download, err := clashAdapter(endpoint, "wrong-secret").NodeTrafficTotals(ctx); err == nil || upload != 0 || download != 0 {
+	if upload, download, err := clashAdapter(endpoint, "wrong-secret").nodeTrafficTotalsLocked(ctx, true); err == nil || upload != 0 || download != 0 {
 		t.Fatal("wrong secret invented node totals", upload, download, err)
 	}
 	adapter := clashAdapter(endpoint, "secret-value")
@@ -98,7 +97,7 @@ func TestNodeTrafficTotalsAreUnknownWithoutACloudApiSecret(t *testing.T) {
 		t.Fatal("stopped core invented node totals", upload, download, err)
 	}
 	adapter = clashAdapter(endpoint, "")
-	if upload, download, err := adapter.NodeTrafficTotals(ctx); err == nil || upload != 0 || download != 0 {
+	if upload, download, err := adapter.nodeTrafficTotalsLocked(ctx, true); err == nil || upload != 0 || download != 0 {
 		t.Fatal("missing secret invented node totals", upload, download, err)
 	}
 }
@@ -110,7 +109,7 @@ func TestNodeTrafficTotalsReportUnreachableApi(t *testing.T) {
 	}
 	closed := listener.Addr().String()
 	listener.Close()
-	if upload, download, err := clashAdapter(closed, "secret-value").NodeTrafficTotals(context.Background()); err == nil || upload != 0 || download != 0 {
+	if upload, download, err := clashAdapter(closed, "secret-value").nodeTrafficTotalsLocked(context.Background(), true); err == nil || upload != 0 || download != 0 {
 		t.Fatal("unreachable Clash API invented node totals", upload, download, err)
 	}
 }
@@ -185,6 +184,7 @@ func TestOfficialSingboxNodeSpoolLeavesUserTrafficUnknown(t *testing.T) {
 	fixture.set(300, 400)
 	a := clashAdapter(endpoint, secret)
 	a.statsEpoch = "official-epoch"
+	a.process, a.runtimeMaterial = runningHandle{}, &core.RuntimeMaterial{SeenCounterSources: []string{"clash-total"}}
 	var saved []traffic.Counter
 	a.hooks = core.RuntimeHooks{TrafficSink: func(_ context.Context, c []traffic.Counter) error { saved = append(saved, c...); return nil }}
 	if err := a.SampleTraffic(context.Background()); err != nil {
@@ -200,3 +200,15 @@ func TestOfficialSingboxNodeSpoolLeavesUserTrafficUnknown(t *testing.T) {
 		t.Fatal("official sing-box fabricated user accounting")
 	}
 }
+
+// runningHandle stands in for the live core process that &exec.Cmd{} used to
+// represent in these fixtures before the adapter held a core.ProcessHandle.
+type runningHandle struct{}
+
+func (runningHandle) Identity() core.ProcessIdentity        { return core.ProcessIdentity{} }
+func (runningHandle) Environment() core.OSEnvironment       { return core.OSEnvironment{} }
+func (runningHandle) ExitObservation() core.ExitObservation { return core.ExitObservation{} }
+func (runningHandle) Done() <-chan struct{}                 { return nil }
+func (runningHandle) Detached() bool                        { return false }
+func (runningHandle) Stop(context.Context) error            { return nil }
+func (runningHandle) Detach() error                         { return nil }

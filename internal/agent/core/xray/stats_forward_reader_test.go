@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 	"net"
-	"os/exec"
+
 	"sync"
 	"testing"
 
@@ -75,10 +75,10 @@ func forwardStatsServer(t *testing.T, responses map[string][]*stats.Stat) (*forw
 func stat(name string, value int64) *stats.Stat { return &stats.Stat{Name: name, Value: value} }
 
 // forwardStatsAdapter is the production sampling path with a recording sink and
-// a stand-in process handle; only the native statistics RPC is real.
+// the native statistics RPC; process ownership is checked by the adapter entry point.
 func forwardStatsAdapter(configuration core.RenderedConfig) (*Adapter, *[][]traffic.Counter) {
 	var batches [][]traffic.Counter
-	adapter := &Adapter{process: &exec.Cmd{}, statsEpoch: "epoch", current: configuration}
+	adapter := &Adapter{process: runningHandle{}, marker: core.RunMarker{Epoch: "epoch"}, statsEpoch: "epoch", current: configuration}
 	adapter.TrafficSink = func(_ context.Context, counters []traffic.Counter) error {
 		batches = append(batches, append([]traffic.Counter(nil), counters...))
 		return nil
@@ -103,7 +103,7 @@ func TestStatsReaderCountsForwardInboundBytesOnce(t *testing.T) {
 		},
 	})
 	adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, map[string]traffic.Counter{}, "forward"))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(*batches) != 2 || len((*batches)[0]) != 0 {
@@ -136,7 +136,7 @@ func TestStatsReaderAddsAccountsAndForwards(t *testing.T) {
 		"outbound>>>_access_peer": {Revision: 1, CredentialID: "peer", UserID: "user", DeviceID: "device", Protocol: "wireguard"},
 	}
 	adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, accounts, "f1", "f2"))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(*batches) != 2 || len((*batches)[0]) != 2 {
@@ -154,7 +154,7 @@ func TestStatsReaderAddsAccountsAndForwards(t *testing.T) {
 func TestStatsReaderKeepsLazyForwardCountersUnobserved(t *testing.T) {
 	_, endpoint := forwardStatsServer(t, map[string][]*stats.Stat{"user>>>": {}, "inbound>>>": {}})
 	adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, map[string]traffic.Counter{}, "f", "g"))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	node := (*batches)[1]
@@ -178,7 +178,7 @@ func TestStatsReaderRejectsInvalidForwardCounters(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, endpoint := forwardStatsServer(t, map[string][]*stats.Stat{"user>>>": {}, "inbound>>>": values})
 			adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, map[string]traffic.Counter{}, "f", "f1", "f2"))
-			if err := adapter.SampleTraffic(context.Background()); err == nil {
+			if err := adapter.sampleCountersLocked(context.Background()); err == nil {
 				t.Fatal("invalid forward counters produced a sample")
 			}
 			if len(*batches) != 0 {
@@ -192,7 +192,7 @@ func TestStatsReaderRejectsInvalidForwardCounters(t *testing.T) {
 	fixture.fail = true
 	fixture.mu.Unlock()
 	adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, map[string]traffic.Counter{}, "f"))
-	if err := adapter.SampleTraffic(context.Background()); err == nil || len(*batches) != 0 {
+	if err := adapter.sampleCountersLocked(context.Background()); err == nil || len(*batches) != 0 {
 		t.Fatal("failed query produced a sample")
 	}
 	if status := adapter.TrafficSourceStatus(); status.Status != "sampling_failed" {
@@ -204,11 +204,11 @@ func TestStatsReaderFailsWhenAForwardSourceDisappears(t *testing.T) {
 	fixture, endpoint := forwardStatsServer(t, map[string][]*stats.Stat{"user>>>": {}})
 	fixture.set("inbound>>>", stat("inbound>>>f>>>traffic>>>uplink", 4), stat("inbound>>>f>>>traffic>>>downlink", 5))
 	adapter, batches := forwardStatsAdapter(forwardConfig(endpoint, map[string]traffic.Counter{}, "f"))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	fixture.set("inbound>>>")
-	if err := adapter.SampleTraffic(context.Background()); err == nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err == nil {
 		t.Fatal("vanished forward source still sampled")
 	}
 	if len(*batches) != 2 {
@@ -226,14 +226,14 @@ func TestStatsReaderReportsForwardSourceCoverage(t *testing.T) {
 	})
 	accounts := map[string]traffic.Counter{"user>>>account": {Revision: 1, CredentialID: "credential", UserID: "user", DeviceID: "device", Protocol: "vless"}}
 	adapter, _ := forwardStatsAdapter(forwardConfig(endpoint, accounts, "f", "g"))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if status := adapter.TrafficSourceStatus(); status.Status != "partial" || status.ConfiguredSources != 3 || status.ObservedSources != 2 {
 		t.Fatal("configured sources must count accounts and forwards only", status)
 	}
 	fixture.set("inbound>>>", stat("inbound>>>f>>>traffic>>>uplink", 3), stat("inbound>>>f>>>traffic>>>downlink", 4), stat("inbound>>>g>>>traffic>>>uplink", 5), stat("inbound>>>g>>>traffic>>>downlink", 6))
-	if err := adapter.SampleTraffic(context.Background()); err != nil {
+	if err := adapter.sampleCountersLocked(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if status := adapter.TrafficSourceStatus(); status.Status != "covered" || status.ObservedSources != 3 {

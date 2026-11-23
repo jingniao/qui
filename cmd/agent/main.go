@@ -35,6 +35,7 @@ var version = "dev"
 // the operator modes plus the supervisor, managed-worker and image-probe flags
 // the Agent self-update path itself invokes.
 type agentFlags struct {
+	handover             *handoverFlags
 	local                *localAgentFlags
 	path                 *string
 	check                *bool
@@ -59,6 +60,7 @@ type agentFlags struct {
 
 func registerFlags(set *flag.FlagSet) *agentFlags {
 	f := &agentFlags{}
+	f.handover = registerHandoverFlags(set)
 	f.local = registerLocalAgentFlags(set)
 	f.path = set.String("config", "", "YAML configuration file")
 	f.check = set.Bool("check-config", false, "validate configuration and exit")
@@ -97,6 +99,9 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
+	if handled, err := executeHandover(set, f.handover, *f.path); handled {
+		return err
+	}
 	if *f.systemUpdateIdentity {
 		valid := *f.path != "" && set.NArg() == 0
 		set.Visit(func(o *flag.Flag) { valid = valid && (o.Name == "config" || o.Name == "system-update-identity") })
@@ -375,8 +380,22 @@ func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
 	logger := logging.New(logOutput)
 	slog.SetDefault(logger)
 	defer slog.SetDefault(logging.New(os.Stderr))
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	defer cancel(control.ErrOrdinaryStop)
+	go func() {
+		select {
+		case sig := <-signals:
+			if sig == syscall.SIGTERM {
+				cancel(control.ErrTerminationRequested)
+			} else {
+				cancel(control.ErrOrdinaryStop)
+			}
+		case <-ctx.Done():
+		}
+	}()
 	if *f.managed {
 		return runManaged(ctx, c, logger)
 	}

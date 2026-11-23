@@ -51,7 +51,8 @@ func TestRealRelayCarriesForwardsAndRejectsUntrustedClients(t *testing.T) {
 			t.Fatalf("render revision %d: %v", state.Revision, err)
 		}
 		if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
-			t.Fatalf("apply revision %d: %+v %v %q", state.Revision, result, err, adapter.log.tail())
+			diagnostic, diagnosticErr := adapter.log.tail()
+			t.Fatalf("apply revision %d: %+v %v %q %v", state.Revision, result, err, diagnostic, diagnosticErr)
 		}
 		return rendered
 	}
@@ -73,7 +74,8 @@ func TestRealRelayCarriesForwardsAndRejectsUntrustedClients(t *testing.T) {
 	// from a rendered configuration.
 	rendered := apply(t, entry, realEntryState(3, entryPort, target, []desiredstate.GostHop{hop}))
 	if result, err := entry.Apply(ctx, withoutClientCertificate(t, rendered)); err != nil || !result.Success {
-		t.Fatalf("apply without a client certificate: %+v %v %q", result, err, entry.log.tail())
+		diagnostic, diagnosticErr := entry.log.tail()
+		t.Fatalf("apply without a client certificate: %+v %v %q %v", result, err, diagnostic, diagnosticErr)
 	}
 	requireNoEcho(t, address)
 }

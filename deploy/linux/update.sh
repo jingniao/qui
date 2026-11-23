@@ -127,6 +127,13 @@ source_dir=''
 # Filled by take_snapshot and read by restore_snapshot and the success paths; empty
 # means no snapshot was taken, which is what keeps the EXIT trap out of it.
 snapshot=''
+core_handover=false
+core_request=''
+core_target=''
+core_helper=''
+core_source_supported=false
+core_target_supported=false
+core_preflight_done=false
 # The component the run is working on. The signal handlers and the journal read these,
 # because a signal can arrive between any two statements of update_component.
 active_component=''
@@ -155,6 +162,9 @@ agent_runtime_state=''
 agent_runtime_ready=''
 agent_inputs=''
 managed_installing=false
+managed_core_journal=''
+managed_core_request=''
+managed_target_digest=''
 agent_guard_pid=''
 agent_guard_read=''
 agent_guard_write=''
@@ -196,6 +206,72 @@ agent_cli() {
     --config "$root/etc/proxy-agent/config.yaml" "$@" 3>&- 4>&- 5>&- 6>&- 7>&- 8>&-
 }
 
+prepare_core_handover() {
+  local candidate=$1 status=0 selected=''
+  core_preflight_done=true
+  core_handover=false core_request='' core_target='' core_helper=''
+  core_source_supported=false core_target_supported=false
+  qui_core_handover_protocol "$program_directory/proxy-agent" || status=$?
+  case $status in 0) core_source_supported=true;; 2) ;; *) return 1;; esac
+  status=0
+  qui_core_handover_protocol "$candidate" || status=$?
+  case $status in 0) core_target_supported=true; core_helper=$candidate;; 2) ;; *) return 1;; esac
+  if $core_source_supported; then
+    [[ -n $core_helper ]] || core_helper=$program_directory/proxy-agent
+    selected=$(qui_core_cli "$program_directory/proxy-agent" "$root/etc/proxy-agent/config.yaml" --core-handover-target) || return 1
+    [[ $selected =~ ^[0-9a-f]{64}$ ]] || { printf '实际 Agent 摘要无效。\n' >&2; return 1; }
+    status=0
+    if $active_was_active; then
+      qui_core_handover_source "$program_directory/proxy-agent" "$selected" || status=$?
+      case $status in 0) ;; 2) core_source_supported=false;; *) return 1;; esac
+    fi
+  fi
+  if $managed_agent; then
+    core_target=$selected
+  else
+    core_target=$(sha256sum -- "$candidate") || return 1
+    core_target=${core_target%% *}
+  fi
+  if $core_source_supported && $core_target_supported; then core_handover=true; fi
+  if ! $core_handover; then
+    printf '[proxy-agent] 源或目标不支持交接协议；本次更新会中断连接。\n'
+  fi
+}
+
+# Only the verified, root-owned snapshot copy is used after stop or replacement.
+snapshot_core_cli() {
+  local helper=$snapshot/core-stop-helper digest='' expected=''
+  [[ -f $helper && ! -L $helper && $(stat -c '%u:%a' -- "$helper") == 0:500 ]] || return 1
+  [[ -f $snapshot/core-stop-helper.sha256 && ! -L $snapshot/core-stop-helper.sha256 \
+    && $(stat -c '%u:%a' -- "$snapshot/core-stop-helper.sha256") == 0:600 ]] || return 1
+  expected=$(cat -- "$snapshot/core-stop-helper.sha256") || return 1
+  digest=$(sha256sum -- "$helper") || return 1
+  [[ $expected =~ ^[0-9a-f]{64}$ && ${digest%% *} == "$expected" ]] || return 1
+  qui_core_cli "$helper" "$root/etc/proxy-agent/config.yaml" "$@"
+}
+
+component_healthy() {
+  if [[ $active_component == agent && -n $core_request ]]; then
+    local selected='' waited=0
+    qui_core_handover_wait "$snapshot/core-stop-helper" "$root/etc/proxy-agent/config.yaml" "$core_request" || return 1
+    service_healthy proxy-agent 10 || return 1
+    # A managed worker records adoption before its Ready frame; the supervisor
+    # opens its local socket only after that, so the target query may need to
+    # wait for it, as install_managed_release waits for --local-agent-status.
+    until selected=$(qui_core_cli "$program_directory/proxy-agent" "$root/etc/proxy-agent/config.yaml" --core-handover-target 2>&1); do
+      if ((waited >= 30)) || ! service_is_active proxy-agent; then
+        printf '%s\n' "$selected" >&2
+        return 1
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+    [[ $selected == "$core_target" ]] || { printf '认领后的实际 Agent 镜像与授权目标不同：%s\n' "$selected" >&2; return 1; }
+  else
+    service_healthy "proxy-$active_component" 10
+  fi
+}
+
 agent_read_status() {
   local output='' magic='' extra='' options=(--local-agent-status)
   if ! service_is_active proxy-agent; then options+=(--local-agent-stopped); fi
@@ -217,6 +293,8 @@ agent_read_status() {
 
 prepare_managed_release() {
   local manifest=$1 binary=$2
+  managed_target_digest=$(sha256sum -- "$binary") || fail '无法读取已校验的 worker 摘要。'
+  managed_target_digest=${managed_target_digest%% *}
   agent_inputs=$(mktemp -d "${TMPDIR:-/var/tmp}/qui-agent.XXXXXXXX") \
     || fail '无法准备 Agent 校验输入目录。'
   chown proxy-agent:proxy-agent -- "$agent_inputs" || fail '无法设置 Agent 校验目录属主。'
@@ -272,6 +350,27 @@ release_agent_bootstrap() {
   fi
 }
 
+managed_core_cli() {
+  # Reuse the snapshot verifier after the bootstrap snapshot has been disposed.
+  local snapshot=$managed_core_journal
+  snapshot_core_cli "$@"
+}
+
+managed_core_rollback() {
+  [[ -n $managed_core_journal ]] || return 0
+  if [[ -n $managed_core_request ]]; then
+    managed_core_cli --core-handover-revoke --request "$managed_core_request" --reason rollback || return 1
+  else
+    managed_core_cli --core-handover-revoke-all --reason abort || return 1
+  fi
+  # The non-root installer may have lost its candidate. Root must confirm both
+  # worker and core exit before any retained image is allowed to restart.
+  service_stop proxy-agent || return 1
+  managed_core_cli --finish-core-stop || return 1
+  rm -rf -- "$managed_core_journal" || return 1
+  managed_core_journal='' managed_core_request=''
+}
+
 install_managed_release() {
   local output='' waited=0
   report_stage agent_install
@@ -291,16 +390,59 @@ install_managed_release() {
     waited=$((waited + 1))
   done
   local install_status=0
-  local install_options=()
+  local local_request="local-system-$(cat /proc/sys/kernel/random/uuid)" local_digest local_manifest
+  local install_options=(--agent-install-request-id "$local_request")
+  local_digest=$(sha256sum -- "$agent_inputs/proxy-agent") || fail '无法读取 worker 候选摘要。'
+  local_digest=${local_digest%% *}
+  [[ $local_digest == "$managed_target_digest" ]] || fail 'worker 候选已偏离已校验镜像，拒绝安装。'
+  if ! $core_preflight_done; then
+    local active_was_active=true
+    prepare_core_handover "$source_dir/bin/proxy-agent" || fail 'worker 核心交接预检失败。'
+  fi
+  if [[ -n $core_helper ]]; then
+    # A persistent helper also covers SIGKILL/boot through the existing
+    # web-handover recovery scan. Never retain the disposable candidate path.
+    local helper_digest=''
+    helper_digest=$(sha256sum -- "$program_directory/proxy-agent") || fail '无法校验已安装停核 helper。'
+    [[ ${helper_digest%% *} == "$managed_target_digest" ]] || fail '已安装 helper 与已校验镜像不同。'
+    managed_core_journal=$(mktemp -d "$registry/web-handover.worker.XXXXXXXX") || fail '无法创建 worker 交接日志。'
+    chmod 0700 -- "$managed_core_journal" || fail '无法保护 worker 交接日志。'
+    install -o root -g root -m 0500 -- "$program_directory/proxy-agent" "$managed_core_journal/core-stop-helper" || fail '无法保留 worker 停核 helper。'
+    printf '%s\n' "$managed_target_digest" > "$managed_core_journal/core-stop-helper.sha256" || fail '无法记录 helper 摘要。'
+    chmod 0600 -- "$managed_core_journal/core-stop-helper.sha256" || fail '无法保护 helper 摘要。'
+    install -o root -g root -m 0600 -- "$managed_core_journal/core-stop-helper.sha256" "$managed_core_journal/sha256" || fail '无法记录恢复摘要。'
+    printf 'transaction=%s\ntarget=%s\n' "$local_request" "$local_digest" > "$managed_core_journal/journal" || fail '无法绑定 worker 安装事务。'
+    chmod 0600 -- "$managed_core_journal/journal" || fail '无法保护 worker 安装事务。'
+    sync -f -- "$managed_core_journal" || fail '无法同步 worker 交接日志。'
+  fi
+  local worker_switch=true
+  if $core_handover; then
+    local current_digest=''
+    current_digest=$(managed_core_cli --core-handover-target) || fail '无法确认切换前的实际 worker 摘要。'
+    if [[ $current_digest == "$local_digest" ]]; then worker_switch=false; fi
+  fi
+  if $core_handover && $worker_switch; then
+    local handover_arm_status=0
+    managed_core_request=$(qui_core_handover_arm managed_core_cli --core-handover-arm --scope worker \
+      --transaction "$local_request" --target-sha256 "$local_digest" --updater-pid "$$") || handover_arm_status=$?
+    case $handover_arm_status in
+      0)
+        [[ $managed_core_request =~ ^[0-9a-f]{64}$ ]] || fail 'worker 交接 request id 无效。'
+        printf 'request=%s\n' "$managed_core_request" >> "$managed_core_journal/journal" || fail '无法记录 worker 交接 request。'
+        sync -f -- "$managed_core_journal/journal" || fail '无法同步 worker 交接 request。'
+        ;;
+      2) core_handover=false; managed_core_request='';;
+      *) fail '无法授权 worker 交接。';;
+    esac
+  elif $worker_switch; then
+    printf '[proxy-agent] 本次 worker 切换会中断连接。\n'
+  fi
   if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
     # Bind the original managed request before Queue or Apply. The root event
     # journal outlives the bootstrap snapshot and the disposable input directory.
-    local local_request="local-system-$(cat /proc/sys/kernel/random/uuid)" local_digest local_manifest
-    local_digest=$(sha256sum "$agent_inputs/proxy-agent"); local_digest=${local_digest%% *}
     local_manifest=$(base64 -w 0 "$agent_inputs/manifest.json")
     printf '{"stage":"managed_request","state":"bound","exitCode":null,"error":"%s:%s:%s"}\n' "$local_request" "$local_digest" "$local_manifest" >&"$QUI_UPDATE_REPORT_FD"
     sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"
-    install_options=(--agent-install-request-id "$local_request")
   fi
   if output=$(agent_cli --install-agent-release --agent-manifest "$agent_inputs/manifest.json" \
     --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version" "${install_options[@]}" 2>&1); then
@@ -324,16 +466,30 @@ install_managed_release() {
       printf '{"stage":"managed_recovery","state":"%s","exitCode":null,"error":%s}\n' "$recovery_state" "$recovery_error_json" >&"$QUI_UPDATE_REPORT_FD"
     fi
     printf '[proxy-agent] 引导程序版本：%s；实际 Agent 更新失败，以上错误和受管安装记录已保留。\n' "$(installed_version agent)" >&2
+    managed_core_rollback || fail "worker 回滚停核屏障失败，保留现场：$managed_core_journal"
     if agent_read_status; then
       printf '[proxy-agent] 当前实际 Agent：%s（%s）。\n' "$agent_runtime_version" "$agent_runtime_state" >&2
     fi
     return 1
+  fi
+  if [[ -n $managed_core_request ]]; then
+    local handover_state=''
+    handover_state=$(managed_core_cli --core-handover-status --request "$managed_core_request") || fail '无法读取 worker 认领回执。'
+    [[ $handover_state == adopted ]] || fail "worker 未完成核心认领：$handover_state"
   fi
   report_stage agent_health
   service_healthy proxy-agent 10 || fail '实际 Agent 切换后服务未保持稳定，请检查受管安装记录和服务日志。'
   agent_read_status || fail '无法核实升级后的实际 Agent 版本。'
   [[ $agent_runtime_state == running && $agent_runtime_ready == ready && $agent_runtime_version == "$version" ]] \
     || fail "实际 Agent 版本核验失败：$agent_runtime_version（$agent_runtime_state/$agent_runtime_ready）。"
+  if [[ -n $managed_core_request ]]; then
+    managed_core_cli --core-handover-revoke --request "$managed_core_request" --reason done || fail '无法撤销已完成的 worker 交接授权。'
+    managed_core_request=''
+  fi
+  if [[ -n $managed_core_journal ]]; then
+    rm -rf -- "$managed_core_journal" || fail '无法清理已提交的 worker 交接日志。'
+    managed_core_journal=''
+  fi
   managed_installing=false
   report_update success
   printf '[proxy-agent] 引导程序 %s；实际 Agent %s，服务运行正常。\n' "$(installed_version agent)" "$agent_runtime_version"
@@ -683,6 +839,17 @@ take_snapshot() {
     mkdir -p -- "${target%/*}" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
     cp -a -- "$path" "$target" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
   done < <(component_files "$component")
+  if [[ $component == agent && -n $core_helper ]]; then
+    install -o root -g root -m 0500 -- "$core_helper" "$snapshot/core-stop-helper" || return 1
+    # Store the digest alone, independent of the snapshot's absolute path.
+    local helper_digest='' copied_digest=''
+    helper_digest=$(sha256sum -- "$core_helper") || return 1
+    copied_digest=$(sha256sum -- "$snapshot/core-stop-helper") || return 1
+    [[ ${helper_digest%% *} == "${copied_digest%% *}" ]] || return 1
+    printf '%s\n' "${helper_digest%% *}" > "$snapshot/core-stop-helper.sha256" || return 1
+    sync -f -- "$snapshot/core-stop-helper" || return 1
+    sync -f -- "$snapshot/core-stop-helper.sha256" || return 1
+  fi
   if [[ ! -f $directory/updater || ! -f $directory/service.sh ]] \
     || ! install -o root -g root -m 0600 -- "$directory/updater" "$snapshot/updater" \
     || ! install -o root -g root -m 0600 -- "$directory/service.sh" "$snapshot/service.sh" \
@@ -722,6 +889,10 @@ journal_write() {
     printf 'backup=%s\n' "$active_backup"
     printf 'database_source=%s\n' "$active_database_source"
     printf 'phase=%s\n' "$phase"
+    if [[ $active_component == agent ]]; then
+      printf 'core_request=%s\n' "$core_request"
+      printf 'core_helper=%s\n' "${core_helper:+v1}"
+    fi
   } > "$temporary" || { rm -f -- "$temporary"; return 1; }
   if ! chmod 0600 -- "$temporary" \
     || ! sync -f -- "$temporary" \
@@ -978,6 +1149,23 @@ recover_snapshot() {
   active_was_active=$was_active
   active_backup=$backup
   active_database_source=$journal_database_source
+  core_request=''
+  if [[ $component == agent ]]; then
+    core_helper=''
+    core_request=$(journal_value "$directory_arg/journal" core_request) || core_request=''
+    if [[ -f $snapshot/core-stop-helper || -L $snapshot/core-stop-helper ]]; then
+      core_helper=$snapshot/core-stop-helper
+      # Recovery never trusts an old detached receipt to authorize preservation.
+      if [[ $mode != rollback || -z $core_request || $phase == committed ]]; then
+        snapshot_core_cli --core-handover-revoke-all --reason recovery || return 1
+      else
+        snapshot_core_cli --core-handover-revoke --request "$core_request" --reason rollback || return 1
+      fi
+    elif [[ $(journal_value "$directory_arg/journal" core_helper) == v1 ]]; then
+      printf '缺少新停核 helper，保留快照并停止恢复：%s\n' "$snapshot" >&2
+      return 1
+    fi
+  fi
   name=proxy-$component
   # A killed updater never forwarded its direct install child's captured output.
   # Replay it before recovery can dispose of the only durable copy.
@@ -1007,7 +1195,18 @@ recover_snapshot() {
       return 0
       ;;
   esac
-  if [[ $mode != boot ]]; then
+  if [[ $component == agent ]]; then
+    # A boot recovery must not cancel the queued start job; the helper proves
+    # the old worker has exited before it examines or stops any retained core.
+    if [[ $mode != boot ]] && ! service_stop "$name"; then
+      printf '[%s] 停止失败，保留快照与新 helper，禁止覆盖文件。\n' "$name" >&2
+      return 1
+    fi
+    if [[ -n $core_helper ]] && ! snapshot_core_cli --finish-core-stop; then
+      printf '[%s] 停核未确认，保留现场：%s\n' "$name" "$snapshot" >&2
+      return 1
+    fi
+  elif [[ $mode != boot ]]; then
     # Not conditional on service_is_active for the reason the old rollback always was: a
     # unit waiting for its restart is "activating", and that is the state a failed update
     # usually leaves behind. A refusal is reported, not fatal: the files go back anyway.
@@ -1085,7 +1284,7 @@ rollback_component() {
   printf '\n[%s] %s：回滚到 %s ...\n' "$name" "$reason" "$previous"
   local recovery_status=0 recovery_output='' recovery_report=''
   recovery_report=$(mktemp "$registry/.recovery-report.XXXXXXXX") || return 1
-  if recover_snapshot "$snapshot" interactive "${install_output_status:-0}" > "$recovery_report" 2>&1; then
+  if recover_snapshot "$snapshot" rollback "${install_output_status:-0}" > "$recovery_report" 2>&1; then
     cat -- "$recovery_report"
     rm -f -- "$recovery_report"
     report_update success
@@ -1227,16 +1426,57 @@ update_component() {
   active_backup=''
   active_database_source=''
   if [[ $component == panel && -n $database_file ]]; then active_database_source=$database_file; fi
+  if [[ $component == agent ]]; then
+    prepare_core_handover "$binary" || fail '核心交接预检失败，服务未停止。'
+    take_snapshot "$component" || fail '无法在停服前保存 Agent 回滚快照与新 helper。'
+    journal_write prepared || fail '无法在停服前保存 Agent 更新日志。'
+    # No helper means both the installed and the candidate Agent definitively
+    # predate core handover (flag rejected), and such an Agent never detaches a
+    # core: Pdeathsig and its KillMode=mixed unit end every core with it.
+    if ! $was_active && [[ -n $core_helper ]]; then
+      snapshot_core_cli --core-handover-revoke-all --reason recovery \
+        && snapshot_core_cli --finish-core-stop || fail '服务未运行但遗留核心退出未确认，拒绝更新。'
+    elif $core_handover; then
+      local handover_arm_status=0
+      core_request=$(qui_core_handover_arm snapshot_core_cli --core-handover-arm --scope bootstrap \
+        --transaction "${snapshot##*/}" --target-sha256 "$core_target" --updater-pid "$$") || handover_arm_status=$?
+      case $handover_arm_status in
+        0) [[ -n $core_request && $core_request != *$'\n'* ]] || fail '核心交接 request id 无效。';;
+        2) core_handover=false; core_request='';;
+        *) fail '无法授权核心交接，服务未停止。';;
+      esac
+      journal_write prepared || fail '无法记录核心交接请求，保留现场并中止。'
+    fi
+  fi
   printf '\n[%s] 停止 %s ...\n' "$name" "$name"
   # Set before the stop: bash runs a trapped signal only after the foreground command,
   # so a Ctrl-C during systemctl/rc-service stop is handled the moment the stop returns,
   # and the handler has to know the service may be down. Starting one that still runs
   # is harmless.
   service_stopped=true
-  service_stop "$name" || fail "无法停止 $name，未做任何修改。"
+  if ! service_stop "$name"; then
+    if [[ $component == agent ]]; then
+      rollback_component "$component" "$previous" "$was_active" '停止 Agent 失败' \
+        || report_failure "$name" "$previous" "$backup"
+    fi
+    fail "无法停止 $name，保留恢复材料。"
+  fi
+  if [[ $component == agent && -n $core_request ]]; then
+    local handover_state=''
+    handover_state=$(snapshot_core_cli --core-handover-status --request "$core_request") || handover_state=error
+    if [[ $handover_state != detached ]]; then
+      rollback_component "$component" "$previous" "$was_active" "核心未确认 detached：$handover_state" \
+        || report_failure "$name" "$previous" "$backup"
+      fail '核心交接未确认，未安装候选版本。'
+    fi
+  elif [[ $component == agent && -n $core_helper ]]; then
+    snapshot_core_cli --core-handover-revoke-all --reason abort \
+      && snapshot_core_cli --finish-core-stop || fail '停核未确认，禁止安装候选版本。'
+  fi
   if [[ $component == agent && $managed_agent == true ]]; then
     if ! release_agent_bootstrap; then
-      restore_service_after_stop
+      rollback_component "$component" "$previous" "$was_active" '引导程序排他保留未正常结束' \
+        || report_failure "$name" "$previous" "$backup"
       fail '引导程序排他保留未正常结束，更新没有开始。'
     fi
   fi
@@ -1274,13 +1514,13 @@ update_component() {
       esac
     fi
   fi
-  if ! take_snapshot "$component"; then
+  if [[ $component == panel ]] && ! take_snapshot "$component"; then
     # Nothing has been replaced yet, so the host only needs its service back.
     restore_service_after_stop
     fail "[$name] 无法保存回滚快照，更新没有开始。"
   fi
   printf '[%s] 回滚快照：%s\n' "$name" "$snapshot"
-  if ! journal_write prepared; then
+  if [[ $component == panel ]] && ! journal_write prepared; then
     # Every later phase would fail the same way, so the update must not start; the
     # snapshot holds nothing install.sh replaced and is removed again.
     dispose_snapshot || true
@@ -1350,6 +1590,7 @@ update_component() {
     # snapshot left at an unfinished phase would make the next run roll a working update
     # back, so it is removed even when the record cannot be written.
     if ! journal_write committed; then
+      if [[ $component == agent ]]; then fail '无法提交未运行 Agent 的更新日志，快照已保留。'; fi
       printf '[%s] 无法把更新记录为完成。\n' "$name"
     fi
     dispose_snapshot || true
@@ -1376,10 +1617,22 @@ update_component() {
   fi
   printf '[%s] 启动 %s 并检查十秒内是否重启 ...\n' "$name" "$name"
   report_stage bootstrap_health
-  if service_start "$name" && service_healthy "$name" 10; then
+  if service_start "$name" && component_healthy; then
     service_stopped=false
     if ! journal_write committed; then
+      if [[ $component == agent ]]; then
+        rollback_component "$component" "$previous" "$was_active" '无法提交 Agent 更新日志' \
+          || report_failure "$name" "$previous" "$backup"
+        exit 1
+      fi
       printf '[%s] 无法把更新记录为完成。\n' "$name"
+    fi
+    if [[ $component == agent && -n $core_request ]]; then
+      local adopted_request=$core_request
+      snapshot_core_cli --core-handover-revoke --request "$core_request" --reason done \
+        || fail '更新已提交，但撤销交接授权失败，快照与 helper 已保留。'
+      core_request=''
+      printf '[%s] 核心交接已认领并提交：%s。\n' "$name" "$adopted_request"
     fi
     dispose_snapshot || true
     if [[ $component == agent ]]; then
@@ -1426,6 +1679,7 @@ on_signal() {
   printf '\n更新被中断（%s）...\n' "$signal"
   release_agent_bootstrap
   if $managed_installing; then
+    managed_core_rollback || printf 'worker 停核屏障失败，现场保留在 %s。\n' "$managed_core_journal" >&2
     printf '引导程序阶段已提交；实际 Agent 的任务和结果保留在节点受管日志中，请检查服务后重跑命令。\n'
   fi
   # The private copy preflight_database runs, if the signal came during the check.
@@ -1466,6 +1720,8 @@ recover_interrupted_updates() {
   local pending='' updater=''
   local journal_component='' journal_previous='' journal_target='' journal_phase=''
   local journal_was_active='' journal_backup='' journal_database_source=''
+  qui_core_handover_recover_web "$registry" interactive \
+    || fail '中断的网页初始化停核未确认，保留现场并中止更新。'
   for pending in "$registry"/discard.*; do
     [[ -e $pending || -L $pending ]] || continue
     if [[ ! -d $pending || -L $pending ]]; then
@@ -1768,6 +2024,10 @@ main() {
   cleanup() {
     local original_status=$? guard_status=0
     release_agent_bootstrap || guard_status=$?
+    if $managed_installing && ! managed_core_rollback; then
+      printf 'worker 停核屏障失败，现场保留在 %s。\n' "$managed_core_journal" >&2
+      original_status=1
+    fi
     if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs"; fi
     if [[ -n $directory ]]; then rm -rf -- "$directory"; fi
     if ((original_status == 0 && guard_status != 0)); then original_status=$guard_status; fi

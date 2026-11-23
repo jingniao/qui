@@ -247,6 +247,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if err != nil {
 		return err
 	}
+	startupTransfer := inspectStartupHandover(ctx, c, state.NodeID)
 	primary := configuration.PrimaryCore(configuredCores)
 	c.CoreName, c.CorePath = primary.Name, primary.Path
 	if _, err := storage.Ensure(c.DataDirectory, state.NodeID, storageContract); err != nil {
@@ -273,8 +274,10 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		c.CorePath = installation.path
 	}
 	var adapter core.Runtime
-	if err := recoverCoreInventory(c.DataDirectory, state.NodeID, inventory, configuredCores, coreRuntime); err != nil {
-		return err
+	if !startupTransfer.attempt {
+		if err := recoverCoreInventory(c.DataDirectory, state.NodeID, inventory, configuredCores, coreRuntime); err != nil {
+			return err
+		}
 	}
 	extraInstallations := map[string]*coreInstallation{}
 	extraConfigs := map[string]config.Agent{}
@@ -313,11 +316,32 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		if err != nil {
 			return err
 		}
+		if startupTransfer.attempt && startupTransfer.err == nil {
+			multi := adapter.(*core.MultiRuntime)
+			for _, name := range core.CoreNames() {
+				material, retained := startupTransfer.materials[name]
+				if retained && multi.Component(name) == nil {
+					if err := multi.AddStartupRuntime(coreRuntime(state.NodeID, filepath.Join(c.DataDirectory, "runtime", name), name, material.ExecutablePath)); err != nil {
+						return err
+					}
+				}
+			}
+		}
 	}
 	coreClosed := false
+	handoverExitReady := false
+	var coreUpdateHeld func() bool
+	var drainCollector func(context.Context) error
 	closeCore := func() {
 		if !coreClosed {
 			coreClosed = true
+			if handoverExitReady && resultErr == nil {
+				detached, err := closeForHandover(ctx, c, state.NodeID, startup != nil, adapter, drainCollector, coreUpdateHeld())
+				resultErr = errors.Join(resultErr, err)
+				if detached {
+					return
+				}
+			}
 			resultErr = errors.Join(resultErr, adapter.Close())
 		}
 	}
@@ -381,6 +405,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if err != nil {
 		return err
 	}
+	coreUpdateHeld = manager.CoreUpdateHeld
 	// The enforced-source helper lives in the node's own state directory and is
 	// driven with a fixed argument list; it is absent on installs that predate
 	// the feature, which the Reconciler treats as "nothing to enforce".
@@ -435,6 +460,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		}
 		collectorCtx, collectorCancel := context.WithCancel(context.Background())
 		go runtimeCollector.Run(collectorCtx)
+		drainCollector = func(ctx context.Context) error { collectorCancel(); return runtimeCollector.Drain(ctx) }
 		// Cancel and join the collector on every path, including the
 		// core-start failures below, so its goroutine never outlives run.
 		defer func() { collectorCancel(); runtimeCollector.Wait() }()
@@ -444,30 +470,47 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		defer closeCore()
 	}
 	adapter.ConfigureRuntime(hooks)
-	// Only a held release and an unconfirmed core exit survive here: on a
-	// refused restore RepairCoreRollback returns before releasing the hold, so
-	// exiting lets the respawn retry the repair and self-heal from the previous
-	// core image, which already ran this revision.
-	if err := repairCoreInstallation(ctx, c, installation, manager); err != nil {
-		if !errors.Is(err, core.ErrReleaseRecovery) && !errors.Is(err, core.ErrCoreStopUnconfirmed) {
-			return fmt.Errorf("roll back interrupted core installation: %w", err)
+	if startupTransfer.attempt {
+		if installation != nil && installation.state != nil && coreInstallationPending(*installation.state) {
+			startupTransfer.err = errors.Join(startupTransfer.err, core.ErrReleaseRecovery, errors.New("primary core installation is pending"))
 		}
-		logger.Error("proxy remains stopped pending core exit confirmation; control connection continues")
-	}
-	for name, installed := range extraInstallations {
-		if err := repairCoreInstallation(ctx, extraConfigs[name], installed, manager); err != nil {
-			return fmt.Errorf("repair %s installation: %w", name, err)
+		for name, installed := range extraInstallations {
+			if installed != nil && installed.state != nil && coreInstallationPending(*installed.state) {
+				startupTransfer.err = errors.Join(startupTransfer.err, core.ErrReleaseRecovery, fmt.Errorf("%s core installation is pending", name))
+			}
 		}
-		installed.Close()
-	}
-	if err := manager.Restore(ctx); err != nil {
-		if !startupRestoreNonFatal(err) {
-			return fmt.Errorf("restore previous core configuration: %w", err)
+		if queueErr != nil {
+			startupTransfer.err = errors.Join(startupTransfer.err, queueErr)
 		}
-		if errors.Is(err, reconcile.ErrRuntimeRestore) {
-			logger.Error("retained revision cannot start with the installed core; proxy remains stopped; control connection continues", "error", err)
-		} else {
-			logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
+		if err := startupTransfer.restore(ctx, c, state.NodeID, manager); err != nil {
+			logger.Error("core handover blocked; control connection continues", "error", err)
+		}
+	} else {
+		// Only a held release and an unconfirmed core exit survive here: on a
+		// refused restore RepairCoreRollback returns before releasing the hold, so
+		// exiting lets the respawn retry the repair and self-heal from the previous
+		// core image, which already ran this revision.
+		if err := repairCoreInstallation(ctx, c, installation, manager); err != nil {
+			if !errors.Is(err, core.ErrReleaseRecovery) && !errors.Is(err, core.ErrCoreStopUnconfirmed) {
+				return fmt.Errorf("roll back interrupted core installation: %w", err)
+			}
+			logger.Error("proxy remains stopped pending core exit confirmation; control connection continues")
+		}
+		for name, installed := range extraInstallations {
+			if err := repairCoreInstallation(ctx, extraConfigs[name], installed, manager); err != nil {
+				return fmt.Errorf("repair %s installation: %w", name, err)
+			}
+			installed.Close()
+		}
+		if err := manager.Restore(ctx); err != nil {
+			if !startupRestoreNonFatal(err) {
+				return fmt.Errorf("restore previous core configuration: %w", err)
+			}
+			if errors.Is(err, reconcile.ErrRuntimeRestore) {
+				logger.Error("retained revision cannot start with the installed core; proxy remains stopped; control connection continues", "error", err)
+			} else {
+				logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
+			}
 		}
 	}
 	installation.Close()
@@ -522,19 +565,23 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	if len(versions) > 0 {
 		version = versions[0]
 	}
+	handoverExitReady = queueErr == nil && manager.StartupError() == nil
 	if startup != nil {
-		healthy := !controlOnly
+		healthy := !controlOnly && manager.StartupError() == nil
 		if manager.Current() > 0 {
 			health, err := adapter.Health(ctx)
 			if err != nil || !health.Healthy {
 				healthy = false
-				if !startup.AllowDegraded {
+				if !startup.AllowDegraded && manager.StartupError() == nil {
 					return errors.Join(errors.New("managed Agent core is not ready"), err)
 				}
 			}
 		}
 		if err := startup.Ready(state.NodeID, manager.Current(), healthy); err != nil {
-			return err
+			if manager.StartupError() == nil {
+				return err
+			}
+			logger.Error("handover worker readiness refused; control connection continues", "error", errors.Join(manager.StartupError(), err))
 		}
 	}
 	sampler := capability.NewSampler(c.DataDirectory)

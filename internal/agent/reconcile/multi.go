@@ -11,7 +11,7 @@ import (
 func (r *Reconciler) RestoreCore(ctx context.Context, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.coreUpdateHold || r.componentHolds[name] || r.controlOnly {
+	if r.coreUpdateHold || r.componentHolds[name] || r.controlOnly || r.startupErr != nil {
 		return errors.New("core release recovery required")
 	}
 	return r.restoreCoreLocked(ctx, name)

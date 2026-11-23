@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -16,6 +17,41 @@ type CounterSources struct {
 	seen        map[string]bool
 	lastSuccess time.Time
 	failed      bool
+}
+
+// CounterSourceSnapshot contains source presence, never usage cursors. Epoch
+// binding prevents restoring a different process's source set.
+type CounterSourceSnapshot struct {
+	Epoch       string
+	Seen        []string
+	LastSuccess time.Time
+}
+
+func (s *CounterSources) Snapshot(epoch string) (CounterSourceSnapshot, error) {
+	if epoch == "" || s.epoch != epoch || s.failed || s.lastSuccess.IsZero() {
+		return CounterSourceSnapshot{}, errors.New("counter source snapshot requires a successful sample of this epoch")
+	}
+	result := CounterSourceSnapshot{Epoch: epoch, LastSuccess: s.lastSuccess}
+	for name := range s.seen {
+		result.Seen = append(result.Seen, name)
+	}
+	sort.Strings(result.Seen)
+	return result, nil
+}
+
+func (s *CounterSources) Restore(epoch string, snapshot CounterSourceSnapshot) error {
+	if epoch == "" || snapshot.Epoch != epoch || snapshot.LastSuccess.IsZero() {
+		return errors.New("counter source snapshot epoch or observation is invalid")
+	}
+	seen := make(map[string]bool, len(snapshot.Seen))
+	for _, name := range snapshot.Seen {
+		if name == "" || seen[name] {
+			return errors.New("invalid or duplicate counter source in snapshot")
+		}
+		seen[name] = true
+	}
+	*s = CounterSources{epoch: epoch, seen: seen, lastSuccess: snapshot.LastSuccess}
+	return nil
 }
 
 func (s *CounterSources) Observe(epoch string, directions map[string]uint8) error {

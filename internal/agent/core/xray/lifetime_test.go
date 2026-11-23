@@ -2,7 +2,7 @@ package xray
 
 import (
 	"errors"
-	"os/exec"
+
 	"testing"
 
 	"proxycontrol/internal/agent/core"
@@ -45,18 +45,18 @@ func TestRunMarkerIsBoundToTheAdapterIdentity(t *testing.T) {
 // TestRunningChildRequiresTheAccountedEpoch proves a child whose start neve
 // settled keeps its process without proving the run of the marker.
 func TestRunningChildRequiresTheAccountedEpoch(t *testing.T) {
-	adapter := &Adapter{process: &exec.Cmd{}, statsEpoch: "epoch-1"}
+	adapter := &Adapter{statsEpoch: "epoch-1"}
 	adapter.marker.Epoch = "epoch-1"
-	if !adapter.runningChildLocked() {
+	if !adapter.accountedChildLocked(true) {
 		t.Fatal("the accounted child was not recognised")
 	}
 	adapter.statsEpoch = "epoch-0"
-	if adapter.runningChildLocked() {
+	if adapter.accountedChildLocked(true) {
 		t.Fatal("a child outside the accounted epoch was proven")
 	}
 	adapter.statsEpoch = "epoch-1"
-	adapter.process = nil
-	if adapter.runningChildLocked() {
+
+	if adapter.accountedChildLocked(false) {
 		t.Fatal("a stopped child was proven")
 	}
 }

@@ -140,9 +140,9 @@ Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出�
 
 节点状态统一语义色：绿色（正常）、黄色（状态降级）、红色（异常）、灰色（离线）、蓝色（发布或更新中）。
 
-**服务器剩余价值与汇率**：统计全部未删除服务器（含离线/维护/停用），展示总价值、月均支出与剩余价值，默认 CNY，支持切换 CNY/USD/EUR/HKD/GBP/JPY/TWD/SGD。未填价格不计入，零价按零处理，一次性费用不计月均与剩余价值，已到期周期费用剩余价值为零，缺日期或不支持周期标注未计入台数。
+**服务器剩余价值与汇率**：统计全部未删除服务器（含离线/维护/停用），展示总价值、月均支出与剩余价值，默认 CNY，支持切换 CNY/USD/EUR/HKD/GBP/JPY/TWD/SGD/AUD/CAD/NZD/CHF/KRW/MYR/THB/PHP/IDR/VND/INR/RUB/TRY/AED/BRL（前端 `CURRENCY_LIST` 与后端 `supportedCurrencies` 须一致）。未填价格不计入，零价按零处理，一次性费用不计月均与剩余价值，已到期周期费用剩余价值为零，缺日期或不支持周期标注未计入台数。
 
-- `GET /api/v1/dashboard/exchange-rates`（Owner/Viewer）固定请求 `https://open.er-api.com/v6/latest/CNY`（无密钥、不携带用户/服务器数据），返回 `{base,updatedAt,nextUpdateAt,source,sourceUrl,rates}`（1 CNY 兑换八种币种的金额）。面板在 `nextUpdateAt` 前复用内存结果；校验 `updatedAt > 0` 且不晚于当前时间、`nextUpdateAt > updatedAt` 及基准/八币种数值有效。失败返回 502 `exchange_rates_unavailable` 与原始原因，不回用旧缓存、不使用固定汇率。
+- `GET /api/v1/dashboard/exchange-rates`（Owner/Viewer）固定请求 `https://open.er-api.com/v6/latest/CNY`（无密钥、不携带用户/服务器数据），返回 `{base,updatedAt,nextUpdateAt,source,sourceUrl,rates}`（1 CNY 兑换全部支持币种的金额）。面板在 `nextUpdateAt` 前复用内存结果；校验 `updatedAt > 0` 且不晚于当前时间、`nextUpdateAt > updatedAt` 及基准/全部支持币种数值有效。失败返回 502 `exchange_rates_unavailable` 与原始原因，不回用旧缓存、不使用固定汇率。
 - 前端统一按 `原金额 ÷ 原币种汇率 × 展示币种汇率` 换算；财务数据按面板时区每日读取一次缓存在浏览器内存，增改删服务器续费后即时更新，失败不缓存。
 
 **节点流量与运行计数**：`GET /api/v1/dashboard` 的 `nodeTraffic` 按未删除节点返回 `{nodeId,todayUpload,todayDownload,monthUpload,monthDownload,measured,historyError?}`，由 `access` 与 `statistics` 统一读取 `node_traffic_samples` 与核心小时汇总（面板时区当日/自然月半开区间，口径见第 21 节），不读取心跳累计字节。本月无样本 `measured=false` 显示「—」；月边界切入已合并小时带 `historyError`，该月显示不可用而今日仍可读。`counts.activeConnections/onlineUsers/todayBlocked` 中任一启用节点未上报时前两项显示「—」并提示部分节点未测。待处理问题的核心异常仅检查在线且已有配置修订的节点，优先读 `heartbeat.cores`，未发布配置不计核心异常。
@@ -384,7 +384,9 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 | 小时 / 日流量 | 小时 90 天；日长期保留 |
 | 本地 spool | 100 MiB（`DefaultLimit`），容量 pragma 对每条 SQLite 连接生效 |
 | 采样 / 上报 | 每 5 秒采样写 spool；心跳间隔 15 秒批量上传 |
-| Xray / sing-box 访问行 | Xray tail `runtime/xray/access.log`（约 100 ms 轮询、读后清空、20 MiB 截断兜底）；sing-box 取核心日志 |
+| Xray / sing-box 访问行 | Xray tail `runtime/xray/access.log`；sing-box 从核心日志提取访问行（Linux 为文件 tail）。Linux 两者约 100 ms 轮询，只交出完整行，半行留在文件直到补全，追平后清空；20 MiB 隐私截断记录结构化丢弃事实。Windows 保留原读取行为 |
+
+Linux Xray、sing-box、GOST 已接入更新时的核心交接：认领沿用原 epoch/Revision 和累计计数，恢复已见计数源集合，来源消失时报记账失败；Xray/sing-box 共享文件 tail 从原 inode/完整行 checkpoint 接读，错误阻止交接就绪。Prepare 经原 TrafficSink 持久化最终采样并保存 checkpoint，Xray 还须证明静态路由 gate-free；Detach 仅释放句柄与 tail，Close 仍停止核心。认领 attach 期间保留文件，20 MiB 隐私上限仍生效并记录丢弃；认领成功后恢复追平清理。更新空窗内允许访问日志在文件积压，访问记录允许少量重复或缺失，不承诺恰好一次。sing-box 来源映射不持久化，交接前已建立连接的来源标记为 unavailable，不阻塞交接。“不漏计”仅承诺正常存活交接；核心在空窗内死亡后无法取得的尾部流量只记本机结构化 WARN `core_traffic_tail_unavailable`，不估算、不补零，不新增面板告警。验收范围见[交接设计 §9](core-handover-plan.md#9-实施与验收结果2026-11-22)。
 
 断线缓存、重连补传、Ack 后删；满时先淘汰最旧允许记录、保留阻断与流量。同一流量或访问批次连续被面板拒绝 3 次则隔离且不淘汰（1 小时后或重启重试），面板记限频 WARN「agent batch rejected」（不含用户名或域名）。删除用户前产生的批次按修订与凭据墓碑归属，仅累加仍存在用户。
 
@@ -400,6 +402,10 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 草稿不直接覆盖运行配置：保存业务配置 → 生成 Revision → 校验用户/节点/能力 → DesiredState → Agent 编译 → 原生校验 → 切换核心 → 健康检查 → 成功或自动回滚。已终结目标收到迟到结果确认忽略并记 WARN；本节点曾下发过的修订其流量、访问与设备观测照常归属。心跳回报成功修订等于待确认修订且核心健康时按成功确认（INFO `deployment confirmed by heartbeat`），失败与回滚码仍仅来自应用结果。
 
 单条 Revision 覆盖全部核心（`core.json.enc` 按核心名存储），活跃核心先全部校验再依序切换、失败逆序补偿，无启用入站的核心停止。**发布重启目标节点全部核心**（中断既有连接），崩溃恢复仅影响异常核心。启动时保留修订不可运行则核心停止但 Agent 保持在线待新版本。默认保留最近 3–5 个成功版本。续期证书自动发布仅在 Owner 设定的低峰窗口内执行（第 27.16 节）。
+
+Linux Agent 更新仅有效本机更新授权允许保留核心：旧 Agent 最终采样写原 spool，写 prepared 后脱离并写 detached；新 Agent 在 lifecycle 独占锁内检查固定三核目录（含禁用核），先恢复全节点私有端口与渲染输入，再用当前版本渲染、原生校验，比较配置字节、依赖、环境、核心镜像摘要及账户归属。全部一致才沿用原 run、epoch、Revision 认领；首采持久化后写 adopted，首次 Refresh 不重启。真实配置变化先建立旧配置管理及采样上下文，再按全核发布重启。材料损坏、身份不明或部分认领失败保留错误与现场，不以补偿重启健康同伴，控制连接保持在线。
+
+交接同时覆盖引导程序与受管 worker 更新。Linux 须支持并允许使用 `pidfd_open`/`pidfd_send_signal`；不可用时不交接，明确提示后按停核更新，不用裸 PID 替代。源或目标不支持交接协议时提示“本次更新会中断连接”；第一次升级到本版本由旧 Agent 执行，仍会断线。普通 stop/restart、卸载和非更新崩溃仍停核，服务 post-stop 屏障须确认遗留核心退出；失败回滚先撤销交接授权，再确认停核，屏障失败保留现场。
 
 ## 22.0 服务器调优与推荐应用流程
 
@@ -440,7 +446,9 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 - **受限 TCP-connect 探测**：仅接受已解析 IP、端口、次数（≤10）、超时（≤3 秒）与截止时间。定时每分钟探测在线节点（每目标 3×3000 ms，默认及每节点自定义各最多 5 目标，手动优先），采样表保留 7 天，≤12 小时返回原点，>12 小时按 epoch 分桶（每目标约 720 点）。
 - **转发与 GOST 中继**：GOST 按序渲染 `forwarder.nodes`、限速（`<整数字节>B`）与连接上限；证书写入 `runtime/gost/tls/<入站>/<半边>/`（0700/0600）。GOST 上报契约 **4**（支持中间 relay 下一跳链，兼容两节点 ≥3；UDP 由 TLS/TCP 封装至出口转发）。
 
-**健康与恢复**：即时健康检查验证子进程与监听（GOST 含 TCP 可拨与 UDP socket 归属）；巡检每 3 秒，仅 `ErrListenerUnavailable` 连续 3 次触发恢复，进程退出等立即恢复并退避，分核判断不因单次拨号失败重启健康核心。目标可达性不属核心健康。
+**健康与恢复**：即时健康检查验证核心进程与本机监听（GOST 含 TCP 可拨；Linux UDP 按端口占用判断，不验证 socket 的 PID 归属）；巡检每 3 秒，仅 `ErrListenerUnavailable` 连续 3 次触发恢复，进程退出等立即恢复并退避，分核判断不因单次拨号失败重启健康核心。认领另行验证原核心进程身份，不能用监听可达代替。目标可达性不属核心健康。
+
+认领与 Prepare 期间暂停监督恢复；认领后单核崩溃仍只恢复该核。只有有效 armed 更新请求允许退出交接，授权窗口为 300 秒 CLOCK_BOOTTIME；受管 worker 接受 bootstrap 与 worker 两种作用域。SIGINT、普通 stop/restart、卸载、未授权 EOF 和非更新异常退出仍停核；崩溃遗留核心由停核屏障确认后正常恢复。
 
 **Agent 网页升级**：v1.7.5 网页升级统一调用节点本机 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`（新装可在安装对话框勾选 `--web-upgrade`，已有节点运行一次 `qui-update --component agent` 启用），详见第 27.9 节与[部署与升级](deployment.md#5-升级)。
 

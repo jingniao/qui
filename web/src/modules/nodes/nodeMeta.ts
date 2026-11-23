@@ -5,7 +5,7 @@ export interface NodeMeta {
   remark?: string;
   region?: string;
   renewDate?: string; // e.g. '2026-12-31'
-  renewCurrency?: string; // 'CNY' | 'USD' | 'EUR' | 'HKD' | 'GBP' | 'JPY' | 'TWD' | 'SGD'
+  renewCurrency?: string; // a CURRENCY_LIST code, e.g. 'CNY' | 'USD' | 'AUD'
   renewPrice?: string | number; // e.g. '120' or 120
   renewCycle?: string; // e.g. '/年' | '/月' | '/季' | '/半年' | '/2年' | '/3年' | '一次性'
   renewNoticeDays?: number;
@@ -26,19 +26,28 @@ export const CURRENCY_LIST = [
   { code: 'GBP', symbol: '£', label: '£ GBP' },
   { code: 'JPY', symbol: '¥', label: '¥ JPY' },
   { code: 'TWD', symbol: 'NT$', label: 'NT$ TWD' },
-  { code: 'SGD', symbol: 'S$', label: 'S$ SGD' }
+  { code: 'SGD', symbol: 'S$', label: 'S$ SGD' },
+  { code: 'AUD', symbol: 'A$', label: 'A$ AUD' },
+  { code: 'CAD', symbol: 'C$', label: 'C$ CAD' },
+  { code: 'NZD', symbol: 'NZ$', label: 'NZ$ NZD' },
+  { code: 'CHF', symbol: 'CHF ', label: 'CHF' },
+  { code: 'KRW', symbol: '₩', label: '₩ KRW' },
+  { code: 'MYR', symbol: 'RM', label: 'RM MYR' },
+  { code: 'THB', symbol: '฿', label: '฿ THB' },
+  { code: 'PHP', symbol: '₱', label: '₱ PHP' },
+  { code: 'IDR', symbol: 'Rp', label: 'Rp IDR' },
+  { code: 'VND', symbol: '₫', label: '₫ VND' },
+  { code: 'INR', symbol: '₹', label: '₹ INR' },
+  { code: 'RUB', symbol: '₽', label: '₽ RUB' },
+  { code: 'TRY', symbol: '₺', label: '₺ TRY' },
+  { code: 'AED', symbol: 'AED ', label: 'AED' },
+  { code: 'BRL', symbol: 'R$', label: 'R$ BRL' }
 ] as const;
 
-export const CURRENCY_SYMBOLS: Record<string, string> = {
-  CNY: '¥',
-  USD: '$',
-  EUR: '€',
-  HKD: 'HK$',
-  GBP: '£',
-  JPY: '¥',
-  TWD: 'NT$',
-  SGD: 'S$'
-};
+// Must match supportedCurrencies in internal/panel/dashboard/exchange_rates.go.
+export const CURRENCY_SYMBOLS: Record<string, string> = Object.fromEntries(
+  CURRENCY_LIST.map(item => [item.code, item.symbol])
+);
 
 export const CYCLE_LIST = ['/年', '/月', '/季', '/半年', '/2年', '/3年', '一次性'] as const;
 
@@ -208,8 +217,18 @@ export function parseRenewPrice(
   }
 
   if (!rawCurrency) {
-    if (priceStr.includes('$') && !priceStr.toUpperCase().includes('HK$') && !priceStr.toUpperCase().includes('S$') && !priceStr.toUpperCase().includes('NT$')) {
+    const upper = priceStr.toUpperCase();
+    // A bare "$" is USD; a letter before it marks another dollar (HK$, A$, R$ ...).
+    if (/(^|[^A-Z])\$/.test(upper)) {
       currency = 'USD';
+    } else if (upper.includes('NZ$')) {
+      currency = 'NZD';
+    } else if (upper.includes('A$') || upper.includes('AUD')) {
+      currency = 'AUD';
+    } else if (upper.includes('C$') || upper.includes('CAD')) {
+      currency = 'CAD';
+    } else if (upper.includes('R$') || upper.includes('BRL')) {
+      currency = 'BRL';
     } else if (priceStr.toUpperCase().includes('HK$')) {
       currency = 'HKD';
     } else if (priceStr.includes('€') || priceStr.toUpperCase().includes('EUR')) {

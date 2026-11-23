@@ -89,7 +89,7 @@ func (n *realTunnelNode) killAndWaitForSupervisor(t *testing.T, ctx context.Cont
 		n.adapter.mu.Unlock()
 		t.Fatal("no GOST process to kill")
 	}
-	err := n.adapter.process.Process.Kill()
+	err := n.adapter.process.Stop(ctx)
 	n.adapter.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)

@@ -122,6 +122,12 @@ func (c *coreRecovery) reset() {
 func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconciler, logger *slog.Logger) {
 	var workers sync.WaitGroup
 	defer workers.Wait()
+	handoverActive := func() bool {
+		if runtime, ok := adapter.(interface{ HandoverInProgress() bool }); ok {
+			return runtime.HandoverInProgress()
+		}
+		return false
+	}
 	if source, ok := adapter.(interface{ SampleConnections(context.Context) }); ok {
 		workers.Add(1)
 		go func() {
@@ -131,7 +137,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			ticker := time.NewTicker(500 * time.Millisecond)
 			defer ticker.Stop()
 			for {
-				source.SampleConnections(ctx)
+				if !handoverActive() {
+					source.SampleConnections(ctx)
+				}
 				select {
 				case <-ctx.Done():
 					return
@@ -165,6 +173,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					if handoverActive() {
+						continue
+					}
 					var gateErr error
 					if multi, ok := target.(interface {
 						TickDeviceGatesExcept(context.Context, map[string]bool) error
@@ -195,6 +206,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				case <-ctx.Done():
 					return
 				case <-probeTicker.C:
+					if handoverActive() {
+						continue
+					}
 					var probeErr error
 					if multi, ok := prober.(interface {
 						ProbeExcept(context.Context, map[string]bool) error
@@ -237,6 +251,9 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if handoverActive() || reconciler.StartupError() != nil {
+				continue
+			}
 			if reconciler.Current() == 0 {
 				continue
 			}

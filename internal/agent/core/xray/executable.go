@@ -45,11 +45,11 @@ func (a *Adapter) ValidateExecutable(ctx context.Context, path string, configura
 func (a *Adapter) SelectExecutable(ctx context.Context, path string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.process != nil {
-		return errors.New("Xray executable cannot change while running")
-	}
 	if err := a.lifecycleReadyLocked(); err != nil {
 		return err
+	}
+	if a.process != nil {
+		return errors.New("Xray executable cannot change while running")
 	}
 	if _, err := Detect(ctx, path); err != nil {
 		return err

@@ -69,6 +69,9 @@ func configureStats(doc *document, state desiredstate.State, port int, secret st
 func (a *Adapter) TrafficCounters(ctx context.Context) ([]traffic.Counter, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.processErrorLocked(); err != nil {
+		return nil, err
+	}
 	if a.current.UserStatsEndpoint == "" {
 		return nil, ErrTelemetryUnavailable
 	}
@@ -84,10 +87,28 @@ func (a *Adapter) SampleTraffic(ctx context.Context) error {
 	return a.sampleTrafficLocked(ctx)
 }
 
-func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
+func (a *Adapter) sampleTrafficLocked(ctx context.Context) (sampleErr error) {
+	defer func() {
+		if sampleErr != nil {
+			a.counterSources.Failure(a.statsEpoch)
+		}
+	}()
+	if err := a.processErrorLocked(); err != nil {
+		return err
+	}
+	if err := a.tailErrorLocked(); err != nil {
+		return err
+	}
 	if a.process == nil || a.hooks.TrafficSink == nil {
 		return nil
 	}
+	if err := a.sampleCountersLocked(ctx); err != nil {
+		return err
+	}
+	return a.persistSampleRuntimeLocked()
+}
+
+func (a *Adapter) sampleCountersLocked(ctx context.Context) error {
 	if a.current.UserStatsEndpoint == "" {
 		if a.current.StatsEndpoint == "" || a.statsSecret == "" {
 			return ErrTelemetryUnavailable
@@ -100,11 +121,20 @@ func (a *Adapter) sampleTrafficLocked(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		return a.hooks.TrafficSink(ctx, []traffic.Counter{node})
+		if err := a.counterSources.Observe(a.statsEpoch, map[string]uint8{"clash-total": 3}); err != nil {
+			return err
+		}
+		if err := a.hooks.TrafficSink(ctx, []traffic.Counter{node}); err != nil {
+			return err
+		}
+		return nil
 	}
 	counters, err := readCounters(ctx, a.current, a.statsEpoch, &a.counterSources)
 	if err != nil {
 		return err
 	}
-	return core.SaveAccountAndNode(ctx, a.hooks.TrafficSink, "sing-box", a.statsEpoch, a.current.Revision, counters)
+	if err := core.SaveAccountAndNode(ctx, a.hooks.TrafficSink, "sing-box", a.statsEpoch, a.current.Revision, counters); err != nil {
+		return err
+	}
+	return nil
 }

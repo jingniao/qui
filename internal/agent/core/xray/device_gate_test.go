@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/traffic"
 	"strings"
@@ -18,7 +17,7 @@ func TestDeviceGateOfficialCLIRecoveryVerificationTTLAndRestartRequest(t *testin
 	for _, verified := range []bool{true, false} {
 		t.Run(map[bool]string{true: "restored", false: "restart"}[verified], func(t *testing.T) {
 			now := time.Unix(1000, 0)
-			a := &Adapter{Directory: t.TempDir(), Now: func() time.Time { return now }, process: &exec.Cmd{}, statsEpoch: "epoch", current: core.RenderedConfig{StatsEndpoint: "127.0.0.1:12345", Data: []byte(`{"routing":{"domainStrategy":"AsIs","rules":[{"type":"field","ruleTag":"baseline","balancerTag":"pool"}],"balancers":[{"tag":"pool","selector":["direct"]}]},"outbounds":[{"tag":"block","protocol":"blackhole"}]}`), StatsAccounts: map[string]traffic.Counter{"user>>>email": {CredentialID: "c"}}}}
+			a := &Adapter{Directory: t.TempDir(), Now: func() time.Time { return now }, marker: core.RunMarker{Run: &core.CoreRun{Process: core.ProcessIdentity{PID: 1, Token: "run-1"}, Epoch: "epoch"}}, statsEpoch: "epoch", current: core.RenderedConfig{StatsEndpoint: "127.0.0.1:12345", Data: []byte(`{"routing":{"domainStrategy":"AsIs","rules":[{"type":"field","ruleTag":"baseline","balancerTag":"pool"}],"balancers":[{"tag":"pool","selector":["direct"]}]},"outbounds":[{"tag":"block","protocol":"blackhole"}]}`), StatsAccounts: map[string]traffic.Counter{"user>>>email": {CredentialID: "c"}}}}
 			calls := 0
 			fail := false
 			var payloads []string
@@ -51,7 +50,10 @@ func TestDeviceGateOfficialCLIRecoveryVerificationTTLAndRestartRequest(t *testin
 			}
 			command := []byte(`{"ttl_seconds":180,"entries":[{"credential_id":"c","keys":["198.51.100.10"]}]}`)
 			ctx := context.Background()
-			if err := a.SetDeviceGate(ctx, command); err != nil {
+			if err := a.deviceGate.Set(command, a.gateNow()); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.applyDeviceGateLocked(ctx); err != nil {
 				t.Fatal(err)
 			}
 			var doc struct {
@@ -61,15 +63,18 @@ func TestDeviceGateOfficialCLIRecoveryVerificationTTLAndRestartRequest(t *testin
 			if len(doc.Routing.Rules) != 2 || doc.Routing.Rules[0].RuleTag != "qui-gate-0" || doc.Routing.Rules[0].User[0] != "email" || len(doc.Routing.Balancers) != 1 {
 				t.Fatal("gate did not preserve user/source scope or balancers")
 			}
-			if err := a.TickDeviceGates(ctx); err != nil || calls != 1 {
+			if err := a.applyDeviceGateLocked(ctx); err != nil || calls != 1 {
 				t.Fatal("unchanged routing reloaded")
 			}
 			now = now.Add(180 * time.Second)
-			if err := a.TickDeviceGates(ctx); err != nil || strings.Contains(payloads[len(payloads)-1], "qui-gate-") {
+			if err := a.applyDeviceGateLocked(ctx); err != nil || strings.Contains(payloads[len(payloads)-1], "qui-gate-") {
 				t.Fatal("expired gate not removed")
 			}
 			fail = true
-			err := a.SetDeviceGate(ctx, command)
+			if err := a.deviceGate.Set(command, a.gateNow()); err != nil {
+				t.Fatal(err)
+			}
+			err := a.applyDeviceGateLocked(ctx)
 			if err == nil || strings.Contains(err.Error(), "198.51") || strings.Contains(err.Error(), "private") || a.gateRecovery == verified || strings.Contains(payloads[len(payloads)-1], "qui-gate-") {
 				t.Fatal("recovery or redaction failed")
 			}
@@ -91,7 +96,7 @@ func TestDeviceGateOfficialCLIRecoveryVerificationTTLAndRestartRequest(t *testin
 // recovering gate is unsupported at once and never reaches the CLI.
 func TestDeviceGateProbeReusesOneVerificationPerWindowAndProcess(t *testing.T) {
 	now := time.Unix(1000, 0)
-	a := &Adapter{Directory: t.TempDir(), Now: func() time.Time { return now }, process: &exec.Cmd{}, statsEpoch: "epoch", current: core.RenderedConfig{StatsEndpoint: "127.0.0.1:12345", Data: []byte(`{"routing":{"rules":[{"type":"field","ruleTag":"baseline"}]}}`)}}
+	a := &Adapter{Directory: t.TempDir(), Now: func() time.Time { return now }, marker: core.RunMarker{Run: &core.CoreRun{Process: core.ProcessIdentity{PID: 1, Token: "run-1"}, Epoch: "epoch"}}, statsEpoch: "epoch", current: core.RenderedConfig{StatsEndpoint: "127.0.0.1:12345", Data: []byte(`{"routing":{"rules":[{"type":"field","ruleTag":"baseline"}]}}`)}}
 	listed := 0
 	a.gateRunner = func(_ context.Context, args []string, out io.Writer) error {
 		if args[1] != "lsrules" {
@@ -124,7 +129,7 @@ func TestDeviceGateProbeReusesOneVerificationPerWindowAndProcess(t *testing.T) {
 		}
 		state.set(false)
 	}
-	a.process = &exec.Cmd{}
+	a.marker.Run.Process = core.ProcessIdentity{PID: 2, Token: "run-2"}
 	if !a.probeDeviceGate(ctx) || listed != 3 {
 		t.Fatal("a new process reused the previous verification")
 	}

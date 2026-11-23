@@ -240,7 +240,7 @@ func renderWithOptions(ctx context.Context, state desiredstate.State, at time.Ti
 	// terminal is unreachable because every enabled inbound has a terminal rule.
 	doc.Outbounds = append(doc.Outbounds, outbound{Type: "direct", Tag: "_panel_terminal_"})
 	doc.Route.Final = "_panel_terminal_"
-	result := core.RenderedConfig{NodeID: state.NodeID, Revision: state.Revision}
+	result := core.RenderedConfig{NodeID: state.NodeID, Revision: state.Revision, PrivatePorts: append([]int(nil), options.privatePorts...)}
 	result.RuntimeAccountsComplete = true
 	for _, entry := range state.Inbounds {
 		if !entry.Enabled {

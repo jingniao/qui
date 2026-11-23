@@ -23,7 +23,7 @@ func (r *Reconciler) WithCoreUpdate(ctx context.Context, expectedRevision int64,
 func (r *Reconciler) WithCoreComponentUpdate(ctx context.Context, expectedRevision int64, component string, operation func(*CoreUpdateLease) error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.controlOnly {
+	if r.controlOnly || r.startupErr != nil {
 		return core.ErrReleaseRecovery
 	}
 	if err := ctx.Err(); err != nil {

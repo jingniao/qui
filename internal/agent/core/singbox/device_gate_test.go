@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"proxycontrol/internal/agent/collector"
 	"proxycontrol/internal/agent/core"
 	"strings"
@@ -45,7 +44,7 @@ func TestDeviceGateSingboxUserSourceJoinTTLAndProbeFailOpen(t *testing.T) {
 		writer.Write([]byte(prefix + "[" + name + "] inbound connection to example.com:443\n"))
 	}
 	now := time.Unix(1000, 0)
-	a := &Adapter{Now: func() time.Time { return now }, process: &exec.Cmd{}, sourceWriter: writer, statsSecret: "fixture-secret", statsEpoch: "e", current: core.RenderedConfig{NodeID: "n", Revision: 1, StatsEndpoint: strings.TrimPrefix(server.URL, "http://"), AccessContext: cc}}
+	a := &Adapter{Now: func() time.Time { return now }, sourceWriter: writer, statsSecret: "fixture-secret", statsEpoch: "e", current: core.RenderedConfig{NodeID: "n", Revision: 1, StatsEndpoint: strings.TrimPrefix(server.URL, "http://"), AccessContext: cc}}
 	ctx := context.Background()
 	sample, err := a.ConnectionSnapshot(ctx)
 	if err != nil || len(sample.Accounts) != 2 || sample.Connections != 2 {

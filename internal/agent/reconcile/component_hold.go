@@ -38,7 +38,7 @@ func (r *Reconciler) loadComponentHolds() {
 	}
 }
 func (r *Reconciler) anyCoreHold() bool {
-	if r.coreUpdateHold {
+	if r.coreUpdateHold || r.startupErr != nil {
 		return true
 	}
 	for _, held := range r.componentHolds {
@@ -85,5 +85,5 @@ func (r *Reconciler) releaseComponent(name string) error {
 func (r *Reconciler) CoreComponentHeld(name string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.coreUpdateHold || r.componentHolds[name] || r.controlOnly
+	return r.coreUpdateHold || r.componentHolds[name] || r.controlOnly || r.startupErr != nil
 }

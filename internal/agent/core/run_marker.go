@@ -28,6 +28,42 @@ type RunMarker struct {
 	Epoch    string
 	Revision int64
 	Env      OSEnvironment
+	Handle   ProcessHandle
+}
+
+// Adopt installs ownership of an already authenticated durable run. It neither
+// writes a new marker nor changes the epoch. Caller holds the lifecycle lock.
+func (m *RunMarker) Adopt(handle ProcessHandle, run CoreRun) error {
+	if handle == nil {
+		return ErrHandoverInvalid
+	}
+	if m.Handle != nil || handle.Detached() || m.Run != nil && *m.Run != run {
+		return ErrHandoverConflict
+	}
+	if err := validateCoreRun(&run); err != nil {
+		return errors.Join(ErrHandoverInvalid, err)
+	}
+	stored, key, err := LoadCoreRun(m.Directory)
+	if err != nil {
+		return errors.Join(ErrHandoverInvalid, err)
+	}
+	if stored == nil || *stored != run || run.Version != CoreRunMarkerVersion || run.NodeID != m.NodeID || run.Core != m.Core || !completeEnvironment(run.Environment) || run.Environment != ObserveOSEnvironment() || handle.Identity() != run.Process || handle.Environment() != run.Environment {
+		return ErrHandoverConflict
+	}
+	exit := handle.ExitObservation()
+	if exit.Err != nil {
+		return exit.Err
+	}
+	if exit.Exited {
+		return ErrCoreExitedDuringHandover
+	}
+	if ResolveCoreRun(&run, ObserveOSEnvironment()) != ProcessAlive {
+		return ErrCoreStopUnconfirmed
+	}
+	m.Run, m.Key, m.Handle = &run, key, handle
+	m.PID, m.Token, m.Epoch, m.Revision, m.Env = run.Process.PID, run.Process.Token, run.Epoch, run.Revision, run.Environment
+	m.Pending = false
+	return nil
 }
 
 // Observe loads the durable marker if it is not already in memory and answers
@@ -72,6 +108,13 @@ func (m *RunMarker) Observe(live bool) (CoreRunObservation, error) {
 // revision; a bare live pointer or a coincidentally equal epoch is not enough.
 func (m *RunMarker) OwnedChild(live bool) bool {
 	run := m.Run
+	if m.Handle != nil {
+		if run == nil || run.Version != CoreRunMarkerVersion {
+			return false
+		}
+		exit := m.Handle.ExitObservation()
+		live = !m.Handle.Detached() && !exit.Exited && exit.Err == nil && m.Handle.Identity() == (ProcessIdentity{PID: m.PID, Token: m.Token}) && m.Handle.Environment() == m.Env && completeEnvironment(m.Env) && m.Env == ObserveOSEnvironment()
+	}
 	if run == nil || !live || m.Token == "" || m.PID <= 0 || m.Epoch == "" {
 		return false
 	}
@@ -110,6 +153,9 @@ func (m *RunMarker) save(run CoreRun) error {
 // Claim durably records a pending start before the child exists, so a crash in
 // the start window cannot leave an orphan without a marker.
 func (m *RunMarker) Claim(epoch string, revision int64) error {
+	if m.Handle != nil {
+		return ErrHandoverConflict
+	}
 	token, err := id.New()
 	if err != nil {
 		return err
@@ -121,6 +167,24 @@ func (m *RunMarker) Claim(epoch string, revision int64) error {
 	}
 	m.Run = &run
 	m.Epoch, m.Revision, m.Env = epoch, revision, environment
+	m.PID, m.Token = 0, ""
+	return nil
+}
+
+// ClaimPrepared binds the exact pending run whose runtime inputs were saved
+// before launch. Claim's random pending token cannot be predicted by callers.
+func (m *RunMarker) ClaimPrepared(run CoreRun) error {
+	if m.Handle != nil || m.Run != nil || run.Version != CoreRunMarkerVersion || run.NodeID != m.NodeID || run.Core != m.Core || run.Process.PID != 0 || !completeEnvironment(run.Environment) || run.Environment != ObserveOSEnvironment() {
+		return ErrHandoverConflict
+	}
+	if err := validateCoreRun(&run); err != nil {
+		return err
+	}
+	if err := m.save(run); err != nil {
+		return err
+	}
+	m.Run = &run
+	m.Epoch, m.Revision, m.Env = run.Epoch, run.Revision, run.Environment
 	m.PID, m.Token = 0, ""
 	return nil
 }
@@ -154,6 +218,16 @@ func (m *RunMarker) ConfirmExit() error {
 	if m.Run == nil {
 		return nil
 	}
+	if m.Handle != nil {
+		if !m.Handle.ExitObservation().Exited {
+			m.Pending = true
+			return ErrCoreStopUnconfirmed
+		}
+		if err := m.Handle.Detach(); err != nil {
+			m.Pending = true
+			return err
+		}
+	}
 	if err := RemoveCoreRun(m.Directory); err != nil {
 		m.Pending = true
 		return err
@@ -165,6 +239,9 @@ func (m *RunMarker) ConfirmExit() error {
 // Abandon drops a pre-start marker after the child never launched. A failed
 // removal is returned and retains the in-memory marker.
 func (m *RunMarker) Abandon() error {
+	if m.Handle != nil {
+		return ErrHandoverConflict
+	}
 	if m.Run == nil {
 		return nil
 	}
@@ -178,6 +255,7 @@ func (m *RunMarker) Abandon() error {
 }
 
 func (m *RunMarker) Clear() {
+	m.Handle = nil
 	m.Run = nil
 	m.Pending = false
 	m.PID, m.Token, m.Epoch, m.Revision = 0, "", "", 0

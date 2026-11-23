@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/updater"
+	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/agentstorage"
 )
 
@@ -27,6 +30,9 @@ type Driver struct {
 	lifetime      context.Context
 	agentUpdates  bool
 	agentRecovery bool
+	handover      *core.HandoverRequest
+	handoverKey   *vault.Vault
+	stopFailed    bool
 }
 
 var _ updater.Driver = (*Driver)(nil)
@@ -89,6 +95,9 @@ func (d *Driver) Release() error {
 	}
 }
 func (d *Driver) Activate(ctx context.Context, path string) error {
+	if d.stopFailed {
+		return ErrStopUnconfirmed
+	}
 	if !d.held {
 		return ErrHandshake
 	}
@@ -102,12 +111,35 @@ func (d *Driver) Activate(ctx context.Context, path string) error {
 	if err := d.Stop(ctx); err != nil {
 		return err
 	}
+	request := d.handover
+	d.handover = nil // Authorization may be exercised for the candidate only once.
+	if request != nil {
+		if image.SHA256 != request.TargetAgentSHA256 {
+			return core.ErrHandoverConflict
+		}
+		if err := d.confirmHandover(*request, core.HandoverDetached, nil); err != nil {
+			return err
+		}
+	} else if err := ConfirmCoresStopped(filepath.Dir(filepath.Dir(d.directory))); err != nil {
+		d.stopFailed = true
+		return err
+	}
 	process, err := start(ctx, d.lifetime, d.directory, image, d.configPath, d.nodeID, d.revision, d.logs, false, d.agentUpdates, d.agentRecovery)
 	if process != nil {
 		d.process = process
 	}
 	if err != nil {
+		if errors.Is(err, ErrStopUnconfirmed) {
+			d.stopFailed = true
+		}
 		return err
+	}
+	if request != nil {
+		// start has already waited for the existing authenticated Ready frame.
+		// Require its durable adoption evidence before Installer can commit.
+		if err := d.confirmHandover(*request, core.HandoverAdopted, process); err != nil {
+			return err
+		}
 	}
 	d.process, d.current = process, image
 	return nil
@@ -117,7 +149,13 @@ func (d *Driver) Stop(ctx context.Context) error {
 		return nil
 	}
 	process := d.process
-	err := process.Stop(ctx)
+	err := process.StopWithoutHandover(ctx)
+	if err == nil {
+		err = ConfirmCoresStopped(filepath.Dir(filepath.Dir(d.directory)))
+	}
+	if err != nil {
+		d.stopFailed = true
+	}
 	if process.Stopped() {
 		d.process = nil
 	}
@@ -127,7 +165,37 @@ func (d *Driver) Stop(ctx context.Context) error {
 func (d *Driver) Process() *Process { return d.process }
 
 func (d *Driver) UnconfirmedStop() bool {
-	return d.process != nil && d.process.Stopping() && !d.process.Stopped()
+	return d.stopFailed || d.process != nil && d.process.Stopping() && !d.process.Stopped()
+}
+
+func (d *Driver) EnableCoreHandover(request core.HandoverRequest, key *vault.Vault) {
+	d.handover, d.handoverKey = &request, key
+}
+
+func (d *Driver) confirmHandover(request core.HandoverRequest, state core.HandoverState, process *Process) error {
+	if err := core.AuthorizeHandoverRequest(request, core.HandoverAuthorization{NodeID: d.nodeID, Environment: core.ObserveOSEnvironment(), SourceAgent: request.SourceAgent, TargetAgentSHA256: request.TargetAgentSHA256, TransactionID: request.TransactionID, Scope: "worker"}); err != nil {
+		return err
+	}
+	receipt, err := core.LoadHandoverReceipt(filepath.Dir(filepath.Dir(d.directory)), d.handoverKey)
+	if err != nil {
+		return err
+	}
+	if err := receipt.MatchRequest(request); err != nil {
+		return err
+	}
+	if receipt.State != state {
+		return core.ErrHandoverConflict
+	}
+	if process != nil {
+		token, err := core.ObserveProcessIdentity(process.command.Process.Pid)
+		if err != nil {
+			return err
+		}
+		if receipt.TargetAgent != (core.ProcessIdentity{PID: process.command.Process.Pid, Token: token}) {
+			return core.ErrHandoverConflict
+		}
+	}
+	return nil
 }
 
 func (d *Driver) EnableAgentUpdates() { d.agentUpdates = true }

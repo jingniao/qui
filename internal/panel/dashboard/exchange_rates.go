@@ -15,6 +15,13 @@ const (
 	exchangeRatesBodyLimit = 1 << 20
 )
 
+// supportedCurrencies must match CURRENCY_LIST in web/src/modules/nodes/nodeMeta.ts.
+var supportedCurrencies = []string{
+	"CNY", "USD", "EUR", "HKD", "GBP", "JPY", "TWD", "SGD",
+	"AUD", "CAD", "NZD", "CHF", "KRW", "MYR", "THB", "PHP",
+	"IDR", "VND", "INR", "RUB", "TRY", "AED", "BRL",
+}
+
 type ExchangeRates struct {
 	Base         string             `json:"base"`
 	UpdatedAt    time.Time          `json:"updatedAt"`
@@ -73,8 +80,8 @@ func (s *ExchangeRateService) Read(ctx context.Context) (*ExchangeRates, error) 
 	if body.UpdatedAt <= 0 || body.UpdatedAt > time.Now().Unix() || body.NextUpdate <= body.UpdatedAt {
 		return nil, fmt.Errorf("汇率服务返回的更新时间无效（实际更新：%s，下次更新：%s）", time.Unix(body.UpdatedAt, 0).UTC().Format(time.RFC3339), time.Unix(body.NextUpdate, 0).UTC().Format(time.RFC3339))
 	}
-	rates := make(map[string]float64, 8)
-	for _, currency := range []string{"CNY", "USD", "EUR", "HKD", "GBP", "JPY", "TWD", "SGD"} {
+	rates := make(map[string]float64, len(supportedCurrencies))
+	for _, currency := range supportedCurrencies {
 		rate := body.Rates[currency]
 		if rate <= 0 {
 			return nil, fmt.Errorf("汇率服务未返回有效的 %s 汇率", currency)

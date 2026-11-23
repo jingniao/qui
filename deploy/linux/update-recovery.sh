@@ -42,6 +42,20 @@ registry=${QUI_UPDATE_TEST_ROOT:-}/var/lib/proxycontrol-install
 # One unusable snapshot must not keep the others from being recovered, so each
 # failure is recorded and the loop carries on; the exit status is the verdict.
 failed=0
+# First-enable transactions can outlive a SIGKILL independently of an updater
+# snapshot. Their pinned helper is validated by the shared library before use.
+for transaction in "$registry"/web-handover.*; do
+  [ -e "$transaction" ] || [ -L "$transaction" ] || continue
+  library=${QUI_UPDATE_TEST_ROOT:-}/usr/local/lib/proxycontrol/service.sh
+  if [ ! -f "$library" ] || [ -L "$library" ] || [ "$(stat -c '%u' -- "$library")" != 0 ]; then
+    printf '网页初始化恢复缺少可信 service.sh：%s\n' "$library" >&2
+    failed=1
+  elif ! /bin/bash -c '. "$1"; init_system=$(detect_init) || exit 1; qui_core_handover_recover_web "$2" boot' recovery "$library" "$registry"; then
+    printf '网页初始化恢复停核未确认，保留现场。\n' >&2
+    failed=1
+  fi
+  break
+done
 for directory in "$registry"/rollback.*; do
   # Without a match the glob stays literal, and that pattern is not a directory.
   # Anything that is not a plain directory with a plain journal is left alone as

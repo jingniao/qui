@@ -14,25 +14,33 @@ import (
 // from an unobservable one so a genuine exit is provable and reuse of the PID by
 // another process is detected by the identity mismatch.
 func observeProcessIdentity(pid int) (string, error) {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if errors.Is(err, os.ErrNotExist) {
+	token, state, err := observeLinuxProcess(pid)
+	if err == nil && (state == "Z" || state == "X") {
 		return "", errProcessGone
 	}
+	return token, err
+}
+
+func observeLinuxProcess(pid int) (string, string, error) {
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if errors.Is(err, os.ErrNotExist) {
+		return "", "", errProcessGone
+	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	text := string(data)
 	close := strings.LastIndexByte(text, ')')
 	if close < 0 {
-		return "", errProcessUnobservable
+		return "", "", errProcessUnobservable
 	}
 	fields := strings.Fields(text[close+1:])
 	if len(fields) < 20 {
-		return "", errProcessUnobservable
+		return "", "", errProcessUnobservable
 	}
 	ticks := fields[19]
 	if _, err := strconv.ParseUint(ticks, 10, 64); err != nil {
-		return "", errProcessUnobservable
+		return "", "", errProcessUnobservable
 	}
-	return "l" + ticks, nil
+	return "l" + ticks, fields[0], nil
 }

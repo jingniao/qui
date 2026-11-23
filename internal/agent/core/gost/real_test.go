@@ -45,7 +45,8 @@ func TestRealApplySettleRollbackAndStats(t *testing.T) {
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	result, err := adapter.Apply(ctx, rendered)
 	if err != nil || !result.Success {
-		t.Fatalf("%+v %v %q", result, err, adapter.log.tail())
+		diagnostic, diagnosticErr := adapter.log.tail()
+		t.Fatalf("%+v %v %q %v", result, err, diagnostic, diagnosticErr)
 	}
 	echo := func(t *testing.T, address string) {
 		t.Helper()

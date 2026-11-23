@@ -8,12 +8,16 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/internal/agent/updater"
 	"proxycontrol/pkg/contracts/agentstorage"
 )
@@ -26,6 +30,9 @@ type Process struct {
 	closeInput sync.Once
 	degraded   bool
 	stopping   atomic.Bool
+	stopErr    error
+	forced     atomic.Bool
+	nodeID     string
 }
 
 var ErrStopUnconfirmed = updater.ErrProcessStopUnconfirmed
@@ -99,7 +106,7 @@ func start(ctx, lifetime context.Context, directory string, image updater.Image,
 		output.Close()
 		return nil, err
 	}
-	p := &Process{command: command, input: input, done: make(chan struct{})}
+	p := &Process{command: command, input: input, done: make(chan struct{}), nodeID: nodeID}
 	go func() { p.waitErr = command.Wait(); close(p.done) }()
 	ready := make(chan error, 1)
 	go func() {
@@ -175,22 +182,91 @@ func (p *Process) Stopped() bool {
 func (p *Process) Wait() error { <-p.done; return p.waitErr }
 
 func (p *Process) Stop(ctx context.Context) error {
+	// Only a bootstrap shutdown may preserve cores without a job-bound call.
+	if runtime.GOOS == "linux" {
+		request, err := core.LoadHandoverRequest()
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			slog.Warn("core handover request unreadable; the worker stops its cores", "error", err)
+		case request.Scope == "bootstrap":
+			if err := p.authorizeHandover(*request, p.nodeID, request.TransactionID, request.TargetAgentSHA256); err != nil {
+				slog.Warn("core handover not authorized for this worker; the worker stops its cores", "error", err)
+			} else {
+				return p.stop(ctx, true)
+			}
+		}
+	}
+	return p.StopWithoutHandover(ctx)
+}
+
+// StopForHandover binds EOF to the authenticated local installation scope.
+func (p *Process) StopForHandover(ctx context.Context, request core.HandoverRequest, nodeID, transaction, target string) error {
+	if err := p.authorizeHandover(request, nodeID, transaction, target); err != nil {
+		return errors.Join(err, p.StopWithoutHandover(ctx))
+	}
+	return p.stop(ctx, true)
+}
+
+func (p *Process) authorizeHandover(request core.HandoverRequest, nodeID, transaction, target string) error {
+	token, err := core.ObserveProcessIdentity(p.command.Process.Pid)
+	if err != nil {
+		return err
+	}
+	if err := core.AuthorizeHandoverRequest(request, core.HandoverAuthorization{NodeID: nodeID, Environment: core.ObserveOSEnvironment(), SourceAgent: core.ProcessIdentity{PID: p.command.Process.Pid, Token: token}, TargetAgentSHA256: target, TransactionID: transaction, Scope: request.Scope}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// An extra byte is an abnormal lifetime-channel shutdown, never an authorized
+// EOF. The worker must Close its cores before acknowledging this exit.
+func (p *Process) StopWithoutHandover(ctx context.Context) error { return p.stop(ctx, false) }
+
+func (p *Process) stop(ctx context.Context, handover bool) error {
 	p.stopping.Store(true)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	p.closeInput.Do(func() { _ = p.input.Close() })
+	p.closeInput.Do(func() {
+		if runtime.GOOS == "linux" && !handover && !p.Stopped() {
+			_, p.stopErr = p.input.Write([]byte{0})
+		}
+		p.stopErr = errors.Join(p.stopErr, p.input.Close())
+	})
 	select {
 	case <-p.done:
-		return p.waitErr
+		if p.forced.Load() {
+			return errors.Join(ErrStopUnconfirmed, p.stopErr, p.waitErr)
+		}
+		return errors.Join(p.stopErr, p.waitErr)
 	case <-ctx.Done():
+		p.forced.Store(true)
 		killErr := p.command.Process.Kill()
 		reap := time.NewTimer(5 * time.Second)
 		defer reap.Stop()
 		select {
 		case <-p.done:
-			return errors.Join(ctx.Err(), killErr, p.waitErr)
+			return errors.Join(ErrStopUnconfirmed, p.stopErr, ctx.Err(), killErr, p.waitErr)
 		case <-reap.C:
-			return errors.Join(ErrStopUnconfirmed, ctx.Err(), killErr)
+			return errors.Join(ErrStopUnconfirmed, p.stopErr, ctx.Err(), killErr)
 		}
 	}
+}
+
+// ConfirmCoresStopped is a read-only rollback barrier. A non-root host cannot
+// stop an orphan: leave its evidence for the root updater/service post-stop.
+func ConfirmCoresStopped(directory string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	for _, name := range []string{"xray", "sing-box", "gost"} {
+		run, _, err := core.LoadCoreRun(filepath.Join(directory, "runtime", name))
+		if err != nil {
+			return errors.Join(ErrStopUnconfirmed, err)
+		}
+		if run != nil && core.ResolveCoreRun(run, core.ObserveOSEnvironment()) != core.ProcessExited {
+			return errors.Join(ErrStopUnconfirmed, errors.New("core "+name+" may still be alive; root --finish-core-stop required"))
+		}
+	}
+	return nil
 }

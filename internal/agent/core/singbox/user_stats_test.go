@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -261,9 +260,9 @@ func TestUserStatsCapabilityFreePortAndOfficialFallback(t *testing.T) {
 func TestUserStatsFinalSampleFailureKeepsCore(t *testing.T) {
 	s := &fakeUserStats{values: statsPair("user>>>u", 1, 2)}
 	endpoint := fakeStatsEndpoint(t, s)
-	a := &Adapter{process: &exec.Cmd{}, done: make(chan error), statsEpoch: "epoch", current: core.RenderedConfig{NodeID: "node", UserStatsEndpoint: endpoint, StatsAccounts: map[string]traffic.Counter{"user>>>u": {Revision: 1, CredentialID: "c", UserID: "u", DeviceID: "d", Protocol: "vless"}}}}
+	a := &Adapter{statsEpoch: "epoch", current: core.RenderedConfig{NodeID: "node", UserStatsEndpoint: endpoint, StatsAccounts: map[string]traffic.Counter{"user>>>u": {Revision: 1, CredentialID: "c", UserID: "u", DeviceID: "d", Protocol: "vless"}}}}
 	a.ConfigureRuntime(core.RuntimeHooks{TrafficSink: func(context.Context, []traffic.Counter) error { return errors.New("disk full") }})
-	if err := a.stopLocked(); err == nil || a.process == nil {
+	if err := a.finalTrafficSampleLocked(); err == nil || a.statsEpoch != "epoch" {
 		t.Fatal("failed persistence allowed replacement", err)
 	}
 }

@@ -64,6 +64,7 @@
 | hostnet | `internal/agent/hostnet` | 服务器强制出站源地址：校验目标状态、渲染 nft 表 `inet proxy_agent_source`、读写 helper 目录（`proxy-agent --apply-host-network`） |
 | agenthost / updater / agentjobs | `internal/agent/agenthost` 等 | 受管 Agent 镜像、自更新与核心更新（URL + SHA-256）、任务日志与回滚 |
 | lifecycle / storage / agentprocess | `internal/agent/lifecycle` 等 | 共享状态进程锁与属主、存储格式下限检查、受管 Agent 进程的安装事务 |
+| handovercli | `internal/agent/handovercli` | root 本机固定命令：交接协议探测、授权、状态、撤销与停核屏障；供更新器和服务 post-stop 调用 |
 | identity | `internal/agent/identity` | 节点私钥、证书、ACK 位置、密钥轮换 |
 
 Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查、证书与更新、TTL 设备门控、受限 TCP-connect 探测）。端口转发使用正常发布路径和各核心原生入站；没有任意命令执行或替代转发器。门控和 observer 在 supervisor 生命周期内运行，不写配置 Revision；Xray 使用官方 adrules/lsrules 并在非原子替换失败后恢复规则，sing-box 仅关闭用户与源都匹配的连接。
@@ -103,11 +104,13 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 **节点删除**：`DELETE /api/v1/nodes/{id}` 先查引用（入站、出站、其他节点指向它的中转出站、出口组、代理链、分流规则、进行中的批量发布），有阻塞项时返回 409 `node_delete_blocked` 并带上 `blockers`（预览接口是 `GET /api/v1/nodes/{id}/deletion-preview`）。未登记且无身份的节点走“取消登记”，记录直接移除；已登记节点在同一事务里逻辑删除：写 `nodes.deleted_at`、`enabled=0`、`allow_subscription=0`、`status='disabled'`，把 `node_identities.revoked_at` 置位，删除注册码/续期/节点组成员，并用 `deployment.CloseNodeTasks` 关闭该节点自己的待发布配置、核心/Agent 更新任务与排队健康检查（`internal/panel/node/deletion.go`、`internal/panel/deployment/node_tasks.go`）。列表与选择器按 `deleted_at IS NULL` 过滤（`internal/panel/node/repository.go:300`），`?deleted=1` 只返回已删除节点；历史流量与访问记录保留。
 
-**遥测与访问记录**：Agent 每 5 秒采样账户计数写入本地 spool；心跳（面板指定 15 秒）里上传流量与访问批次，收到 ACK 才删除。Xray 的访问行来自 `runtime/xray/access.log`（Agent 自己 tail，读到即清空，20 MiB 兜底上限），sing-box 的访问行来自核心日志（`internal/agent/collector/singbox.go`）。面板把域名级记录按分钟桶聚合入库，不保存正文、路径或凭据。
+**遥测与访问记录**：Agent 每 5 秒采样账户计数写入本地 spool；心跳（面板指定 15 秒）里上传流量与访问批次，收到 ACK 才删除。Xray 的访问行来自 `runtime/xray/access.log`，sing-box 从核心日志提取。Linux 两者使用共享 FileTail，只交付完整行，半行留在文件直到补全；认领从 inode/offset checkpoint 接读，追平后清空，20 MiB 隐私截断记录丢弃事实；Windows 保留原读取行为。三核 ProcessHandle 区分真实子进程与 Linux 认领句柄；加密 RuntimeMaterial 保留原配置、epoch/Revision、端口、计数源和交接 checkpoint，最终采样和认领首采均写原 spool。空窗内允许日志积压及少量访问记录重复或缺失；sing-box 不持久化来源映射，旧连接来源为 unavailable。核心在空窗内死亡的尾部流量只记本机 WARN `core_traffic_tail_unavailable`，不估算。面板把域名级记录按分钟桶聚合入库，不保存正文、路径或凭据。
 
 **证书**：节点证书默认 90 天，到期前由 Agent 自动续期（`internal/agent/control/renewal.go`）；轮换与续期也可在节点停机时手工执行（见[运维手册](operations.md)）。
 
 **多核心运行**：`cores: [{name,path}]` 的第一个用户内核（Xray 或 sing-box）由 `Inventory.Primary` 记录为主核心；GOST 不能是主核心，列表可为空或仅含 GOST，此时主核心为空。面板通过统一的 `node.CoreOptional` 结合 `core_optional_supported` 与启用列表判断，旧 Agent 的未知上报规则保持不变。无用户内核时只允许显式 GOST forward 和 GOST 隧道，不承载用户配置或订阅；没有任何内核时省略核心健康，不因缺主核心而降级。`cores.json.enc` 持久记录启用/禁用；每核使用 `runtime/<core>/`。一条 Revision 覆盖所有核心，先全部校验再依序切换，失败逆序补偿；发布仍重启该节点全部核心，supervisor 只恢复异常核心。移除须确认退出才删除运行目录与 Agent 自管镜像，安装器二进制与记录保留。旧 Agent 移除最后用户内核仍返回 `last_core`；支持可选内核时先检查全部用户内核依赖（409 `user_core_in_use`），再由 Agent 激活格式 6（失败 `fallback_incompatible`）。面板拒绝将无用户内核节点更新到低于 1.9.0 的 Agent（`agent_version_unsupported`）。
+
+Linux Agent 更新时，仅有效本机更新授权允许 prepared→detached 退出交接，覆盖引导程序与受管 worker 两次切换；`handovercli` 协调更新事务，systemd/OpenRC post-stop 执行同一停核屏障。启动持有 lifecycle 锁，枚举固定三核目录（含禁用核），批量恢复私有端口及渲染输入，用新版本渲染并校验候选。配置、依赖、环境、核心镜像与账户归属全部一致才认领原 run/epoch/Revision；首采写原 spool 后写 adopted，并恢复 current/expected/history 与 renderedDigest。真实配置变化先建立旧统计上下文，再走全核发布。身份不明、损坏材料、部分认领失败只释放观察句柄，阻塞发布与监督恢复并保留在线控制面。认领及 Prepare 期间不触发 RestoreCore，认领后仍按单核恢复。普通 stop/restart、卸载、SIGINT、未授权 EOF 与非更新崩溃仍停核，遗留核心须先过停核屏障。pidfd 不可用或源/目标不支持协议时，明确提示后按停核更新；首次从旧 Agent 升级仍会断线。验收与未实测项见[交接设计 §9](core-handover-plan.md#9-实施与验收结果2026-11-22)。
 
 **隧道管理（v1.4）**：`tunnels/tunnel_hops` 表达 entry → [mid] → exit，GOST TLS＋mTLS；接收跳各有一个共享监听，每节点只有一个下一跳。两节点要求契约 ≥3，三节点 ≥4，当前 Agent 上报 4。`tunnel_rules` 将入口监听指向隧道或直接目标；直接规则优先 GOST，否则主 Xray/sing-box。linked 目标随目标地址/入站端口变化派生并标 needs_publish，出口等于目标时用 loopback；manual 固定目标。`tunnel_objects` 按 ID 归属生成入站，普通入站编辑/删除返回 managed_by_tunnel。`port_claims` 持久预留，保存草稿不部署，删除已发布对象须再发布移除。
 

@@ -23,29 +23,23 @@ const settleWindow = 2 * time.Second
 // process serves, and the failure is one fatal line plus exit status 1. The child
 // itself is therefore the semantic validator, and it has to survive the window with
 // its own TCP listeners answering and its UDP sockets bound.
-func settle(ctx context.Context, pid int, done chan error, configuration core.RenderedConfig, metricsSocket string, childLog func() string) error {
+func settle(ctx context.Context, handle core.ProcessHandle, configuration core.RenderedConfig, metricsSocket string, childLog func() (string, error)) error {
 	deadline := time.Now().Add(settleWindow)
 	var last error
 	for {
-		select {
-		case exit := <-done:
-			// Hand the exit back: the caller's reaper proves the exit from the same
-			// one-slot channel, and an emptied channel would read as an unconfirmed
-			// stop that blocks the rollback start.
-			done <- exit
-			reason := childLog()
-			if exit == nil {
-				exit = errors.New("exited during startup")
-			}
+		exit := handle.ExitObservation()
+		if exit.Exited || exit.Err != nil {
+			reason, logErr := childLog()
+			err := errors.Join(errors.New("gost exited during startup"), exit.Err, logErr)
 			if reason != "" {
-				return fmt.Errorf("gost %w: %s", exit, reason)
+				return fmt.Errorf("%w: %s", err, reason)
 			}
-			return fmt.Errorf("gost %w", exit)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+			return err
 		}
-		last = listenerHealth(configuration, pid)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		last = listenerHealth(configuration, handle.Identity().PID)
 		if last == nil {
 			if err := metricsReady(metricsSocket); err != nil {
 				last = err
@@ -63,7 +57,8 @@ func settle(ctx context.Context, pid int, done chan error, configuration core.Re
 		}
 	}
 	if last != nil {
-		reason := childLog()
+		reason, logErr := childLog()
+		last = errors.Join(last, logErr)
 		if reason != "" {
 			return fmt.Errorf("%w: %s", last, reason)
 		}
@@ -110,27 +105,30 @@ func metricsReady(path string) error {
 func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	result := core.HealthStatus{CheckedAt: time.Now().UTC()}
 	if a.process == nil {
+		return a.healthLocked(ctx, nil, 0)
+	}
+	if a.process.Detached() {
+		return core.HealthStatus{}, core.ErrProcessDetached
+	}
+	exit := a.process.ExitObservation()
+	return a.healthLocked(ctx, &exit, a.process.Identity().PID)
+}
+func (a *Adapter) healthLocked(ctx context.Context, exit *core.ExitObservation, pid int) (core.HealthStatus, error) {
+	result := core.HealthStatus{CheckedAt: time.Now().UTC()}
+	if exit == nil {
 		if err := a.lifecycleReadyLocked(); err != nil {
 			return result, err
 		}
 		return result, errors.New("core is not running")
 	}
-	select {
-	case exit := <-a.done:
-		a.process, a.done, a.stopPending = nil, nil, false
-		if err := a.runMarker().ConfirmExit(); err != nil {
-			return result, errors.Join(core.ErrCoreStopUnconfirmed, err)
-		}
-		// The child's own exit result is the only explanation of why it is gone.
-		if exit != nil {
-			return result, fmt.Errorf("core exited: %w", exit)
-		}
-		return result, errors.New("core exited")
-	default:
+	if exit.Exited {
+		return result, errors.Join(errors.New("core exited"), exit.Err, a.finishExitLocked())
 	}
-	if err := listenerHealth(a.current, a.process.Process.Pid); err != nil {
+	if exit.Err != nil {
+		return result, exit.Err
+	}
+	if err := listenerHealth(a.current, pid); err != nil {
 		return result, err
 	}
 	result.Healthy = true

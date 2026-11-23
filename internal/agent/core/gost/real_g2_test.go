@@ -40,7 +40,8 @@ func TestRealForwardPoolsFailoverAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
-			t.Fatalf("%+v %v %q", result, err, adapter.log.tail())
+			diagnostic, diagnosticErr := adapter.log.tail()
+			t.Fatalf("%+v %v %q %v", result, err, diagnostic, diagnosticErr)
 		}
 	}
 	first, stopFirst := taggedTarget(t, 'A')
@@ -206,7 +207,8 @@ func TestRealForwardRateLimitsAndNodeCounter(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
-		t.Fatalf("%+v %v %q", result, err, adapter.log.tail())
+		diagnostic, diagnosticErr := adapter.log.tail()
+		t.Fatalf("%+v %v %q %v", result, err, diagnostic, diagnosticErr)
 	}
 	// target to client: read the payload and measure the average rate.
 	started := time.Now()

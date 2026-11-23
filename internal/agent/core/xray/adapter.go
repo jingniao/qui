@@ -47,17 +47,20 @@ type Adapter struct {
 	Now                func() time.Time
 	Path, Directory    string
 	// RuleSets downloads the native rule set files; nil uses the defaults.
-	RuleSets       *rulesets.Fetcher
-	mu             sync.Mutex
-	process        *exec.Cmd
-	done           chan error
-	stopPending    bool
-	marker         core.RunMarker
-	current        core.RenderedConfig
-	accessTail     *accessLogTail
-	history        map[int64]core.RenderedConfig
-	probePorts     map[string]int
-	outboundHealth map[string]scheduler.Health
+	RuleSets         *rulesets.Fetcher
+	mu               sync.Mutex
+	process          core.ProcessHandle
+	stopPending      bool
+	marker           core.RunMarker
+	current          core.RenderedConfig
+	accessTail       *accessLogTail
+	runtimeMaterial  *core.RuntimeMaterial
+	handoverPrepared bool
+	detached         bool
+	adopting         bool
+	history          map[int64]core.RenderedConfig
+	probePorts       map[string]int
+	outboundHealth   map[string]scheduler.Health
 }
 
 func (a *Adapter) Name() string { return "xray" }
@@ -139,7 +142,12 @@ func (a *Adapter) Render(ctx context.Context, state desiredstate.State) (core.Re
 	if a.Ports != nil {
 		options.PrivatePorts = a.Ports.Ports()
 	}
-	return renderWithOptions(ctx, state, at, options)
+	rendered, err := renderWithOptions(ctx, state, at, options)
+	if err != nil {
+		return core.RenderedConfig{}, err
+	}
+	rendered.PrivatePorts = options.PrivatePorts
+	return rendered, nil
 }
 func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfig) error {
 	if err := os.MkdirAll(a.Directory, 0700); err != nil {
@@ -238,7 +246,9 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 		return core.ErrCoreStopUnconfirmed
 	}
 	// Release a tail of an earlier start that never launched a core.
-	a.closeAccessLogLocked()
+	if err := a.closeAccessLogLocked(); err != nil {
+		return err
+	}
 	if err := a.lifecycleReadyLocked(); err != nil {
 		return err
 	}
@@ -284,8 +294,8 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 	command.SysProcAttr = core.CoreProcessAttributes()
 	// Record the pending child before it exists so no start-window crash can
 	// leave an orphan core without a durable marker.
-	if err := a.runMarker().Claim(epoch, configuration.Revision); err != nil {
-		return err
+	if err := a.claimRuntimeLocked(ctx, configuration, epoch, absolute, command); err != nil {
+		return errors.Join(err, a.discardUnstartedRuntimeLocked())
 	}
 	command.Stdout = io.Discard
 	var accessSink io.Writer
@@ -303,49 +313,51 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 		tail, err := newAccessLogTail(configuration.AccessLogPath, accessSink, accessLogLimit)
 		if err != nil {
 			abandonErr := a.runMarker().Abandon()
-			return errors.Join(err, abandonErr)
+			return errors.Join(err, abandonErr, a.discardUnstartedRuntimeLocked())
 		}
 		a.accessTail = tail
 	}
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
-		a.closeAccessLogLocked()
+		tailErr := a.closeAccessLogLocked()
 		abandonErr := a.runMarker().Abandon()
-		return errors.Join(err, abandonErr)
+		return errors.Join(err, tailErr, abandonErr, a.discardUnstartedRuntimeLocked())
 	}
-	a.startedAt = time.Now()
-	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
-	// Bind the exact launched child's OS identity. Failure to record an
-	// authenticable identity keeps a marker that a later parent must treat as
-	// unknown rather than a clean exit.
+	a.startedAt = time.Now().UTC()
 	if err := a.runMarker().Bind(command.Process.Pid); err != nil {
+		// No handle owns Wait until Bind succeeds.
 		_ = command.Process.Kill()
+		done := make(chan error, 1)
+		go func() { done <- command.Wait() }()
 		if reapErr := core.ReapProcess(done, core.StopReapTimeout); reapErr != nil {
-			a.process = command
-			a.done = done
 			a.stopPending = true
 			return errors.Join(err, reapErr)
 		}
-		a.closeAccessLogLocked()
-		confirmErr := a.runMarker().ConfirmExit()
-		return errors.Join(err, confirmErr)
+		return errors.Join(err, a.finishExitLocked())
 	}
+	handle, err := core.NewChildProcessHandle(command, *a.marker.Run)
+	if err != nil {
+		killErr := command.Process.Kill()
+		done := make(chan error, 1)
+		go func() { done <- command.Wait() }()
+		if reapErr := core.ReapProcess(done, core.StopReapTimeout); reapErr != nil {
+			a.stopPending = true
+			return errors.Join(err, killErr, reapErr)
+		}
+		return errors.Join(err, a.finishExitLocked())
+	}
+	a.process, a.marker.Handle = handle, handle
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			if err := a.abortStartLocked(command, done); err != nil {
-				return err
-			}
-			return ctx.Err()
-		case err := <-done:
-			confirmErr := a.runMarker().ConfirmExit()
-			if err == nil {
-				err = errors.New("Xray stopped during startup")
-			}
-			return errors.Join(err, confirmErr)
-		default:
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, a.forceStopLocked())
+		}
+		exit := handle.ExitObservation()
+		if exit.Exited {
+			return errors.Join(errors.New("Xray stopped during startup"), exit.Err, a.finishExitLocked())
+		}
+		if exit.Err != nil {
+			return errors.Join(exit.Err, a.forceStopLocked())
 		}
 		healthy := true
 		for _, endpoint := range configuration.HealthEndpoints {
@@ -359,86 +371,58 @@ func (a *Adapter) start(ctx context.Context, configuration core.RenderedConfig) 
 		if healthy {
 			timer := time.NewTimer(150 * time.Millisecond)
 			select {
-			case err := <-done:
+			case <-handle.Done():
 				timer.Stop()
-				confirmErr := a.runMarker().ConfirmExit()
-				if err == nil {
-					err = errors.New("Xray stopped during health check")
-				}
-				return errors.Join(err, confirmErr)
+				return errors.Join(errors.New("Xray stopped during health check"), handle.ExitObservation().Err, a.finishExitLocked())
 			case <-ctx.Done():
 				timer.Stop()
-				if err := a.abortStartLocked(command, done); err != nil {
-					return err
-				}
-				return ctx.Err()
+				return errors.Join(ctx.Err(), a.forceStopLocked())
 			case <-timer.C:
 			}
-			a.process = command
-			a.done = done
 			for key := range a.outboundHealth {
 				if a.current.ProbeFingerprints[key] != configuration.ProbeFingerprints[key] {
 					delete(a.outboundHealth, key)
 				}
 			}
 			a.current = configuration
-			a.gateDigest = ""
-			a.gateRecovery = false
-			a.gateFailed = false
+			a.gateDigest, a.gateRecovery, a.gateFailed = "", false, false
 			a.statsEpoch = epoch
+			if err := a.activateRuntimeLocked(); err != nil {
+				return errors.Join(err, a.forceStopLocked())
+			}
+			if exit := handle.ExitObservation(); exit.Exited || exit.Err != nil {
+				return errors.Join(errors.New("Xray exited or observation failed while saving runtime material"), exit.Err, a.forceStopLocked())
+			}
 			return nil
 		}
 		timer := time.NewTimer(50 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			if err := a.abortStartLocked(command, done); err != nil {
-				return err
-			}
-			return ctx.Err()
+			return errors.Join(ctx.Err(), a.forceStopLocked())
 		case <-timer.C:
 		}
 	}
-	if err := a.abortStartLocked(command, done); err != nil {
-		return err
-	}
-	return errors.New("Xray health check timed out")
-}
-
-// abortStartLocked kills a child that failed to become healthy and waits, with a
-// bounded budget, for its exit to be observed. An unconfirmed exit retains the
-// exact process so no replacement can start for it.
-func (a *Adapter) abortStartLocked(command *exec.Cmd, done chan error) error {
-	_ = command.Process.Kill()
-	if err := core.ReapProcess(done, core.StopReapTimeout); err != nil {
-		a.process = command
-		a.done = done
-		a.stopPending = true
-		return err
-	}
-	a.closeAccessLogLocked()
-	return a.runMarker().ConfirmExit()
+	return errors.Join(errors.New("Xray health check timed out"), a.forceStopLocked())
 }
 func (a *Adapter) stop() error {
 	if a.process == nil {
-		a.closeAccessLogLocked()
-		return a.lifecycleReadyLocked()
+		return errors.Join(a.closeAccessLogLocked(), a.lifecycleReadyLocked())
 	}
-	select {
-	case <-a.done:
-		a.process = nil
-		a.done = nil
-		a.stopPending = false
-		a.closeAccessLogLocked()
-		return a.runMarker().ConfirmExit()
-	default:
+	if a.process.Detached() {
+		return core.ErrProcessDetached
+	}
+	if exit := a.process.ExitObservation(); exit.Exited {
+		return a.finishExitLocked()
+	} else if exit.Err != nil {
+		return exit.Err
 	}
 	if a.TrafficSink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := a.sampleTrafficLocked(ctx)
 		cancel()
 		if err != nil {
-			return errors.New("final traffic sample could not be persisted")
+			return fmt.Errorf("final traffic sample could not be persisted: %w", err)
 		}
 	}
 	if err := a.forceStopLocked(); err != nil {
@@ -461,29 +445,38 @@ func (a *Adapter) Close() error {
 	return err
 }
 func (a *Adapter) forceStopLocked() error {
+	a.handoverPrepared = false
 	if a.process == nil {
-		a.closeAccessLogLocked()
 		return a.lifecycleReadyLocked()
 	}
-	if err := a.process.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		// Killing failed for a reason other than the child already being gone, so
-		// its exit is unconfirmed. Keep the original child and the original Kill
-		// error, and mark the stop pending so callers refuse a replacement start
-		// and leave the accounting run unresolved.
+	ctx, cancel := context.WithTimeout(context.Background(), core.StopReapTimeout)
+	defer cancel()
+	if err := a.process.Stop(ctx); err != nil {
 		a.stopPending = true
 		return err
 	}
-	if err := core.ReapProcess(a.done, core.StopReapTimeout); err != nil {
-		// Keep the original child and mark the stop unconfirmed so callers refuse
-		// a replacement start and leave the accounting run unresolved.
-		a.stopPending = true
-		return err
+	return a.finishExitLocked()
+}
+
+// finishExitLocked clears runtime material only after the exact run exited.
+func (a *Adapter) finishExitLocked() error {
+	tailErr := a.closeAccessLogLocked()
+	if a.marker.Run == nil {
+		return errors.Join(tailErr, core.ErrCoreStopUnconfirmed)
+	}
+	run := *a.marker.Run
+	if err := a.recordRuntimeExitLocked(); err != nil {
+		return errors.Join(tailErr, err)
+	}
+	if err := a.removeRuntimeLocked(run); err != nil {
+		return errors.Join(tailErr, err)
+	}
+	if err := a.runMarker().ConfirmExit(); err != nil {
+		return errors.Join(tailErr, err)
 	}
 	a.process = nil
-	a.done = nil
 	a.stopPending = false
-	a.closeAccessLogLocked()
-	return a.runMarker().ConfirmExit()
+	return tailErr
 }
 
 // UnconfirmedStop reports that the last forced stop could not confirm the exact
@@ -513,32 +506,36 @@ func (a *Adapter) Rollback(ctx context.Context, revision int64) error {
 func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.process != nil {
+		if a.process.Detached() {
+			return core.HealthStatus{}, core.ErrProcessDetached
+		}
+		exit := a.process.ExitObservation()
+		return a.healthLocked(ctx, &exit)
+	}
+	return a.healthLocked(ctx, nil)
+}
+
+func (a *Adapter) healthLocked(ctx context.Context, exit *core.ExitObservation) (core.HealthStatus, error) {
 	result := core.HealthStatus{CheckedAt: time.Now().UTC()}
 	if a.gateRecovery {
 		return result, errors.New("routing recovery requires core restart")
 	}
-	if a.process == nil {
+	if exit == nil {
 		if err := a.lifecycleReadyLocked(); err != nil {
 			return result, err
 		}
 		return result, errors.New("core is not running")
 	}
-	select {
-	case exit := <-a.done:
-		a.process = nil
-		a.done = nil
-		a.stopPending = false
-		confirmErr := a.runMarker().ConfirmExit()
-		if confirmErr != nil {
-			return result, errors.Join(core.ErrCoreStopUnconfirmed, confirmErr)
-		}
-		// The child's own exit result is the only explanation of why it is
-		// gone.
-		if exit != nil {
-			return result, fmt.Errorf("core exited: %w", exit)
-		}
-		return result, errors.New("core exited")
-	default:
+	if exit.Exited {
+		cleanupErr := a.finishExitLocked()
+		return result, errors.Join(errors.New("core exited"), exit.Err, cleanupErr)
+	}
+	if exit.Err != nil {
+		return result, exit.Err
+	}
+	if err := a.tailErrorLocked(); err != nil {
+		return result, err
 	}
 	for _, endpoint := range a.current.HealthEndpoints {
 		connection, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", endpoint)
@@ -559,9 +556,16 @@ func (a *Adapter) Health(ctx context.Context) (core.HealthStatus, error) {
 func (a *Adapter) CollectStats(ctx context.Context) (core.StatsBatch, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if err := a.processErrorLocked(); err != nil {
+		return core.StatsBatch{}, err
+	}
 	if a.process == nil {
 		return core.StatsBatch{}, errors.New("core not running")
 	}
+	return a.collectStatsLocked(ctx)
+}
+
+func (a *Adapter) collectStatsLocked(ctx context.Context) (core.StatsBatch, error) {
 	counters, forwards, err := readSample(ctx, a.current, a.statsEpoch, &a.counterSources)
 	if err != nil {
 		return core.StatsBatch{}, err

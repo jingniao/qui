@@ -148,6 +148,22 @@ if $tuning_units && [[ $init_system == systemd && -f /etc/systemd/system/proxy-a
   fi
 fi
 # A failed stop is not a clean handoff: never delete the program underneath it.
+# A legacy Agent has neither handover authorizations nor detached cores: its own
+# unit kills the whole service cgroup and its cores carry Pdeathsig.
+core_handover=false
+if [[ $component == agent && -x $target ]]; then
+  core_protocol_status=0
+  qui_core_handover_protocol "$target" || core_protocol_status=$?
+  case $core_protocol_status in
+    0) core_handover=true;;
+    2) ;;
+    *) fail '核心交接能力探测失败，保留程序、配置和数据。';;
+  esac
+fi
+if $core_handover; then
+  qui_core_cli "$target" /etc/proxy-agent/config.yaml --core-handover-revoke-all --reason uninstall \
+    || fail '撤销核心交接授权失败，保留程序、配置和数据。'
+fi
 if [[ $init_system == systemd ]]; then
   systemctl stop "$name.service"
   [[ $(systemctl show "$name.service" -p ActiveState --value) == inactive ]] || fail 'Service did not stop cleanly.'
@@ -163,6 +179,10 @@ else
   # Leaving the default runlevel is idempotent: rc-update reports an error for a
   # service that is not in it, and that is not a failed uninstall.
   rc-update del "$name" default 2>/dev/null || true
+fi
+if $core_handover; then
+  qui_core_cli "$target" /etc/proxy-agent/config.yaml --finish-core-stop \
+    || fail '核心或 worker 退出未确认，中止卸载并保留现场。'
 fi
 if $host_network_units; then
   if [[ $init_system == systemd ]]; then

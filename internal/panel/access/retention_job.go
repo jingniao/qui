@@ -208,6 +208,7 @@ func (r *Repository) advanceRetentionBatch(ctx context.Context, now time.Time, o
 		},
 		{
 			{"account_traffic_samples", "observed_at<?", at.AddDate(0, 0, -policy.HourlyDays).Format("2006-01-02T15:04:05.000000000Z")},
+			{"account_traffic_minutes", "bucket<?", timestamp(at.AddDate(0, 0, -policy.HourlyDays))},
 		},
 	}
 	phase := phases[state.Phase]

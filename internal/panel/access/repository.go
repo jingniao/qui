@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/vault"
 	contract "proxycontrol/pkg/contracts/access"
 	"time"
@@ -43,6 +44,9 @@ func (r *Repository) Receipt(ctx context.Context, batch contract.Batch) (bool, e
 		return false, err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, batch.NodeID); err != nil {
+		return false, err
+	}
 	stored, _, err := r.accessReceiptTx(ctx, tx, batch.NodeID, batch.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -73,6 +77,9 @@ func (r *Repository) Ingest(ctx context.Context, batch contract.Batch, now time.
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, batch.NodeID); err != nil {
+		return err
+	}
 	previous, _, err := r.accessReceiptTx(ctx, tx, batch.NodeID, batch.ID)
 	if err == nil {
 		if previous != value {

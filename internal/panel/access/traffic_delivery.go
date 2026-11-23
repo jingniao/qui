@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/pkg/contracts/traffic"
 	"time"
 )
@@ -42,14 +43,14 @@ func (s *Service) NegotiateTrafficDelivery(ctx context.Context, node, queue, fin
 	if errors.Is(err, sql.ErrNoRows) {
 		// A consumed recovery code explicitly closes the prior live queue.
 		// The recovered host may retain that matching spool or start a new one.
-		var closed, recovery string
-		err = tx.QueryRowContext(ctx, "SELECT closed_at,recovery_id,completed_seq,confirmed_seq FROM traffic_delivery_queues WHERE node_id=? AND queue_id=?", node, queue).Scan(&closed, &recovery, &c, &a)
+		var closed, recovery, reset string
+		err = tx.QueryRowContext(ctx, "SELECT closed_at,recovery_id,completed_seq,confirmed_seq,reset_id FROM traffic_delivery_queues WHERE node_id=? AND queue_id=?", node, queue).Scan(&closed, &recovery, &c, &a, &reset)
 		if err == nil {
 			var latest string
 			if err = tx.QueryRowContext(ctx, "SELECT id FROM node_identity_recoveries WHERE node_id=? AND status='consumed' ORDER BY consumed_at DESC,created_at DESC,id DESC LIMIT 1", node).Scan(&latest); err != nil {
 				return err
 			}
-			if closed == "" || recovery != latest || int64(issued) < c || int64(confirmed) < a {
+			if reset != "" || closed == "" || recovery != latest || int64(issued) < c || int64(confirmed) < a {
 				return ErrTrafficDelivery
 			}
 			_, err = tx.ExecContext(ctx, "UPDATE traffic_delivery_queues SET closed_at='',recovery_id='',updated_at=? WHERE node_id=? AND queue_id=?", timestamp(time.Now()), node, queue)
@@ -58,7 +59,7 @@ func (s *Service) NegotiateTrafficDelivery(ctx context.Context, node, queue, fin
 				return ErrTrafficDelivery
 			}
 			var pending int
-			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM traffic_pending_batches WHERE node_id=? AND delivery_seq=0", node).Scan(&pending); err != nil {
+			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM traffic_pending_batches WHERE node_id=? AND delivery_seq=0 AND reset_id=''", node).Scan(&pending); err != nil {
 				return err
 			}
 			if pending > 0 {
@@ -95,6 +96,12 @@ func (s *Service) RequireTrafficProtocol(ctx context.Context, node string, suppo
 }
 
 func checkTrafficDeliveryTx(ctx context.Context, tx *sql.Tx, node string, d traffic.Delivery) error {
+	if err := agentidentity.CheckTx(ctx, tx, node); err != nil {
+		return err
+	}
+	if agentidentity.Pending(ctx) {
+		return nil
+	}
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -109,14 +116,15 @@ func checkTrafficDeliveryTx(ctx context.Context, tx *sql.Tx, node string, d traf
 		return nil
 	}
 	var retired int64
-	err := tx.QueryRowContext(ctx, "SELECT retired_seq FROM traffic_delivery_queues WHERE node_id=? AND queue_id=?", node, d.QueueID).Scan(&retired)
+	var reset string
+	err := tx.QueryRowContext(ctx, "SELECT retired_seq,reset_id FROM traffic_delivery_queues WHERE node_id=? AND queue_id=?", node, d.QueueID).Scan(&retired, &reset)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrTrafficDelivery
 	}
 	if err != nil {
 		return err
 	}
-	if d.Sequence <= retired {
+	if reset != "" || d.Sequence <= retired {
 		return ErrTrafficRetired
 	}
 	return nil
@@ -296,7 +304,12 @@ func (r *Repository) retireTrafficReceipts(ctx context.Context, now time.Time) (
 }
 
 func (r *Repository) AdvanceTrafficStorage(ctx context.Context, now time.Time) (bool, error) {
-	pending, err := r.compactCoreTraffic(ctx, now)
+	pending, err := r.compactTrafficMinutes(ctx, now)
+	if err == nil {
+		var more bool
+		more, err = r.compactCoreTraffic(ctx, now)
+		pending = pending || more
+	}
 	if err == nil {
 		var more bool
 		more, err = r.retireTrafficReceipts(ctx, now)

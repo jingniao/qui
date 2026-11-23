@@ -18,7 +18,7 @@ Description=Proxy Control: finish or roll back an interrupted qui-update
 ConditionPathExistsGlob=|/var/lib/proxycontrol-install/rollback.*/journal
 ConditionPathExistsGlob=|/var/lib/proxycontrol-install/web-handover.*
 After=local-fs.target
-Before=proxy-agent.service proxy-panel.service proxy-agent-host-network.service proxy-agent-host-network.path proxy-agent-tuning.service proxy-agent-tuning.path proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service
+Before=proxy-agent.service proxy-panel.service proxy-agent-state-reset.service proxy-agent-host-network.service proxy-agent-host-network.path proxy-agent-tuning.service proxy-agent-tuning.path proxy-agent-tuning-probe.service proxy-agent-tuning-probe-reset.service
 
 [Service]
 Type=oneshot

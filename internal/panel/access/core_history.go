@@ -39,6 +39,20 @@ func ReadNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to 
 
 func readNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to time.Time, nodeID string, hourly, useIndex bool) ([]NodeTrafficTotal, error) {
 	for _, boundary := range []time.Time{from, to} {
+		if !boundary.Equal(boundary.Truncate(time.Minute)) {
+			var count int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM core_traffic_minutes WHERE bucket=? AND (?='' OR node_id=?)`, timestamp(boundary.Truncate(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
+				return nil, err
+			}
+			if count == 0 {
+				if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM account_traffic_minutes WHERE bucket=? AND (?='' OR node_id=?)`, timestamp(boundary.Truncate(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
+					return nil, err
+				}
+			}
+			if count > 0 {
+				return nil, fmt.Errorf("%w; boundary %s must use whole UTC minute", ErrTrafficResolution, boundary.UTC().Format(time.RFC3339Nano))
+			}
+		}
 		if boundary.Equal(boundary.Truncate(time.Hour)) {
 			continue
 		}
@@ -64,8 +78,13 @@ func readNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to 
 		coarseTo = coarseTo.Truncate(time.Second).Add(time.Second)
 	}
 	coarseEnd := coarseTo.Format("2006-01-02T15:04:05")
-	args := []any{coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID}
-	source := `SELECT node_id,observed_at,upload_bytes,download_bytes,1 AS samples FROM node_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+	args := []any{coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID, coarseFrom, coarseEnd, nodeID, nodeID}
+	source := `SELECT node_id,observed_at,upload_bytes,download_bytes,1 AS samples FROM core_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM account_traffic_samples WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_samples.node_id AND n.epoch=account_traffic_samples.epoch||'.node')
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_minutes WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM account_traffic_minutes WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_minutes.node_id AND n.epoch=account_traffic_minutes.epoch||'.node')
  UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`
 	fullFrom, fullTo := from.UTC().Truncate(time.Hour), to.UTC().Truncate(time.Hour)
 	if !from.Equal(fullFrom) {
@@ -91,15 +110,39 @@ func readNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to 
 			source = `SELECT h.node_id,h.bucket AS observed_at,h.upload_bytes,h.download_bytes,h.samples FROM traffic_sample_hours h
  WHERE h.bucket>=? AND h.bucket<? AND (?='' OR h.node_id=?) AND h.samples>0
  AND (h.source='core' OR NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=h.node_id AND n.epoch=h.epoch||'.node'))
- UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM node_traffic_samples
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM core_traffic_samples
  WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
- UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM node_traffic_samples
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM account_traffic_samples
  WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+	 AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_samples.node_id AND n.epoch=account_traffic_samples.epoch||'.node')
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_minutes
+ WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM account_traffic_minutes
+ WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_minutes.node_id AND n.epoch=account_traffic_minutes.epoch||'.node')
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM core_traffic_samples
+ WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,observed_at,upload_bytes,download_bytes,1 FROM account_traffic_samples
+ WHERE observed_at>=? AND observed_at<? AND (?='' OR node_id=?)
+ AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_samples.node_id AND n.epoch=account_traffic_samples.epoch||'.node')
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_minutes
+ WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM account_traffic_minutes
+ WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)
+ AND NOT EXISTS(SELECT 1 FROM node_traffic_cursors n WHERE n.node_id=account_traffic_minutes.node_id AND n.epoch=account_traffic_minutes.epoch||'.node')
  UNION ALL SELECT node_id,bucket,upload_bytes,download_bytes,samples FROM core_traffic_hourly WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`
-			args = []any{timestamp(fullFrom), timestamp(fullTo), nodeID, nodeID,
+			args = []any{
+				timestamp(fullFrom), timestamp(fullTo), nodeID, nodeID,
+				coarseFrom, fullFrom.Format("2006-01-02T15:04:05"), nodeID, nodeID,
+				coarseFrom, fullFrom.Format("2006-01-02T15:04:05"), nodeID, nodeID,
+				coarseFrom, fullFrom.Format("2006-01-02T15:04:05"), nodeID, nodeID,
 				coarseFrom, fullFrom.Format("2006-01-02T15:04:05"), nodeID, nodeID,
 				fullTo.Format("2006-01-02T15:04:05"), coarseEnd, nodeID, nodeID,
-				coarseFrom, coarseEnd, nodeID, nodeID}
+				fullTo.Format("2006-01-02T15:04:05"), coarseEnd, nodeID, nodeID,
+				fullTo.Format("2006-01-02T15:04:05"), coarseEnd, nodeID, nodeID,
+				fullTo.Format("2006-01-02T15:04:05"), coarseEnd, nodeID, nodeID,
+				coarseFrom, coarseEnd, nodeID, nodeID,
+			}
 		}
 	}
 	// The indexed bounds already select whole seconds exactly. Only fractional
@@ -145,6 +188,10 @@ func (r *Repository) compactCoreTraffic(ctx context.Context, now time.Time) (boo
 		return false, err
 	}
 	defer tx.Rollback()
+	minuteMore, err := compactCoreMinutesToHoursTx(ctx, tx, now)
+	if err != nil {
+		return false, err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT rowid,node_id,core,substr(observed_at,1,13)||':00:00Z',upload_bytes,download_bytes FROM core_traffic_samples WHERE observed_at<? ORDER BY observed_at LIMIT 500`, now.Add(-7*24*time.Hour).UTC().Truncate(time.Hour).Format("2006-01-02T15:04:05"))
 	if err != nil {
 		return false, err
@@ -188,5 +235,50 @@ func (r *Repository) compactCoreTraffic(ctx context.Context, now time.Time) (boo
 	if _, err := tx.ExecContext(ctx, "UPDATE traffic_storage_job SET compacted_samples=compacted_samples+?,updated_at=? WHERE id=1", len(items), timestamp(now)); err != nil {
 		return false, err
 	}
-	return len(items) == 500, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return minuteMore || len(items) == 500, nil
+}
+
+func compactCoreMinutesToHoursTx(ctx context.Context, tx *sql.Tx, now time.Time) (bool, error) {
+	cutoff := timestamp(now.UTC().Add(-7 * 24 * time.Hour).Truncate(time.Hour))
+	rows, err := tx.QueryContext(ctx, `SELECT node_id,core,bucket,upload_bytes,download_bytes,samples FROM core_traffic_minutes WHERE bucket<? ORDER BY bucket,node_id,core LIMIT 500`, cutoff)
+	if err != nil {
+		return false, err
+	}
+	type minute struct {
+		node, core, bucket string
+		up, down, samples  int64
+	}
+	items := []minute{}
+	for rows.Next() {
+		var item minute
+		if err := rows.Scan(&item.node, &item.core, &item.bucket, &item.up, &item.down, &item.samples); err != nil {
+			rows.Close()
+			return false, err
+		}
+		items = append(items, item)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return false, err
+	}
+	for _, item := range items {
+		hour := item.bucket[:13] + ":00:00Z"
+		res, err := tx.ExecContext(ctx, `INSERT INTO core_traffic_hourly(node_id,core,bucket,upload_bytes,download_bytes,samples) VALUES(?,?,?,?,?,?)
+ON CONFLICT(node_id,core,bucket) DO UPDATE SET upload_bytes=upload_bytes+excluded.upload_bytes,download_bytes=download_bytes+excluded.download_bytes,samples=samples+excluded.samples
+WHERE upload_bytes<=? - excluded.upload_bytes AND download_bytes<=? - excluded.download_bytes AND samples<=? - excluded.samples`, item.node, item.core, hour, item.up, item.down, item.samples, math.MaxInt64, math.MaxInt64, math.MaxInt64)
+		if err != nil {
+			return false, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return false, err
+		} else if n != 1 {
+			return false, fmt.Errorf("core traffic hourly counter overflow")
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM core_traffic_minutes WHERE node_id=? AND core=? AND bucket=?`, item.node, item.core, item.bucket); err != nil {
+			return false, err
+		}
+	}
+	return len(items) == 500, nil
 }

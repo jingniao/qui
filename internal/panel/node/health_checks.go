@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/platform/httpapi"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"time"
 )
@@ -73,6 +74,9 @@ func (r *Repository) recordHealthCheck(ctx context.Context, nodeID string, resul
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	var revision int64
 	var phase, deadline, core string
 	if err := tx.QueryRowContext(ctx, "SELECT revision,status,deadline,core FROM node_health_checks WHERE id=? AND node_id=?", result.Id, nodeID).Scan(&revision, &phase, &deadline, &core); err != nil {

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"proxycontrol/internal/panel/connections"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/pki"
 	accesscontract "proxycontrol/pkg/contracts/access"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -220,6 +221,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		return status.Error(codes.Unauthenticated, "invalid node certificate")
 	}
 	fingerprint := pki.Fingerprint(cert)
+	ctx = agentidentity.WithIdentity(ctx, id, fingerprint)
 	if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
 		if c.Logger != nil {
 			attributes := []any{"node", id, "fingerprint", fingerprint}

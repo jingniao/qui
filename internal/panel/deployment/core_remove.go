@@ -14,6 +14,7 @@ import (
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
@@ -183,6 +184,9 @@ func (r *Repository) RemoveCoreResult(ctx context.Context, nodeID string, result
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	t, err := scanRemove(tx.QueryRowContext(ctx, "SELECT "+removeColumns+" FROM core_remove_tasks WHERE id=? AND node_id=?", result.Id, nodeID))
 	if err != nil {
 		return err

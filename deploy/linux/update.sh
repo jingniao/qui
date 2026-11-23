@@ -1618,6 +1618,7 @@ update_component() {
   printf '[%s] 启动 %s 并检查十秒内是否重启 ...\n' "$name" "$name"
   report_stage bootstrap_health
   if service_start "$name" && component_healthy; then
+    if [[ $component == agent && -f /etc/systemd/system/proxy-agent-state-reset.service ]]; then systemctl start --no-block proxy-agent-state-reset.service || fail '???? Agent ????????'; elif [[ $component == agent && -f /etc/init.d/proxy-agent-state-reset ]]; then rc-service proxy-agent-state-reset start || fail '???? Agent ????????'; fi
     service_stopped=false
     if ! journal_write committed; then
       if [[ $component == agent ]]; then

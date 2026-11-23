@@ -159,6 +159,9 @@ type controlClient struct{ stream *controlStream }
 func (c controlClient) Enroll(context.Context, *pb.EnrollRequest, ...grpc.CallOption) (*pb.EnrollResponse, error) {
 	return nil, errors.New("unused")
 }
+func (c controlClient) ResetLegacyState(context.Context, *pb.LegacyStateResetRequest, ...grpc.CallOption) (*pb.EnrollResponse, error) {
+	return nil, errors.New("unused")
+}
 func (c controlClient) Connect(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[pb.AgentMessage, pb.ServerMessage], error) {
 	return c.stream, nil
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
@@ -290,6 +291,9 @@ func (r *Repository) AgentSystemUpdateEvent(ctx context.Context, nodeID string, 
 		return nil, err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return nil, err
+	}
 	var qData, oldResult, oldProgress, oldDispatchError []byte
 	var ack release.AgentSystemUpdateAck
 	ack.AttemptID = attempt

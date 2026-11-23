@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"proxycontrol/internal/platform/httpapi"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/tcpprobe"
 	"strconv"
@@ -324,6 +325,9 @@ func (r *Repository) recordTCPProbe(ctx context.Context, node string, result *pb
 			return err
 		}
 		defer tx.Rollback()
+		if err := agentidentity.CheckTx(ctx, tx, node); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO node_latency_samples(node_id,target_id,at,sent,failed,median_ms) SELECT node_id,target_id,created_at,?,?,? FROM node_tcp_probes WHERE id=? AND status='queued' AND deadline>?", result.Attempted, result.Lost, result.MedianMs, result.Id, timestamp(time.Now().UTC()))
 		if err != nil {
 			return err
@@ -338,8 +342,18 @@ func (r *Repository) recordTCPProbe(ctx context.Context, node string, result *pb
 	if err != nil {
 		return err
 	}
-	_, err = r.Database.ExecContext(ctx, "UPDATE node_tcp_probes SET status='complete',result_json=? WHERE id=? AND node_id=? AND status='queued' AND deadline>?", string(data), result.Id, node, timestamp(time.Now().UTC()))
-	return err
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, node); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE node_tcp_probes SET status='complete',result_json=? WHERE id=? AND node_id=? AND status='queued' AND deadline>?", string(data), result.Id, node, timestamp(time.Now().UTC())); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // PanelReachability runs only on an explicit Owner request, never in /sub.

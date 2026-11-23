@@ -4,12 +4,21 @@ option go_package = "proxycontrol/pkg/contracts/agentpb";
 import "google/protobuf/timestamp.proto";
 
 service AgentControl {
+  rpc ResetLegacyState(LegacyStateResetRequest) returns (EnrollResponse);
   rpc Enroll(EnrollRequest) returns (EnrollResponse);
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
   rpc RenewCertificate(CertificateRequest) returns (CertificateRenewal);
   rpc ConfirmCATrust(CATrustConfirmation) returns (CATrustAcknowledgement);
   rpc PrepareNodeRootRetirement(NodeRootRetirementRequest) returns (NodeRootRetirementResponse);
   rpc ConfirmNodeRootRetirement(NodeRootRetirementConfirmation) returns (NodeRootRetirementAcknowledgement);
+}
+// A reset is bound to one installed node, old identity, new key and release.
+// Replays return the original result even after the old identity is retired.
+message LegacyStateResetRequest {
+  string reset_id = 1;
+  bytes csr_pem = 2;
+  string target_sha256 = 3;
+  string agent_version = 4;
 }
 message NodeRootRetirementConfirmation { string plan_digest = 1; bytes proof_json = 2; }
 message NodeRootRetirementAcknowledgement { string plan_digest = 1; string proof_digest = 2; string certificate_fingerprint = 3; google.protobuf.Timestamp confirmed_at = 4; }
@@ -33,8 +42,9 @@ message EnrollResponse {
   bytes certificate_pem = 2;
   bytes ca_pem = 3;
   google.protobuf.Timestamp expires_at = 4;
+  string state_reset_status = 5;
 }
-message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; bool multi_core_supported = 11; bool node_traffic_supported = 12; bool gost_core_supported = 13; bool traffic_retirement_supported = 14; string traffic_queue_id = 15; uint64 traffic_confirmed_seq = 16; uint64 traffic_issued_seq = 17; bool agent_system_update_supported = 18; string agent_system_update_error = 19; string agent_bootstrap_version = 20; }
+message Hello { uint64 last_acked_sequence = 1; string agent_version = 2; bool budget_retirement_supported = 3; bool core_update_supported = 4; bool agent_update_supported = 5; bool agent_recovery_supported = 6; bool health_check_supported = 7; bool core_restart_supported = 8; bool device_gate_supported = 9; bool tcp_probe_supported = 10; bool multi_core_supported = 11; bool node_traffic_supported = 12; bool gost_core_supported = 13; bool traffic_retirement_supported = 14; string traffic_queue_id = 15; uint64 traffic_confirmed_seq = 16; uint64 traffic_issued_seq = 17; bool agent_system_update_supported = 18; string agent_system_update_error = 19; string agent_bootstrap_version = 20; bool legacy_state_reset_pending = 21; }
 message ProtocolCapability { string protocol = 1; bool inbound = 2; bool outbound = 3; bool tcp = 4; bool udp = 5; }
 // SettingsCombination is one (protocol, direction, security, transport, flow)
 // combination a core declares it can apply (v1.4 M1 server settings contract).

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/id"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
@@ -275,6 +276,9 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	t, err := scanCoreTask(tx.QueryRowContext(ctx, "SELECT "+coreTaskColumns+" FROM core_update_tasks WHERE command_id=? AND node_id=?", result.ID, nodeID))
 	if err != nil {
 		return err

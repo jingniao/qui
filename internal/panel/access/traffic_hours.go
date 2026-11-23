@@ -54,7 +54,12 @@ func PrepareNodeTrafficHours(ctx context.Context, database *sql.DB, limit int) (
 		}
 		var up, down, samples int64
 		overflow := false
-		sourceRows, err := conn.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM `+table+` WHERE node_id=? AND epoch=? AND substr(observed_at,1,13)=?`, k.node, k.epoch, k.bucket[:13])
+		minuteTable := "core_traffic_minutes"
+		if k.source == "account" {
+			minuteTable = "account_traffic_minutes"
+		}
+		sourceRows, err := conn.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM `+table+` WHERE node_id=? AND epoch=? AND substr(observed_at,1,13)=?
+ UNION ALL SELECT upload_bytes,download_bytes FROM `+minuteTable+` WHERE node_id=? AND epoch=? AND substr(bucket,1,13)=?`, k.node, k.epoch, k.bucket[:13], k.node, k.epoch, k.bucket[:13])
 		if err != nil {
 			return false, err
 		}
@@ -116,5 +121,14 @@ func resetTrafficHoursTx(ctx context.Context, tx *sql.Tx) error {
  SELECT DISTINCT 'core',node_id,epoch,substr(observed_at,1,13)||':00:00Z',0 FROM core_traffic_samples;
  INSERT INTO traffic_sample_hours(source,node_id,epoch,bucket,ready)
  SELECT DISTINCT 'account',node_id,epoch,substr(observed_at,1,13)||':00:00Z',0 FROM account_traffic_samples;`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO traffic_sample_hours(source,node_id,epoch,bucket,ready)
+ SELECT DISTINCT 'core',node_id,epoch,substr(bucket,1,13)||':00:00Z',0 FROM core_traffic_minutes;
+ UPDATE traffic_sample_hours SET ready=0 WHERE source='core' AND EXISTS(SELECT 1 FROM core_traffic_minutes m WHERE m.node_id=traffic_sample_hours.node_id AND m.epoch=traffic_sample_hours.epoch AND substr(m.bucket,1,13)||':00:00Z'=traffic_sample_hours.bucket);
+ INSERT OR IGNORE INTO traffic_sample_hours(source,node_id,epoch,bucket,ready)
+ SELECT DISTINCT 'account',node_id,epoch,substr(bucket,1,13)||':00:00Z',0 FROM account_traffic_minutes;
+ UPDATE traffic_sample_hours SET ready=0 WHERE source='account' AND EXISTS(SELECT 1 FROM account_traffic_minutes m WHERE m.node_id=traffic_sample_hours.node_id AND m.epoch=traffic_sample_hours.epoch AND substr(m.bucket,1,13)||':00:00Z'=traffic_sample_hours.bucket);`)
 	return err
 }

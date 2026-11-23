@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AgentControl_ResetLegacyState_FullMethodName          = "/proxycontrol.agent.v1.AgentControl/ResetLegacyState"
 	AgentControl_Enroll_FullMethodName                    = "/proxycontrol.agent.v1.AgentControl/Enroll"
 	AgentControl_Connect_FullMethodName                   = "/proxycontrol.agent.v1.AgentControl/Connect"
 	AgentControl_RenewCertificate_FullMethodName          = "/proxycontrol.agent.v1.AgentControl/RenewCertificate"
@@ -31,6 +32,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AgentControlClient interface {
+	ResetLegacyState(ctx context.Context, in *LegacyStateResetRequest, opts ...grpc.CallOption) (*EnrollResponse, error)
 	Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error)
 	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMessage, ServerMessage], error)
 	RenewCertificate(ctx context.Context, in *CertificateRequest, opts ...grpc.CallOption) (*CertificateRenewal, error)
@@ -45,6 +47,16 @@ type agentControlClient struct {
 
 func NewAgentControlClient(cc grpc.ClientConnInterface) AgentControlClient {
 	return &agentControlClient{cc}
+}
+
+func (c *agentControlClient) ResetLegacyState(ctx context.Context, in *LegacyStateResetRequest, opts ...grpc.CallOption) (*EnrollResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnrollResponse)
+	err := c.cc.Invoke(ctx, AgentControl_ResetLegacyState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentControlClient) Enroll(ctx context.Context, in *EnrollRequest, opts ...grpc.CallOption) (*EnrollResponse, error) {
@@ -114,6 +126,7 @@ func (c *agentControlClient) ConfirmNodeRootRetirement(ctx context.Context, in *
 // All implementations must embed UnimplementedAgentControlServer
 // for forward compatibility.
 type AgentControlServer interface {
+	ResetLegacyState(context.Context, *LegacyStateResetRequest) (*EnrollResponse, error)
 	Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error)
 	Connect(grpc.BidiStreamingServer[AgentMessage, ServerMessage]) error
 	RenewCertificate(context.Context, *CertificateRequest) (*CertificateRenewal, error)
@@ -130,6 +143,9 @@ type AgentControlServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentControlServer struct{}
 
+func (UnimplementedAgentControlServer) ResetLegacyState(context.Context, *LegacyStateResetRequest) (*EnrollResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetLegacyState not implemented")
+}
 func (UnimplementedAgentControlServer) Enroll(context.Context, *EnrollRequest) (*EnrollResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Enroll not implemented")
 }
@@ -167,6 +183,24 @@ func RegisterAgentControlServer(s grpc.ServiceRegistrar, srv AgentControlServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AgentControl_ServiceDesc, srv)
+}
+
+func _AgentControl_ResetLegacyState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LegacyStateResetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).ResetLegacyState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_ResetLegacyState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).ResetLegacyState(ctx, req.(*LegacyStateResetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AgentControl_Enroll_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -273,6 +307,10 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "proxycontrol.agent.v1.AgentControl",
 	HandlerType: (*AgentControlServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ResetLegacyState",
+			Handler:    _AgentControl_ResetLegacyState_Handler,
+		},
 		{
 			MethodName: "Enroll",
 			Handler:    _AgentControl_Enroll_Handler,

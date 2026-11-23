@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"math"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
@@ -87,6 +88,12 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 				return trafficStageError("journal_unavailable", err)
 			}
 		}
+		if s.Repository.Vault != nil {
+			ctx, err = agentidentity.WithPending(ctx, batch)
+			if err != nil {
+				return err
+			}
+		}
 		if err := s.Repository.IngestTraffic(ctx, batch, now); err != nil {
 			return trafficStageError("statistics_pending", err)
 		}
@@ -123,6 +130,12 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 				return trafficStageError("journal_unavailable", err)
 			}
 		}
+		if s.Repository.Vault != nil {
+			ctx, err = agentidentity.WithPending(ctx, batch)
+			if err != nil {
+				return err
+			}
+		}
 		if err := recorder.ApplyTrafficWithStates(ctx, batch, states); err != nil {
 			return s.trafficAccountError(err)
 		}
@@ -130,6 +143,12 @@ func (s *Service) recordDecodedTraffic(ctx context.Context, batch traffic.Batch,
 		if accepted && s.Repository.Vault != nil {
 			if err := s.Repository.SavePendingTraffic(ctx, batch, now); err != nil {
 				return trafficStageError("journal_unavailable", err)
+			}
+		}
+		if s.Repository.Vault != nil {
+			ctx, err = agentidentity.WithPending(ctx, batch)
+			if err != nil {
+				return err
 			}
 		}
 		if err := s.Users.ApplyTraffic(ctx, batch); err != nil {

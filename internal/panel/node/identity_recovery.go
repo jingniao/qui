@@ -26,6 +26,23 @@ type Recovery struct {
 	ConsumedAt          string `json:"consumedAt,omitempty"`
 }
 
+type StateResetStatus struct {
+	State          string `json:"state"`
+	DiscardedUsage string `json:"discardedUsage"`
+	ResetID        string `json:"resetId,omitempty"`
+	UpdatedAt      string `json:"updatedAt,omitempty"`
+}
+
+func (r *Repository) StateResetStatus(ctx context.Context, nodeID string) (StateResetStatus, error) {
+	result := StateResetStatus{State: "not_needed", DiscardedUsage: "unknown"}
+	err := r.Database.QueryRowContext(ctx, `SELECT id,redeploy_state,created_at FROM node_identity_recoveries
+ WHERE node_id=? AND owner='legacy-state-reset' ORDER BY created_at DESC LIMIT 1`, nodeID).Scan(&result.ResetID, &result.State, &result.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	return result, err
+}
+
 func recoveryBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, error) {
 	items := []Blocker{}
 	queries := []struct{ kind, table, query string }{

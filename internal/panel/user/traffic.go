@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/traffic"
 )
@@ -28,6 +29,9 @@ func (r *Repository) applyTraffic(ctx context.Context, batch traffic.Batch, stat
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, batch.NodeID); err != nil {
+		return err
+	}
 	affected := []string{}
 	affectedSeen := map[string]bool{}
 	for _, counter := range batch.Counters {

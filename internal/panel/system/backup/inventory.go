@@ -28,6 +28,8 @@ type Totals struct {
 	CoreRemoveTasks           int64 `json:"coreRemoveTasks"`
 	NodeTrafficCursors        int64 `json:"nodeTrafficCursors"`
 	CoreTrafficSamples        int64 `json:"coreTrafficSamples"`
+	CoreTrafficMinutes        int64 `json:"coreTrafficMinutes,omitempty"`
+	AccountTrafficMinutes     int64 `json:"accountTrafficMinutes,omitempty"`
 	CanvasTunnels             int64 `json:"canvasTunnels"`
 	CanvasTunnelObjects       int64 `json:"canvasTunnelObjects"`
 	MetricSamples             int64 `json:"metricSamples"`
@@ -61,6 +63,7 @@ type Totals struct {
 	RunningBackupJobs         int64 `json:"runningBackupJobs"`
 	NodeIdentityRecoveries    int64 `json:"nodeIdentityRecoveries,omitempty"`
 	NodeIdentityRetirements   int64 `json:"nodeIdentityRetirements,omitempty"`
+	AgentStateResets          int64 `json:"agentStateResets,omitempty"`
 
 	// Machine traffic is durable host accounting, separate from proxy traffic.
 	MachineTrafficSettings int64 `json:"machineTrafficSettings"`
@@ -114,7 +117,7 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	for _, item := range []struct {
 		table string
 		count *int64
-	}{{"relay_cleanup_nodes", &result.Totals.RelayCleanupNodes}, {"canvas_entry_bindings", &result.Totals.CanvasEntryBindings}, {"client_policy_profiles", &result.Totals.ClientPolicyProfiles}, {"node_identity_recoveries", &result.Totals.NodeIdentityRecoveries}, {"node_identity_retirements", &result.Totals.NodeIdentityRetirements}, {"certificates", &result.Totals.Certificates}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_group_relays", &result.Totals.NodeGroupRelays}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}, {"notifications", &result.Totals.Notifications}, {"notification_channels", &result.Totals.NotificationChannels}} {
+	}{{"relay_cleanup_nodes", &result.Totals.RelayCleanupNodes}, {"canvas_entry_bindings", &result.Totals.CanvasEntryBindings}, {"client_policy_profiles", &result.Totals.ClientPolicyProfiles}, {"node_identity_recoveries", &result.Totals.NodeIdentityRecoveries}, {"node_identity_retirements", &result.Totals.NodeIdentityRetirements}, {"agent_state_resets", &result.Totals.AgentStateResets}, {"certificates", &result.Totals.Certificates}, {"tunnel_objects", &result.Totals.TunnelObjects}, {"tunnels", &result.Totals.Tunnels}, {"tunnel_hops", &result.Totals.TunnelHops}, {"tunnel_rules", &result.Totals.TunnelRules}, {"port_claims", &result.Totals.PortClaims}, {"core_remove_tasks", &result.Totals.CoreRemoveTasks}, {"node_traffic_cursors", &result.Totals.NodeTrafficCursors}, {"core_traffic_samples", &result.Totals.CoreTrafficSamples}, {"canvas_tunnels", &result.Totals.CanvasTunnels}, {"canvas_tunnel_objects", &result.Totals.CanvasTunnelObjects}, {"node_metric_samples", &result.Totals.MetricSamples}, {"node_tuning", &result.Totals.NodeTuning}, {"node_machine_traffic_settings", &result.Totals.MachineTrafficSettings}, {"node_machine_traffic_daily", &result.Totals.MachineTrafficDays}, {"node_machine_traffic_cursors", &result.Totals.MachineTrafficCursors}, {"node_group_servers", &result.Totals.NodeGroupServers}, {"node_group_inbounds", &result.Totals.NodeGroupInbounds}, {"node_group_imports", &result.Totals.NodeGroupImports}, {"node_group_relays", &result.Totals.NodeGroupRelays}, {"node_latency_targets", &result.Totals.NodeLatencyTargets}, {"node_latency_samples", &result.Totals.LatencySamples}, {"probe_targets", &result.Totals.ProbeTargets}, {"node_tcp_probes", &result.Totals.TCPProbes}, {"node_meta", &result.Totals.NodeMeta}, {"subscription_sources", &result.Totals.SubscriptionSources}, {"imported_proxies", &result.Totals.ImportedProxies}, {"user_source_grants", &result.Totals.SourceGrants}, {"notifications", &result.Totals.Notifications}, {"notification_channels", &result.Totals.NotificationChannels}} {
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM "+item.table).Scan(item.count); err != nil {
 			return Inventory{}, err
 		}
@@ -175,6 +178,18 @@ func ReadInventory(ctx context.Context, r Reader) (Inventory, error) {
 	if trafficStoragePresent > 0 {
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM core_traffic_hourly").Scan(&result.Totals.CoreTrafficHours); err != nil {
 			return result, err
+		}
+		var minuteTables int
+		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('core_traffic_minutes','account_traffic_minutes')").Scan(&minuteTables); err != nil {
+			return result, err
+		}
+		if minuteTables == 2 {
+			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM core_traffic_minutes").Scan(&result.Totals.CoreTrafficMinutes); err != nil {
+				return result, err
+			}
+			if err := r.QueryRowContext(ctx, "SELECT count(*) FROM account_traffic_minutes").Scan(&result.Totals.AccountTrafficMinutes); err != nil {
+				return result, err
+			}
 		}
 		if err := r.QueryRowContext(ctx, "SELECT count(*) FROM traffic_delivery_queues").Scan(&result.Totals.TrafficDeliveryQueues); err != nil {
 			return result, err

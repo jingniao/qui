@@ -121,45 +121,24 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, ErrNotFound)
 		return
 	}
-	step := latencyStepSeconds(hours)
 	sinceTime := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
-	since := timestamp(sinceTime)
-	lookback := timestamp(sinceTime.Add(-time.Minute))
-	cte := `WITH ordered AS (
-		SELECT *,
-			CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER) AS ts,
-			LAG(CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER)) OVER (ORDER BY at) AS prev_ts,
-			LAG(tcp_out_segs) OVER (ORDER BY at) AS prev_out,
-			LAG(tcp_retrans_segs) OVER (ORDER BY at) AS prev_retrans
-		FROM node_metric_samples
-		WHERE node_id=? AND at>=?
-	),
-	samples AS (
-		SELECT *,
-			CASE
-				WHEN prev_out IS NOT NULL AND prev_retrans IS NOT NULL
-					AND tcp_out_segs IS NOT NULL AND tcp_retrans_segs IS NOT NULL
-					AND ts - prev_ts = 60
-					AND tcp_out_segs > prev_out
-					AND tcp_retrans_segs >= prev_retrans
-				THEN CAST(tcp_retrans_segs - prev_retrans AS REAL) * 100.0 / CAST(tcp_out_segs - prev_out AS REAL)
-				ELSE NULL
-			END AS tcp_retrans_percent
-		FROM ordered
-		WHERE at>=?
-	)`
-	query := cte + " SELECT at," + metricColumns + ",tcp_retrans_percent,1 FROM samples ORDER BY at"
-	args := []any{n.ID, lookback, since}
-	if step > 60 {
-		avgs := []string{}
-		for _, col := range strings.Split(metricColumns, ",") {
-			avgs = append(avgs, "AVG("+col+")")
-		}
-		avgs = append(avgs, "AVG(tcp_retrans_percent)")
-		query = cte + ", bucketed AS (SELECT *,(ts/?)*? AS bucket FROM samples) SELECT strftime('%Y-%m-%dT%H:%M:%S',bucket,'unixepoch')||'.000000000Z'," + strings.Join(avgs, ",") + ",COUNT(*) FROM bucketed GROUP BY bucket ORDER BY bucket"
-		args = []any{n.ID, lookback, since, step, step}
+	tx, err := h.Repository.Database.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		h.fail(w, err)
+		return
 	}
-	rows, err := h.Repository.Database.QueryContext(r.Context(), query, args...)
+	defer tx.Rollback()
+	var coarse bool
+	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM node_metric_rollups WHERE node_id=? AND bucket>=?)`, n.ID, timestamp(sinceTime.Truncate(telemetryBucket))).Scan(&coarse); err != nil {
+		h.fail(w, err)
+		return
+	}
+	step := telemetryStepSeconds(hours, coarse)
+	if coarse && !sinceTime.Equal(sinceTime.Truncate(telemetryBucket)) {
+		sinceTime = sinceTime.Truncate(telemetryBucket).Add(telemetryBucket)
+	}
+	query, args := metricTierQuery(n.ID, sinceTime, step)
+	rows, err := tx.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -178,7 +157,11 @@ func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": 60, "points": points})
+	storageResolution := 60
+	if coarse {
+		storageResolution = 300
+	}
+	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": 60, "storageResolutionSeconds": storageResolution, "from": timestamp(sinceTime), "points": points})
 }
 
 type MetricSample struct {

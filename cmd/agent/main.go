@@ -35,6 +35,7 @@ var version = "dev"
 // the operator modes plus the supervisor, managed-worker and image-probe flags
 // the Agent self-update path itself invokes.
 type agentFlags struct {
+	reset                *stateResetFlags
 	handover             *handoverFlags
 	local                *localAgentFlags
 	path                 *string
@@ -60,6 +61,7 @@ type agentFlags struct {
 
 func registerFlags(set *flag.FlagSet) *agentFlags {
 	f := &agentFlags{}
+	f.reset = registerStateResetFlags(set)
 	f.handover = registerHandoverFlags(set)
 	f.local = registerLocalAgentFlags(set)
 	f.path = set.String("config", "", "YAML configuration file")
@@ -99,6 +101,9 @@ func run() error {
 }
 
 func execute(set *flag.FlagSet, f *agentFlags) (resultErr error) {
+	if handled, err := executeStateReset(set, f.reset, *f.path, version); handled {
+		return err
+	}
 	if handled, err := executeHandover(set, f.handover, *f.path); handled {
 		return err
 	}

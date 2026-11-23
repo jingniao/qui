@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/vault"
 	"proxycontrol/pkg/contracts/traffic"
 	"time"
@@ -87,6 +88,9 @@ func (r *Repository) CompletePendingTraffic(ctx context.Context, batch traffic.B
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, batch.NodeID); err != nil {
+		return err
+	}
 	material, err := readCurrentTrafficReceipt(ctx, tx, batch.NodeID, batch.ID)
 	if err != nil {
 		return err
@@ -249,7 +253,12 @@ func (s *Service) ResumePendingTraffic(ctx context.Context, now time.Time) error
 		code := "material_invalid"
 		if decodeErr == nil {
 			code = "accounting_pending"
-			decodeErr = s.recordDecodedTraffic(ctx, batch, true)
+			resumeCtx, resumeErr := agentidentity.WithPending(ctx, batch)
+			if resumeErr != nil {
+				decodeErr = resumeErr
+			} else {
+				decodeErr = s.recordDecodedTraffic(resumeCtx, batch, true)
+			}
 			var stageError *trafficProcessingError
 			if errors.As(decodeErr, &stageError) {
 				code = stageError.code

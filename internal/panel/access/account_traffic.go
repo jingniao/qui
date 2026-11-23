@@ -120,7 +120,7 @@ func (r *Repository) IngestTraffic(ctx context.Context, batch traffic.Batch, now
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_batches(node_id,batch_id,digest,received_at,queue_id,delivery_seq) VALUES(?,?,?,?,?,?)", batch.NodeID, batch.ID, digest, timestamp(now), batch.Delivery.QueueID, batch.Delivery.Sequence); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO traffic_batches(node_id,batch_id,digest,received_at,queue_id,delivery_seq,reset_id) VALUES(?,?,?,?,?,?,coalesce((SELECT reset_id FROM traffic_pending_batches WHERE node_id=? AND batch_id=?),''))", batch.NodeID, batch.ID, digest, timestamp(now), batch.Delivery.QueueID, batch.Delivery.Sequence, batch.NodeID, batch.ID); err != nil {
 		return err
 	}
 	return tx.Commit()

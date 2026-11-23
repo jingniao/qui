@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/subscription/availability"
+	"proxycontrol/internal/platform/agentidentity"
 	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/readtiming"
 	"proxycontrol/internal/platform/vault"
@@ -313,6 +314,9 @@ func (r *Repository) Result(ctx context.Context, nodeID string, result *pb.Apply
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	var previous, previousCode string
 	if err := tx.QueryRowContext(ctx, "SELECT status,result_code FROM deployment_targets WHERE revision=? AND node_id=?", result.Revision, nodeID).Scan(&previous, &previousCode); err != nil {
 		return err

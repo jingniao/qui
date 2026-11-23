@@ -96,6 +96,7 @@ func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
 	mux.Handle("POST /api/v1/nodes/{id}/revoke-certificate", h.Auth.Require(http.HandlerFunc(h.revoke), true))
 	mux.Handle("POST /api/v1/nodes/{id}/recovery-token", h.Auth.Require(http.HandlerFunc(h.issueRecovery), true))
 	mux.Handle("GET /api/v1/nodes/{id}/recovery-status", h.Auth.Require(http.HandlerFunc(h.recoveryStatus), true))
+	mux.Handle("GET /api/v1/nodes/{id}/state-reset-status", h.Auth.Require(http.HandlerFunc(h.stateResetStatus), true))
 	mux.Handle("DELETE /api/v1/nodes/{id}", h.Auth.Require(http.HandlerFunc(h.delete), true))
 }
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -332,6 +333,15 @@ func (h *Handler) issueRecovery(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) recoveryStatus(w http.ResponseWriter, r *http.Request) {
 	x, err := h.Repository.RecoveryStatus(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	httpapi.JSON(w, 200, x)
+}
+
+func (h *Handler) stateResetStatus(w http.ResponseWriter, r *http.Request) {
+	x, err := h.Repository.StateResetStatus(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.fail(w, err)
 		return

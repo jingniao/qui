@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"log/slog"
@@ -40,11 +41,17 @@ func (s *LatencyScheduler) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	maintenance := time.NewTicker(time.Second)
+	defer maintenance.Stop()
 	seen := map[string]bool{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case now := <-maintenance.C:
+			if _, err := s.Repository.CompactTelemetry(ctx, now.UTC()); err != nil && ctx.Err() == nil && s.Logger != nil {
+				s.Logger.Error("telemetry compaction failed", "error", err)
+			}
 		case now := <-ticker.C:
 			err := s.Repository.scheduleLatency(ctx, now.UTC())
 			if err != nil && ctx.Err() == nil && !seen[err.Error()] {
@@ -176,10 +183,26 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, ErrNotFound)
 		return
 	}
-	step := latencyStepSeconds(hours)
-	since := timestamp(time.Now().UTC().Add(-time.Duration(hours) * time.Hour))
-	rows, err := h.Repository.Database.QueryContext(r.Context(), `SELECT id,label,host,port FROM probe_targets t WHERE EXISTS(SELECT 1 FROM nodes n WHERE n.id=? AND `+strings.ReplaceAll(effectiveLatencyTarget, "?", "t.id")+`)
-  OR EXISTS(SELECT 1 FROM node_latency_samples s WHERE s.target_id=t.id AND s.node_id=? AND s.at>=?) ORDER BY label,id`, r.PathValue("id"), r.PathValue("id"), since)
+	sinceTime := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	tx, err := h.Repository.Database.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	defer tx.Rollback()
+	var coarse bool
+	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM node_latency_rollups WHERE node_id=? AND bucket>=?)`, n.ID, timestamp(sinceTime.Truncate(telemetryBucket))).Scan(&coarse); err != nil {
+		h.fail(w, err)
+		return
+	}
+	step := telemetryStepSeconds(hours, coarse)
+	if coarse && !sinceTime.Equal(sinceTime.Truncate(telemetryBucket)) {
+		sinceTime = sinceTime.Truncate(telemetryBucket).Add(telemetryBucket)
+	}
+	since := timestamp(sinceTime)
+	rows, err := tx.QueryContext(r.Context(), `SELECT id,label,host,port FROM probe_targets t WHERE EXISTS(SELECT 1 FROM nodes n WHERE n.id=? AND `+strings.ReplaceAll(effectiveLatencyTarget, "?", "t.id")+`)
+  OR EXISTS(SELECT 1 FROM node_latency_samples s WHERE s.target_id=t.id AND s.node_id=? AND s.at>=?)
+  OR EXISTS(SELECT 1 FROM node_latency_rollups s WHERE s.target_id=t.id AND s.node_id=? AND s.bucket>=?) ORDER BY label,id`, n.ID, n.ID, since, n.ID, since)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -205,7 +228,9 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 		item := latencySeries{TargetID: t.ID, Points: []latencyPoint{}}
 		query := "SELECT at,avg_ms,min_ms,max_ms,median_ms,sent,failed,1 FROM node_latency_samples WHERE node_id=? AND target_id=? AND at>=? ORDER BY at"
 		args := []any{r.PathValue("id"), t.ID, since}
-		if step > int(LatencyInterval/time.Second) {
+		if coarse {
+			query, args = latencyTierQuery(n.ID, t.ID, sinceTime, step)
+		} else if step > int(LatencyInterval/time.Second) {
 			// timestamp() stores fixed-width UTC nanoseconds. Strip fractions to
 			// prevent SQLite rounding a sample into the next second or bucket.
 			query = `WITH samples AS (
@@ -218,7 +243,7 @@ SELECT strftime('%Y-%m-%dT%H:%M:%S',bucket,'unixepoch')||'.000000000Z',
 FROM samples GROUP BY target_id,bucket ORDER BY bucket`
 			args = []any{step, step, r.PathValue("id"), t.ID, since}
 		}
-		rows, err = h.Repository.Database.QueryContext(r.Context(), query, args...)
+		rows, err = tx.QueryContext(r.Context(), query, args...)
 		if err != nil {
 			h.fail(w, err)
 			return
@@ -240,5 +265,9 @@ FROM samples GROUP BY target_id,bucket ORDER BY bucket`
 		}
 		series = append(series, item)
 	}
-	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": int(LatencyInterval / time.Second), "targets": targets, "series": series})
+	storageResolution := 60
+	if coarse {
+		storageResolution = 300
+	}
+	httpapi.JSON(w, 200, map[string]any{"intervalSeconds": step, "sampleSeconds": int(LatencyInterval / time.Second), "storageResolutionSeconds": storageResolution, "from": since, "targets": targets, "series": series})
 }

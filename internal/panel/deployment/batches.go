@@ -9,6 +9,7 @@ import (
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription/availability"
 	"proxycontrol/internal/platform/id"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 )
 
@@ -437,6 +438,9 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	var owner, previous string
 	var revision int64
 	if err := tx.QueryRowContext(ctx, "SELECT node_id,revision,status FROM deployment_commands WHERE id=?", result.CommandId).Scan(&owner, &revision, &previous); err != nil {

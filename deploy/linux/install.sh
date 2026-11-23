@@ -134,6 +134,8 @@ panel_update_service=/etc/systemd/system/proxy-panel-update.service
 panel_update_path=/etc/systemd/system/proxy-panel-update.path
 registry=/var/lib/proxycontrol-install
 record=$registry/$component.manifest
+legacy_reset_request=$registry/agent-state-reset/request
+legacy_reset_service=/usr/local/lib/proxycontrol/agent-state-reset
 removed=$registry/$component.removed
 core_target=''
 [[ -z $core ]] || core_target=/usr/local/lib/proxy-agent/$core
@@ -560,7 +562,7 @@ cleanup() {
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
   fi
   [[ $stage == "$registry"/staging.* ]] || return 1
-  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/tuning-probe" "$stage/tuning-probe-reset" "$stage/tuning-probe-digests" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id" "$stage/panel-database"
+  rm -f -- "$stage/program" "$stage/unit" "$stage/qui" "$stage/qui-update" "$stage/config" "$stage/config.new" "$stage/core" "$stage/core-xray" "$stage/core-sing-box" "$stage/core-gost" "$stage/SHA256SUMS" "$stage/archive" "$stage/asset.dgst" "$stage/installed-manifest" "$stage/host-network-service" "$stage/host-network-path" "$stage/tuning-service" "$stage/tuning-path" "$stage/tuning-probe" "$stage/tuning-probe-reset" "$stage/tuning-probe-digests" "$stage/service-library" "$stage/update-recovery" "$stage/update-recovery-service" "$stage/agent-state-reset" "$stage/agent-state-reset-service" "$stage/panel-update-request" "$stage/panel-update-service" "$stage/panel-update-path" "$stage/machine-id" "$stage/panel-database"
   if [[ -d $stage/extract ]]; then rm -rf -- "$stage/extract"; fi
   rmdir -- "$stage"
 }
@@ -611,6 +613,15 @@ install -o root -g root -m 0600 -- "$root/linux/update-recovery.sh" "$stage/upda
 [[ -f $root/linux/uninstall.sh && ! -L $root/linux/uninstall.sh ]] || fail 'Missing packaged uninstall script.'
 install -o root -g root -m 0600 -- "$root/linux/uninstall.sh" "$stage/uninstall"
 install -o root -g root -m 0600 -- "$packaged_recovery_service" "$stage/update-recovery-service"
+if [[ $component == agent ]]; then
+  [[ -f $root/linux/agent-state-reset.sh && ! -L $root/linux/agent-state-reset.sh ]] || fail 'Missing packaged Agent state reset script.'
+  install -o root -g root -m 0600 -- "$root/linux/agent-state-reset.sh" "$stage/agent-state-reset"
+  if [[ $init_system == systemd ]]; then
+    install -o root -g root -m 0600 -- "$service_directory/proxy-agent-state-reset.service" "$stage/agent-state-reset-service"
+  else
+    install -o root -g root -m 0600 -- "$service_directory/proxy-agent-state-reset" "$stage/agent-state-reset-service"
+  fi
+fi
 host_network_service_digest=''
 host_network_path_digest=''
 tuning_service_digest=''
@@ -842,6 +853,10 @@ fi
 # published together with them: the systemd unit (0644) or the OpenRC init script
 # (0755), which is the mode the component's own definition gets as well.
 publish "$stage/update-recovery-service" "$recovery_service" root root "$service_mode"
+if [[ $component == agent ]]; then
+  publish "$stage/agent-state-reset" /usr/local/lib/proxycontrol/agent-state-reset root root 0755
+  if [[ $init_system == systemd ]]; then publish "$stage/agent-state-reset-service" /etc/systemd/system/proxy-agent-state-reset.service root root 0644; else publish "$stage/agent-state-reset-service" /etc/init.d/proxy-agent-state-reset root root 0755; fi
+fi
 if [[ $component == panel ]]; then
   # The update bridge lives next to the recovery hook and is published the same way;
   # like the hook and the terminal menu it is not part of the install record. The unit
@@ -976,6 +991,12 @@ fi
 qui_write_record "$stage/installed-manifest"
 chmod 0600 "$stage/installed-manifest"
 publish "$stage/installed-manifest" "$record" root root 0600
+if [[ $component == agent && -n ${QUI_UPDATE:-} && -f $data/identity/client.crt && ! -e $legacy_reset_request ]]; then
+  install -d -o root -g root -m 0700 "${legacy_reset_request%/*}"
+  printf '%s\n' "$digest" > "$legacy_reset_request"
+  chmod 0600 "$legacy_reset_request"
+  if [[ $init_system == systemd && -f /etc/systemd/system/proxy-agent-state-reset.service ]]; then systemctl enable proxy-agent-state-reset.service || fail 'Cannot arm legacy Agent state reset.'; elif [[ $init_system == openrc && -f /etc/init.d/proxy-agent-state-reset ]]; then rc-update add proxy-agent-state-reset default || fail 'Cannot arm legacy Agent state reset.'; fi
+fi
 if [[ $component == panel ]]; then publish "$stage/panel-database" "$registry/panel.database" root root 0600; fi
 if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
 verify_binary "$target" "$digest"

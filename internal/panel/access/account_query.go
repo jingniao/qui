@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -38,9 +39,29 @@ func (r *Repository) AccountSummary(ctx context.Context, filter Filter) (Account
 		}
 		return result, nil
 	}
-	where, args := accountWhere(filter, filter.From.UTC().Format("2006-01-02T15:04:05.000000000Z"), filter.To.UTC().Format("2006-01-02T15:04:05.000000000Z"), "observed_at")
-	sampleTable := "account_traffic_samples"
-	err := r.Database.QueryRowContext(ctx, "SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),count(*) FROM "+sampleTable+where, args...).Scan(&result.UploadBytes, &result.DownloadBytes, &result.Observations)
+	from := filter.From.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	to := filter.To.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	for _, boundary := range []time.Time{filter.From, filter.To} {
+		if boundary.Equal(boundary.Truncate(time.Minute)) {
+			continue
+		}
+		minute := timestamp(boundary.Truncate(time.Minute))
+		var count int
+		where, args := accountWhere(filter, minute, timestamp(boundary.Truncate(time.Minute).Add(time.Minute)), "bucket")
+		if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM account_traffic_minutes"+where, args...).Scan(&count); err != nil {
+			return result, err
+		}
+		if count > 0 {
+			return result, fmt.Errorf("%w; boundary %s must use whole UTC minute", ErrTrafficResolution, boundary.UTC().Format(time.RFC3339Nano))
+		}
+	}
+	rawWhere, rawArgs := accountWhere(filter, from, to, "observed_at")
+	minuteWhere, minuteArgs := accountWhere(filter, from, to, "bucket")
+	args := append(rawArgs, minuteArgs...)
+	err := r.Database.QueryRowContext(ctx, `SELECT coalesce(sum(upload_bytes),0),coalesce(sum(download_bytes),0),coalesce(sum(samples),0) FROM (
+ SELECT upload_bytes,download_bytes,1 AS samples FROM account_traffic_samples`+rawWhere+`
+ UNION ALL SELECT upload_bytes,download_bytes,samples FROM account_traffic_minutes`+minuteWhere+`
+)`, args...).Scan(&result.UploadBytes, &result.DownloadBytes, &result.Observations)
 	return result, err
 }
 

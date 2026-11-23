@@ -58,7 +58,9 @@ func (r *Repository) StorageObservation(ctx context.Context) (StorageObservation
 		{"traffic_batches", "account_receipts", "confirmed_window"},
 		{"traffic_cursors", "account_cursors", "replay_protection"},
 		{"core_traffic_samples", "core_samples", "seven_days"},
+		{"core_traffic_minutes", "core_minutes", "seven_days"},
 		{"core_traffic_hourly", "core_hours", "long_term"},
+		{"account_traffic_minutes", "account_minutes", "policy"},
 	} {
 		item := StorageTableObservation{Kind: entry.kind, Retention: entry.retention}
 		// Never accept a table name from input; LIMIT caps the actual row scan.

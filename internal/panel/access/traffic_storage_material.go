@@ -26,7 +26,7 @@ func ValidateTrafficStorage(ctx context.Context, database *sql.DB) error {
 }
 
 func validateTrafficStorageTx(ctx context.Context, tx *sql.Tx, prefix string) error {
-	for _, query := range []string{
+	queries := []string{
 		"SELECT count(*) FROM " + prefix + "core_traffic_hourly WHERE core NOT IN ('xray','sing-box','gost') OR typeof(upload_bytes)<>'integer' OR upload_bytes<0 OR typeof(download_bytes)<>'integer' OR download_bytes<0 OR typeof(samples)<>'integer' OR samples<=0 OR bucket<>strftime('%Y-%m-%dT%H:00:00Z',bucket) OR julianday(bucket) IS NULL",
 		"SELECT count(*) FROM " + prefix + "traffic_delivery_queues WHERE queue_id='' OR length(queue_id)>128 OR typeof(completed_seq)<>'integer' OR completed_seq<0 OR typeof(confirmed_seq)<>'integer' OR confirmed_seq<0 OR confirmed_seq>completed_seq OR typeof(retired_seq)<>'integer' OR retired_seq<0 OR retired_seq>confirmed_seq OR typeof(candidate_seq)<>'integer' OR candidate_seq<retired_seq OR candidate_seq>confirmed_seq",
 		"SELECT count(*) FROM " + prefix + "traffic_delivery_queues q WHERE q.closed_at<>'' AND NOT EXISTS(SELECT 1 FROM " + prefix + "node_identity_recoveries r WHERE r.id=q.recovery_id AND r.node_id=q.node_id AND r.status='consumed' AND r.consumed_at=q.closed_at)",
@@ -35,7 +35,21 @@ func validateTrafficStorageTx(ctx context.Context, tx *sql.Tx, prefix string) er
 		"SELECT count(*) FROM " + prefix + "traffic_pending_batches p JOIN " + prefix + "traffic_batches b ON b.node_id=p.node_id AND b.batch_id=p.batch_id WHERE p.digest<>b.digest OR p.queue_id<>b.queue_id OR p.delivery_seq<>b.delivery_seq",
 		"SELECT count(*) FROM " + prefix + "traffic_delivery_queues q WHERE completed_seq-retired_seq<>(SELECT count(*) FROM " + prefix + "traffic_batches b WHERE b.node_id=q.node_id AND b.queue_id=q.queue_id AND b.delivery_seq>q.retired_seq AND b.delivery_seq<=q.completed_seq AND b.accounting_completed_at<>'')",
 		"SELECT count(*) FROM " + prefix + "traffic_storage_job WHERE id<>1 OR typeof(compacted_samples)<>'integer' OR compacted_samples<0 OR typeof(retired_receipts)<>'integer' OR retired_receipts<0 OR error_code NOT IN ('','traffic_storage_failed')",
-	} {
+	}
+	var minuteTables int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM "+prefix+"sqlite_master WHERE type='table' AND name IN ('core_traffic_minutes','account_traffic_minutes')").Scan(&minuteTables); err != nil {
+		return err
+	}
+	if minuteTables == 1 {
+		return ErrTrafficDelivery
+	}
+	if minuteTables == 2 {
+		queries = append(queries,
+			"SELECT count(*) FROM "+prefix+"core_traffic_minutes WHERE core NOT IN ('xray','sing-box','gost') OR upload_bytes<0 OR download_bytes<0 OR samples<=0 OR bucket<>strftime('%Y-%m-%dT%H:%M:00.000000000Z',bucket) OR julianday(bucket) IS NULL",
+			"SELECT count(*) FROM "+prefix+"account_traffic_minutes WHERE upload_bytes<0 OR download_bytes<0 OR samples<=0 OR bucket<>strftime('%Y-%m-%dT%H:%M:00.000000000Z',bucket) OR julianday(bucket) IS NULL",
+		)
+	}
+	for _, query := range queries {
 		var bad int64
 		if err := tx.QueryRowContext(ctx, query).Scan(&bad); err != nil {
 			return err

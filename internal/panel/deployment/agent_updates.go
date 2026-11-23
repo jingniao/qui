@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"proxycontrol/internal/platform/agentidentity"
 
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
@@ -104,6 +105,9 @@ func (r *Repository) AgentUpdateResult(ctx context.Context, nodeID string, paylo
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	var requestData, old []byte
 	var taskID string
 	if err := tx.QueryRowContext(ctx, "SELECT a.task_id,a.request_json,a.result_json FROM agent_update_attempts a JOIN agent_update_tasks t ON t.id=a.task_id WHERE a.command_id=? AND t.node_id=?", result.ID, nodeID).Scan(&taskID, &requestData, &old); err != nil {

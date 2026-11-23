@@ -23,7 +23,16 @@ func stripLatencySnapshot(ctx context.Context, path string) error {
 	}
 	defer database.Close()
 	database.SetMaxOpenConns(1)
-	for _, q := range []string{"PRAGMA secure_delete=ON", "DELETE FROM node_metric_samples", "DELETE FROM node_latency_samples", "DELETE FROM node_tcp_probes WHERE source='scheduled'", "VACUUM"} {
+	queries := []string{"PRAGMA secure_delete=ON", "DELETE FROM node_metric_samples", "DELETE FROM node_latency_samples", "DELETE FROM node_tcp_probes WHERE source='scheduled'"}
+	var tiered bool
+	if err = database.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='0162_telemetry_tiers.sql')`).Scan(&tiered); err != nil {
+		return err
+	}
+	if tiered {
+		queries = append(queries, "DELETE FROM node_metric_rollups", "DELETE FROM node_latency_rollups")
+	}
+	queries = append(queries, "VACUUM")
+	for _, q := range queries {
 		if _, err = database.ExecContext(ctx, q); err != nil {
 			return err
 		}

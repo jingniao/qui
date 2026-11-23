@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"proxycontrol/internal/platform/agentidentity"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/scheduler"
 	"time"
@@ -18,6 +19,9 @@ func (r *Repository) RecordHealth(ctx context.Context, nodeID string, batch *pb.
 		return err
 	}
 	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for _, item := range batch.Items {
 		if item == nil || item.CheckedAt == nil || item.CheckedAt.CheckValid() != nil || item.LatencyMs < 0 || item.LatencyMs > 60000 || seen[item.OutboundId] {

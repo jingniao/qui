@@ -1,0 +1,6 @@
+#!/sbin/openrc-run
+name="Proxy Control legacy Agent state reset"
+description="Discard and rebuild the old Agent state once"
+command=/usr/local/lib/proxycontrol/agent-state-reset
+command_background=no
+depend() { need localmount; before proxy-agent; }

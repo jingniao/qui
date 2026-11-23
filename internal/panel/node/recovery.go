@@ -7,6 +7,11 @@ import (
 )
 
 func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx, stamp string) error {
+	for _, table := range []string{"node_metric_rollups", "node_latency_rollups"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_metric_samples"); err != nil {
 		return err
 	}

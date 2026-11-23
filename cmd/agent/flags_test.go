@@ -73,6 +73,8 @@ func TestAgentFlagsAreExactlyTheSupportedSurface(t *testing.T) {
 		"renew-node-certificate",
 		"request",
 		"reserve-agent-bootstrap",
+		"reset-legacy-state",
+		"reset-target-sha256",
 		"rotate-node-key",
 		"scope",
 		"storage-contract",

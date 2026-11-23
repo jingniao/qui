@@ -18,6 +18,7 @@
           {{ node?.name || '服务器详情' }}
         </h1>
         <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" /><RelayCleanupBadge v-if="node" :node="node" />
+        <span v-if="stateReset && stateReset.state !== 'not_needed'" class="rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20 px-2 py-0.5 text-xs font-semibold shrink-0">旧数据清理：{{ stateResetLabel }}</span>
       </div>
     </div>
 
@@ -56,7 +57,7 @@
 import { invalidatesRead } from '../../../app/apiClient';
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
-import { nodeAPI, type NodeView } from '../api';
+import { nodeAPI, type NodeView, type StateResetStatus } from '../api';
 import { getNodeMeta, loadNodeMeta } from '../nodeMeta';
 import { useNodeRuntime } from '../useNodeRuntime';
 import { deploymentAPI, type Revision } from '../../system/deploymentApi';
@@ -86,6 +87,8 @@ import ServerDeleteDialog from '../components/ServerDeleteDialog.vue';
 
 const route = useRoute(), router = useRouter();
 const node = ref<NodeView | null>(null), error = ref(''), loading = ref(false), warnings = ref<string[]>([]);
+const stateReset = ref<StateResetStatus | null>(null);
+const stateResetLabel = computed(() => ({ pending: '待执行', queued: '排队中', running: '清理中', success: '已完成', failed: '失败', blocked: '受阻' } as Record<string, string>)[stateReset.value?.state || ''] || stateReset.value?.state || '');
 const revisions = ref<Revision[]>([]), now = ref(Date.now());
 const runtime = useNodeRuntime({ onInventoryChanged: () => { void refreshNode(true); } });
 const { statusNow, error: runtimeError } = runtime;
@@ -263,12 +266,14 @@ async function loadSupplements() {
         return fallback;
       }
     };
-    const [revisionResult] = await Promise.all([
+    const [revisionResult, , resetResult] = await Promise.all([
       isOwner.value ? optional('版本读取失败', deploymentAPI.nodeRevisions(id, 1, 20).then(result => result.items), revisions.value) : Promise.resolve([]),
-      optional('元数据读取失败', loadNodeMeta(id), null)
+      optional('元数据读取失败', loadNodeMeta(id), null),
+      isOwner.value ? optional('旧数据清理状态读取失败', nodeAPI.stateResetStatus(id), { state: 'not_needed', discardedUsage: 'unknown' } as StateResetStatus) : Promise.resolve(null)
     ]);
     if (current !== generation || ticket !== supplementGeneration) return;
     revisions.value = revisionResult;
+    stateReset.value = resetResult;
     revisionRefresh.value++;
     warnings.value = notices;
   } finally {

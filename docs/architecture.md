@@ -71,7 +71,7 @@ Agent 只执行固定操作（应用/回滚版本、重启核心、健康检查�
 
 ## 5. 数据模型
 
-SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头为 **`0163`**（`0163_traffic_minutes.sql`）；最新正式版 **v1.10.2** 迁移头为 **`0163`**；存储与生命周期见第 8.1 节。已应用迁移（`0152–0163`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
+SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`）。当前源码迁移头为 **`0163`**（`0163_traffic_minutes.sql`）；最新正式版 **v1.10.3** 迁移头为 **`0163`**；存储与生命周期见第 8.1 节。已应用迁移（`0152–0163`）的校验和由 `migrations/checksums_test.go` 固定，历史 `0001–0152` 校验和保存在 `internal/platform/db`，不允许修改历史迁移。
 
 | 分组 | 主要表 |
 | --- | --- |

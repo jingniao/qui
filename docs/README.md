@@ -1,6 +1,6 @@
 # 文档导航
 
-当前正式版为 **v1.10.2**（tag → `7a6add0`，迁移头 0163），兼容底线为 v1.7.5。本次未连接或升级生产；生产状态以[运维手册「当前生产环境」](operations.md#当前生产环境)为准，操作前须重新实机核实。
+当前正式版为 **v1.10.3**（tag → `c910e89`，迁移头 0163），兼容底线为 v1.7.5。本次未连接或升级生产；生产状态以[运维手册「当前生产环境」](operations.md#当前生产环境)为准，操作前须重新实机核实。
 
 ## 现行规则与操作
 
@@ -21,8 +21,9 @@
 
 | 目的 | 文档 |
 | --- | --- |
-| 当前正式版 v1.10.2 | [发布说明](releases/release-notes-1.10.2.md)（离线误报、Agent 升级重置及发布门禁） |
-| 上一正式版 v1.10.1 | [发布说明](releases/release-notes-1.10.1.md)（旧 Agent 状态换代、分层存储及发布门禁） |
+| 当前正式版 v1.10.3 | [发布说明](releases/release-notes-1.10.3.md)（面板更新磁盘优化、残留清理及发布证据） |
+| 上一正式版 v1.10.2 | [发布说明](releases/release-notes-1.10.2.md)（离线误报、Agent 升级重置及发布门禁） |
+| 历史正式版 v1.10.1 | [发布说明](releases/release-notes-1.10.1.md)（旧 Agent 状态换代、分层存储及发布门禁） |
 | 历史正式版 v1.10.0 | [发布说明](releases/release-notes-1.10.0.md)（Agent 核心交接、崩溃恢复、币种扩展及发布证据） |
 | 历史正式版 v1.9.0 | [发布说明](releases/release-notes-1.9.0.md)（可选内核节点、自动续费、实机验收与发布证据） |
 | 历史正式版 v1.8.0 | [发布说明](releases/release-notes-1.8.0.md)（独立出口探测、迁移、门禁与附件核验） |
@@ -30,6 +31,7 @@
 | 当前兼容基线 v1.7.5 | [发布说明](releases/release-notes-1.7.5.md)、[验证记录](v1.7.5-verification.md) |
 | 历次版本变更摘要 | [变更记录](changelog.md)（完整旧发布说明与验收日志留存于 Git 历史及 GitHub Releases） |
 | 核心设计不变式、防踩坑备忘与未验证边界 | [实施决定](implementation-decisions.md) |
+| 审查后续设计 | [节点存活判定提案](superpowers/specs/2026-11-23-node-liveness-design.md)（待决定）、[更新器渐进下沉](superpowers/specs/2026-11-23-updater-go-design.md)（B3 已选方案 B，后续按需实施） |
 | 原始底层探测与已发布设计、计划 | [归档索引](archive/README.md) |
 | 测试夹具生成与维护说明 | [身份 Write=2](../internal/agent/identity/testdata/generate_store/README.md)、[旧备份负向夹具](../internal/platform/server/testdata/generate_prerefactor/README.md) |
 | 第三方资源许可 | [DB-IP](../internal/panel/geoip/LICENSE-DB-IP.md)、[Twemoji 字体](../web/src/styles/fonts/LICENSE-TwemojiCountryFlags.md) |

@@ -1,7 +1,8 @@
 [Unit]
 Description=Proxy Control legacy Agent state reset
 After=local-fs.target proxycontrol-update-recovery.service
-Before=proxy-agent.service proxy-agent-host-network.service proxy-agent-tuning.service
+# This job waits for the updater locks. Agent/helper starts must remain runnable
+# while the updater validates the new worker, and while this job starts it again.
 ConditionPathExists=/var/lib/proxycontrol-install/agent-state-reset/request
 
 [Service]

@@ -10,7 +10,8 @@ import (
 )
 
 const telemetryBucket = 5 * time.Minute
-const telemetryBucketsPerPass = 64
+const telemetryBucketsPerPass = 8
+const telemetryMaintenanceBudget = 2 * time.Second
 
 var telemetryMetricColumns = strings.Split(metricColumns+",tcp_retrans_percent", ",")
 
@@ -39,13 +40,11 @@ type telemetryKey struct{ node, target, bucket string }
 
 // CompactTelemetry advances a bounded number of complete five-minute buckets.
 // Accounting never reads these display tables. The merge and raw deletion share
-// one write transaction, so an interruption cannot count a minute twice.
+// one transaction per bucket. Release the writer between buckets so heartbeats
+// can progress, and retain earlier commits if a later bucket fails.
 func (r *Repository) CompactTelemetry(ctx context.Context, now time.Time) (bool, error) {
-	tx, err := r.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
+	ctx, cancel := context.WithTimeout(ctx, telemetryMaintenanceBudget)
+	defer cancel()
 	expires := timestamp(now.UTC().Add(-7 * 24 * time.Hour))
 	changed := false
 	for _, table := range []string{"node_metric_samples", "node_latency_samples", "node_metric_rollups", "node_latency_rollups"} {
@@ -55,61 +54,70 @@ func (r *Repository) CompactTelemetry(ctx context.Context, now time.Time) (bool,
 			column = "bucket"
 			cutoff = timestamp(now.UTC().Add(-7 * 24 * time.Hour).Truncate(telemetryBucket))
 		}
-		result, e := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE rowid IN (SELECT rowid FROM `+table+` WHERE `+column+`<? LIMIT 500)`, cutoff)
+		result, e := r.Database.ExecContext(ctx, `DELETE FROM `+table+` WHERE rowid IN (SELECT rowid FROM `+table+` WHERE `+column+`<? LIMIT 500)`, cutoff)
 		if e != nil {
-			return false, e
+			return changed, e
 		}
 		n, e := result.RowsAffected()
 		if e != nil {
-			return false, e
+			return changed, e
 		}
 		changed = changed || n > 0
 	}
 	cutoff := timestamp(now.UTC().Add(-24 * time.Hour).Truncate(telemetryBucket))
 	for _, kind := range []string{"metric", "latency"} {
-		target := "''"
-		subTarget := "'' AS target_id"
-		if kind == "latency" {
-			target = "target_id"
-			subTarget = "target_id"
-		}
-		query := `SELECT node_id,` + target + `,strftime('%Y-%m-%dT%H:%M:%S',CAST(strftime('%s',substr(at,1,19)||'Z') AS INTEGER)/300*300,'unixepoch')||'.000000000Z' AS bucket FROM (SELECT node_id,` + subTarget + `,at FROM node_` + kind + `_samples WHERE at<? ORDER BY at LIMIT ?) GROUP BY node_id,` + target + `,bucket ORDER BY bucket,node_id LIMIT ?`
-		// A constant expression must not be interpreted as a GROUP BY ordinal.
-		if kind == "metric" {
-			query = strings.Replace(query, "GROUP BY node_id,'',bucket", "GROUP BY node_id,bucket", 1)
-		}
-		rows, e := tx.QueryContext(ctx, query, cutoff, telemetryBucketsPerPass*8, telemetryBucketsPerPass)
-		if e != nil {
-			return false, e
-		}
-		keys := []telemetryKey{}
-		for rows.Next() {
-			var k telemetryKey
-			if e = rows.Scan(&k.node, &k.target, &k.bucket); e != nil {
-				rows.Close()
-				return false, e
+		for i := 0; i < telemetryBucketsPerPass; i++ {
+			more, err := r.compactNextTelemetryBucket(ctx, kind, cutoff)
+			if err != nil {
+				return changed, err
 			}
-			keys = append(keys, k)
-		}
-		if e = errors.Join(rows.Err(), rows.Close()); e != nil {
-			return false, e
-		}
-		for _, k := range keys {
-			if kind == "metric" {
-				e = compactMetricBucket(ctx, tx, k)
-			} else {
-				e = compactLatencyBucket(ctx, tx, k)
+			if !more {
+				break
 			}
-			if e != nil {
-				return false, e
-			}
+			changed = true
 		}
-		changed = changed || len(keys) > 0
-	}
-	if err = tx.Commit(); err != nil {
-		return false, err
 	}
 	return changed, nil
+}
+
+func (r *Repository) compactNextTelemetryBucket(ctx context.Context, kind, cutoff string) (bool, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	target := "''"
+	if kind == "latency" {
+		target = "target_id"
+	}
+	var k telemetryKey
+	var at string
+	// The global time indexes select one oldest sample without sorting/grouping
+	// the backlog. The bucket lookup below uses the node/target primary key.
+	err = tx.QueryRowContext(ctx, `SELECT node_id,`+target+`,at FROM node_`+kind+`_samples WHERE at<? ORDER BY at LIMIT 1`, cutoff).Scan(&k.node, &k.target, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	observed, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return false, err
+	}
+	k.bucket = timestamp(observed.Truncate(telemetryBucket))
+	if kind == "metric" {
+		err = compactMetricBucket(ctx, tx, k)
+	} else {
+		err = compactLatencyBucket(ctx, tx, k)
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func compactMetricBucket(ctx context.Context, tx *sql.Tx, k telemetryKey) error {

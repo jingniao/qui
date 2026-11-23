@@ -41,7 +41,7 @@ func (s *LatencyScheduler) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	maintenance := time.NewTicker(time.Second)
+	maintenance := time.NewTicker(5 * time.Second)
 	defer maintenance.Stop()
 	seen := map[string]bool{}
 	for {

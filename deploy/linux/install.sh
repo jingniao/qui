@@ -1002,6 +1002,18 @@ if $reinstall; then rm -- "$removed"; sync -f -- "$registry"; fi
 verify_binary "$target" "$digest"
 publishing_started=false
 
+# Queue the reset after publication.
+# The running updater may predate this service. Start it asynchronously here;
+# its locks keep deletion behind the entire update/rollback transaction.
+if [[ $component == agent && -n ${QUI_UPDATE:-} && -f $legacy_reset_request ]]; then
+  if [[ $init_system == systemd ]]; then
+    systemctl start --no-block proxy-agent-state-reset.service
+  else
+    service_start proxy-agent-state-reset
+  fi
+fi
+# End reset scheduling.
+
 printf '%s installed at %s with unit %s.\n' "$name" "$target" "$unit"
 for core in "${cores[@]}"; do printf 'Core %s installed at /usr/local/lib/proxy-agent/%s.\n' "$core" "$core"; done
 # Both hints below are for a first install; qui-update starts the service itself.

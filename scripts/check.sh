@@ -273,6 +273,8 @@ fi
 # Replacement checks use temporary paths and service substitutes, never host services.
 bash -n -- deploy/linux/tests/agent-replace-test.sh
 bash deploy/linux/tests/agent-replace-test.sh
+bash -n -- deploy/linux/tests/agent-state-reset-test.sh
+bash deploy/linux/tests/agent-state-reset-test.sh
 bash -n -- deploy/linux/tests/tuning-module-uninstall-busy.sh
 bash deploy/linux/tests/tuning-module-uninstall-busy.sh
 # The argument-driven recovery fixture runs in TestTuningProbeLifecycle above.

@@ -3,11 +3,83 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestTelemetryCompactionCommitsBeforeLaterBucketFailure(t *testing.T) {
+	r, id := latencyFixture(t)
+	now := time.Now().UTC().Truncate(5 * time.Minute)
+	base := now.Add(-25 * time.Hour)
+	for i := 0; i < 2; i++ {
+		if _, err := r.Database.Exec(`INSERT INTO node_metric_samples(node_id,at,cpu_percent) VALUES(?,?,?)`, id, timestamp(base.Add(time.Duration(i)*5*time.Minute)), 10+i*20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.Database.Exec(`CREATE TRIGGER refuse_second_metric BEFORE INSERT ON node_metric_rollups WHEN NEW.bucket='` + timestamp(base.Add(5*time.Minute)) + `' BEGIN SELECT RAISE(ABORT,'second bucket refused'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CompactTelemetry(context.Background(), now); err == nil || !strings.Contains(err.Error(), "second bucket refused") {
+		t.Fatalf("expected original second-bucket error, got %v", err)
+	}
+	var raw, coarse int
+	if err := r.Database.QueryRow(`SELECT (SELECT count(*) FROM node_metric_samples),(SELECT count(*) FROM node_metric_rollups)`).Scan(&raw, &coarse); err != nil {
+		t.Fatal(err)
+	}
+	if raw != 1 || coarse != 1 {
+		t.Fatalf("earlier committed bucket lost: raw=%d coarse=%d", raw, coarse)
+	}
+	if _, err := r.Database.Exec(`DROP TRIGGER refuse_second_metric`); err != nil {
+		t.Fatal(err)
+	}
+	compactTelemetryForTest(t, r, now)
+	var samples int
+	var sum float64
+	if err := r.Database.QueryRow(`SELECT sum(samples),sum(cpu_percent_sum) FROM node_metric_rollups`).Scan(&samples, &sum); err != nil {
+		t.Fatal(err)
+	}
+	if samples != 2 || sum != 40 {
+		t.Fatalf("retry changed measurements: samples=%d sum=%v", samples, sum)
+	}
+}
+
+type telemetryLogWriter chan string
+
+func (w telemetryLogWriter) Write(p []byte) (int, error) {
+	w <- string(p)
+	return len(p), nil
+}
+
+func TestTelemetryMaintenanceBoundsWriterWait(t *testing.T) {
+	r, _ := latencyFixture(t)
+	conn, err := r.Database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	logs := make(telemetryLogWriter, 8)
+	s := &LatencyScheduler{Repository: r, Logger: slog.New(slog.NewJSONHandler(logs, nil))}
+	done := make(chan struct{})
+	go func() { defer close(done); s.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case line := <-logs:
+		if !strings.Contains(line, "telemetry compaction failed") || !strings.Contains(line, "context deadline exceeded") {
+			t.Fatalf("maintenance error was hidden: %s", line)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("maintenance consumed the scheduler lifetime")
+		}
+	case <-ctx.Done():
+		t.Fatal("monitoring maintenance held the writer without its own deadline")
+	}
+}
 
 func compactTelemetryForTest(t *testing.T, r *Repository, now time.Time) {
 	t.Helper()

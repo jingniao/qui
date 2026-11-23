@@ -2,5 +2,6 @@
 name="Proxy Control legacy Agent state reset"
 description="Discard and rebuild the old Agent state once"
 command=/usr/local/lib/proxycontrol/agent-state-reset
-command_background=no
-depend() { need localmount; before proxy-agent; }
+command_background=yes
+pidfile=/run/proxy-agent-state-reset.pid
+depend() { need localmount; }

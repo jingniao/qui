@@ -295,8 +295,8 @@ func stoppedDatabase(t *testing.T, path string) {
 func TestDatabaseCompatibilityCheckCreatesNoStateOrLocks(t *testing.T) {
 	root := t.TempDir()
 	c, path := panelConfig(t, filepath.Join(root, "data", "panel.db"), filepath.Join(root, "identity"))
-	// The inspected file lives outside the panel directories: only a private
-	// copy of it may ever be touched.
+	// The inspected file lives outside the panel directories: its contents
+	// must stay unchanged, and no panel runtime state may be created.
 	source := filepath.Join(t.TempDir(), "stopped.db")
 	stoppedDatabase(t, source)
 	before, err := os.ReadFile(source)

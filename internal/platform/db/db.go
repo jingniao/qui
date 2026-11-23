@@ -19,6 +19,10 @@ import (
 // panel relies on. Writes stay serialized because Open keeps a single
 // connection.
 func URI(path string) (string, error) {
+	return fileURI(path, "", []string{"foreign_keys(1)", "busy_timeout(5000)", "synchronous(NORMAL)"})
+}
+
+func fileURI(path, mode string, pragmas []string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -28,7 +32,10 @@ func URI(path string) (string, error) {
 		uriPath = "/" + uriPath
 	}
 	query := url.Values{}
-	for _, pragma := range []string{"foreign_keys(1)", "busy_timeout(5000)", "synchronous(NORMAL)"} {
+	if mode != "" {
+		query.Set("mode", mode)
+	}
+	for _, pragma := range pragmas {
 		query.Add("_pragma", pragma)
 	}
 	uri := url.URL{Scheme: "file", Path: uriPath, RawQuery: query.Encode()}

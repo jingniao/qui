@@ -19,7 +19,7 @@ func DisplayStatus(n Node, now time.Time) string {
 	}
 	heartbeat, err := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
 	age := now.Sub(heartbeat)
-	fresh := err == nil && age >= -5*time.Second && age < 45*time.Second
+	fresh := err == nil && age >= -5*time.Second && age < HeartbeatFreshness
 	if n.Status == "offline" || !fresh && n.Status != "error" {
 		if ConfirmedOffline(n.Status, n.LastHeartbeat, n.OfflineAfterSeconds, now) {
 			return "offline"
@@ -70,7 +70,7 @@ func ConfirmedOffline(status, lastHeartbeat string, offlineAfterSeconds int, now
 	heartbeat, err := time.Parse(time.RFC3339Nano, lastHeartbeat)
 	age := now.Sub(heartbeat)
 	valid := err == nil && age >= -5*time.Second
-	fresh := valid && age < 45*time.Second
+	fresh := valid && age < HeartbeatFreshness
 	if status != "offline" && (fresh || status == "error") {
 		return false
 	}

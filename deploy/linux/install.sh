@@ -537,14 +537,22 @@ publish() {
   temporary=${destination%/*}/.${destination##*/}.installing.$$
   publishing_temporary=$temporary
   if ! install -o "$owner" -g "$group" -m "$mode" -- "$source" "$temporary" \
-    || ! sync -f -- "$temporary" \
+    || ! sync -- "$temporary" \
     || ! mv -T -- "$temporary" "$destination"; then
     rm -f -- "$temporary"
     publishing_temporary=''
     return 1
   fi
   publishing_temporary=''
-  sync -f -- "${destination%/*}"
+  # Persist new directory entries too: first installation may have created
+  # several ancestors. Directory fsync does not flush unrelated file contents.
+  local directory=${destination%/*}
+  while :; do
+    sync -- "$directory" || return 1
+    [[ $directory != / ]] || break
+    directory=${directory%/*}
+    [[ -n $directory ]] || directory=/
+  done
 }
 
 stage=$(mktemp -d "$registry/staging.XXXXXXXX")

@@ -84,7 +84,7 @@ Linux 当前 UDP 健康通过端口占用推断（`internal/agent/core/udp_endpo
 
 ### 2.5 现行产品合同
 
-`docs/project-spec.md:402`、`docs/architecture.md:110` 规定普通发布重启全部核心，异常恢复只影响异常核；`project-spec.md:443` 规定巡检；`:387` 规定访问行清理。`docs/deployment.md:236` 规定停服后的快照/回滚，`:285`、`:293` 区分受管与完整网页更新。实施时需同步这些位置，本文阶段不改它们。
+`docs/project-spec.md:402`、`docs/architecture.md:110` 规定普通发布重启全部核心，异常恢复只影响异常核；`../project-spec.md:443` 规定巡检；`:387` 规定访问行清理。`docs/deployment.md:236` 规定停服后的快照/回滚，`:285`、`:293` 区分受管与完整网页更新。实施时需同步这些位置，本文阶段不改它们。
 
 ## 3. 生命周期、认领与各文件的修改设计
 

@@ -3,9 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
-	"net/url"
-	"path/filepath"
-	"strings"
+	"fmt"
 )
 
 // ReadPoolConnections is the number of connections in the read-only pool. The
@@ -21,26 +19,16 @@ const ReadPoolConnections = 4
 // The pool keeps up to two idle connections to reuse their SQLite setup across
 // reads. The owner must close it before replacing the database files.
 func OpenReadPool(ctx context.Context, path string, connections int) (*sql.DB, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-	uriPath := filepath.ToSlash(absolute)
-	if !strings.HasPrefix(uriPath, "/") {
-		uriPath = "/" + uriPath
-	}
-	query := url.Values{}
-	query.Set("mode", "ro")
-	for _, pragma := range []string{"foreign_keys(1)", "busy_timeout(5000)", "query_only(1)"} {
-		query.Add("_pragma", pragma)
-	}
-	uri := url.URL{Scheme: "file", Path: uriPath, RawQuery: query.Encode()}
-	database, err := sql.Open("sqlite", uri.String())
-	if err != nil {
-		return nil, err
-	}
 	if connections < 1 {
-		connections = 1
+		return nil, fmt.Errorf("read-only pool connections must be positive: %d", connections)
+	}
+	uri, err := fileURI(path, "ro", []string{"foreign_keys(1)", "busy_timeout(5000)", "query_only(1)"})
+	if err != nil {
+		return nil, err
+	}
+	database, err := sql.Open("sqlite", uri)
+	if err != nil {
+		return nil, err
 	}
 	database.SetMaxOpenConns(connections)
 	database.SetMaxIdleConns(min(2, connections))

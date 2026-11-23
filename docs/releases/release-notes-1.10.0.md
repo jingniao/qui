@@ -23,7 +23,7 @@ Alpine/OpenRC 的 GOST、Xray + GOST 受管节点，及 Debian 12 systemd-nspawn
 
 追加 OpenRC 验证：候选 1.9.103 的引导程序与 worker 更新保持 GOST PID 16927、长连接零错误；随后同时 SIGKILL 引导程序与 worker，旧核心退出并恢复为单份新进程 19351，恢复后真实回显通过。候选版本号和测试签名仅用于隔离验收，不属于正式发布。
 
-详细数据与修复记录见[交接实施记录](core-handover-plan.md#9-实施与验收结果2026-11-22)。systemd-nspawn 的伪造 boot_id 与服务命名空间不一致，需要在测试容器卸除伪造挂载后验证；LXC 未实测。sing-box 尚无真机交接节点，arm64 未做原生实机验收。
+详细数据与修复记录见[交接实施记录](../archive/core-handover-plan.md#9-实施与验收结果2026-11-22)。systemd-nspawn 的伪造 boot_id 与服务命名空间不一致，需要在测试容器卸除伪造挂载后验证；LXC 未实测。sing-box 尚无真机交接节点，arm64 未做原生实机验收。
 
 ## 门禁与发布证据
 

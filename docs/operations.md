@@ -4,11 +4,12 @@
 
 ## 当前生产环境
 
-Owner 于 2026-11-13 指定以下服务器为生产环境（实际变更前须先核实当前运行版本与备份状态）：
+**最近核实日期：未实时核实。** 主机与地址依据 Owner 于 **2026-11-13** 的指定记录（原 README 与本节）；原 AGENTS.md 引用的会话 [772](codeg://session/772) 只读记录面板 **1.7.5**、迁移头 **0158**，但现有文档未注明该次核实日期，不能用版本发布日期推定。上述均为历史记录，本轮未连接生产；生产操作前须重新实时核实运行版本、迁移头、节点与备份状态。
 
 | 项目 | 当前登记 |
 | --- | --- |
 | 服务器 / 面板地址 | `5.45.96.43`（德国 netcup） / `https://qui.lluu.de` |
+| 面板版本 / 迁移头（历史只读记录） | 1.7.5 / 0158（会话 772，核实日期未确认；未实时核实） |
 | 管理员登录 | 自定义地址不入文档；Owner 登录后在「系统设置」查看，忘记时用服务器 `qui` 菜单重置（需停面板），见[说明书 §27.18](project-spec.md#2718-系统设置管理员登录地址与门户字段v154) |
 | 用户门户 | `https://qui.lluu.de/` |
 
@@ -182,7 +183,7 @@ OpenRC 替换为 `rc-service proxy-agent-host-network status|restart` 与 `grep 
 
 ### Agent 核心交接排障
 
-目标版本 1.10.0 的 Linux 更新可经授权保留并认领核心，普通 stop/restart、卸载与非更新崩溃仍停核。`qui-update` 输出“核心交接已认领并提交”表示该次认领和更新提交成功；“核心未确认 detached”表示旧 Agent 未确认脱离，更新进入失败回滚，须保留快照与 helper 查看原因。源或目标不支持协议、pidfd 不可用时按停核更新并提示；第一次从旧 Agent 升级仍会断线。既有验收与未实测项见[交接设计 §9](core-handover-plan.md#9-实施与验收结果2026-11-22)。
+目标版本 1.10.0 的 Linux 更新可经授权保留并认领核心，普通 stop/restart、卸载与非更新崩溃仍停核。`qui-update` 输出“核心交接已认领并提交”表示该次认领和更新提交成功；“核心未确认 detached”表示旧 Agent 未确认脱离，更新进入失败回滚，须保留快照与 helper 查看原因。源或目标不支持协议、pidfd 不可用时按停核更新并提示；第一次从旧 Agent 升级仍会断线。既有验收与未实测项见[交接设计 §9](archive/core-handover-plan.md#9-实施与验收结果2026-11-22)。
 
 Agent 日志中的 `core handover not authorized ...`（含 worker 相关同类 WARN）表示授权被拒，查看 `error` 中的具体原因：`OS environment is incomplete` / `OS environment differs` 对应 host、boot、PID namespace 环境缺失或不一致；`node differs`、`source Agent ... is not ...`、`target Agent ... is not ...`、`transaction ... is not ...`、`scope ... is not ...` 分别对应节点、源 PID/启动 token、目标镜像摘要、事务与作用域不匹配。`core_handover_expired` 表示 300 秒授权窗口失效，或更新进程已退出、PID 启动 token 不符。引导与 worker 两次切换均须有匹配授权，不能靠残留回执继续保留核心。
 
@@ -199,6 +200,10 @@ Agent 日志中的 `core handover not authorized ...`（含 worker 相关同类 
 ### 面板网页更新
 
 「系统设置 → 系统信息 → 面板更新」由无特权面板写请求、root 单元执行（见[说明书 §27.15](project-spec.md#2715-系统管理面板网页更新)）：
+
+更新的备份、预检、快照与回滚流程见[部署与升级 §5「数据库备份与预检（面板）」「快照、健康检查与自动回滚」](deployment.md#5-升级)，网页入口与 root helper 步骤见[§5.4](deployment.md#54-面板网页更新)。磁盘本身很慢时，最终备份与完整性读取仍会耗时。
+
+首次由旧更新器升级到本版本且检查进程被 `kill -9` 时，备份目录可能残留 `.proxy-panel-check-*`，确认无更新运行后可手工删除。
 
 ```sh
 systemctl status proxy-panel-update.path proxy-panel-update.service

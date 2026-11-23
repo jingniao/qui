@@ -127,6 +127,8 @@ source_dir=''
 # Filled by take_snapshot and read by restore_snapshot and the success paths; empty
 # means no snapshot was taken, which is what keeps the EXIT trap out of it.
 snapshot=''
+# Private backup hardlinks used by preflight_backup; retained for signal cleanup.
+check_directory=''
 core_handover=false
 core_request=''
 core_target=''
@@ -605,9 +607,9 @@ copy_database_atomic() {
   partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
   partial_files+=("$partial")
   if ! read_database_source "$source" > "$partial" \
-    || ! sync -f -- "$partial" \
     || ! read_database_source "$source" | cmp -s -- - "$partial" \
-    || ! chown -h "$panel_account:$panel_account" "$partial" || ! chmod 0600 "$partial"; then
+    || ! chown -h "$panel_account:$panel_account" "$partial" || ! chmod 0600 "$partial" \
+    || ! sync -- "$partial"; then
     rm -f -- "$partial"
     exec {destination_fd}<&-
     printf '无法复制数据库：%s\n' "$source" >&2
@@ -617,9 +619,9 @@ copy_database_atomic() {
     wal_partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
     partial_files+=("$wal_partial")
     if ! read_database_source "$wal" > "$wal_partial" \
-      || ! sync -f -- "$wal_partial" \
       || ! read_database_source "$wal" | cmp -s -- - "$wal_partial" \
-      || ! chown -h "$panel_account:$panel_account" "$wal_partial" || ! chmod 0600 "$wal_partial"; then
+      || ! chown -h "$panel_account:$panel_account" "$wal_partial" || ! chmod 0600 "$wal_partial" \
+      || ! sync -- "$wal_partial"; then
       rm -f -- "$partial" "$wal_partial"
       exec {destination_fd}<&-
       printf '无法复制数据库日志：%s\n' "$wal" >&2
@@ -634,7 +636,7 @@ copy_database_atomic() {
   fi
   mv -T -- "$partial" "/proc/self/fd/$destination_fd/$name" || return 1
   partial_files=()
-  sync -f -- "/proc/self/fd/$destination_fd" || return 1
+  sync -- "/proc/self/fd/$destination_fd" || return 1
   exec {destination_fd}<&-
 }
 
@@ -895,12 +897,12 @@ journal_write() {
     fi
   } > "$temporary" || { rm -f -- "$temporary"; return 1; }
   if ! chmod 0600 -- "$temporary" \
-    || ! sync -f -- "$temporary" \
+    || ! sync -- "$temporary" \
     || ! mv -T -- "$temporary" "$snapshot/journal"; then
     rm -f -- "$temporary"
     return 1
   fi
-  sync -f -- "$snapshot"
+  sync -- "$snapshot"
 }
 
 # Read the journal of FILE into the journal_* locals of the caller (bash resolves those
@@ -1395,6 +1397,33 @@ preflight_database() {
   esac
 }
 
+# Check the backup through root-owned paths. copy_database_atomic already requires
+# the registry and backup directory to share a filesystem, so hardlinks work here.
+# Root never creates or removes anything inside the panel account's directory.
+preflight_backup() {
+  local backup=$1 status=0
+  if ! check_directory=$(mktemp -d "$registry/check.XXXXXXXX"); then
+    printf '无法创建数据库预检目录。\n' >&2
+    return 4
+  fi
+  if ! ln -P -- "$backup" "$check_directory/panel.db"; then
+    printf '无法为数据库预检创建主库硬链接：%s\n' "$backup" >&2
+    status=4
+  elif [[ -e $backup-wal || -L $backup-wal ]] \
+    && ! ln -P -- "$backup-wal" "$check_directory/panel.db-wal"; then
+    printf '无法为数据库预检创建 WAL 硬链接：%s\n' "$backup-wal" >&2
+    status=4
+  else
+    preflight_database "$check_directory/panel.db" || status=$?
+  fi
+  if ! rm -rf -- "$check_directory"; then
+    printf '无法删除数据库预检目录：%s\n' "$check_directory" >&2
+    return 4
+  fi
+  check_directory=''
+  return "$status"
+}
+
 # Stop the component, back up the panel database while it is stopped, snapshot the files
 # install.sh may replace, run the bundled install.sh, then start the service again when
 # it was active and check that the new version stays up for ten seconds. Every failure
@@ -1426,6 +1455,12 @@ update_component() {
   active_backup=''
   active_database_source=''
   if [[ $component == panel && -n $database_file ]]; then active_database_source=$database_file; fi
+  if [[ $component == panel ]]; then
+    # These files do not change while the panel serves requests. Prepare and
+    # persist them before downtime; the final database backup and prepared
+    # journal are deliberately still made after stop.
+    take_snapshot "$component" || fail "[$name] 无法在停服前保存回滚快照，服务未停止。"
+  fi
   if [[ $component == agent ]]; then
     prepare_core_handover "$binary" || fail '核心交接预检失败，服务未停止。'
     take_snapshot "$component" || fail '无法在停服前保存 Agent 回滚快照与新 helper。'
@@ -1458,6 +1493,8 @@ update_component() {
     if [[ $component == agent ]]; then
       rollback_component "$component" "$previous" "$was_active" '停止 Agent 失败' \
         || report_failure "$name" "$previous" "$backup"
+    else
+      dispose_snapshot || true
     fi
     fail "无法停止 $name，保留恢复材料。"
   fi
@@ -1487,6 +1524,7 @@ update_component() {
     if ! backup=$(backup_database "$previous"); then
       remove_database_partials
       restore_service_after_stop
+      dispose_snapshot || true
       fail "[$name] 数据库备份失败，更新没有开始。"
     fi
     active_backup=$backup
@@ -1497,7 +1535,7 @@ update_component() {
     # check and on the rollback, which restores the database as well.
     if [[ -z $database_file ]]; then
       status=0
-      preflight_database "$backup" || status=$?
+      preflight_backup "$backup" || status=$?
       case $status in
         0) ;;
         2) printf '[%s] 目标版本 %s 不支持数据库检查，跳过预检。\n' "$name" "$version";;
@@ -1506,18 +1544,15 @@ update_component() {
           # the copy is removed again instead of piling up with every refused attempt.
           rm -f -- "$backup" "$backup-wal"
           restore_service_after_stop
+          dispose_snapshot || true
           downgrade_guidance "$version"
           exit 1;;
         *)
           restore_service_after_stop
+          dispose_snapshot || true
           fail "[$name] 数据库无法用于这次更新，更新没有开始（备份保留在 $backup）。";;
       esac
     fi
-  fi
-  if [[ $component == panel ]] && ! take_snapshot "$component"; then
-    # Nothing has been replaced yet, so the host only needs its service back.
-    restore_service_after_stop
-    fail "[$name] 无法保存回滚快照，更新没有开始。"
   fi
   printf '[%s] 回滚快照：%s\n' "$name" "$snapshot"
   if [[ $component == panel ]] && ! journal_write prepared; then
@@ -1685,6 +1720,7 @@ on_signal() {
   fi
   # The private copy preflight_database runs, if the signal came during the check.
   rm -f -- "$registry"/.check-panel.* 2>/dev/null
+  [[ -z $check_directory ]] || rm -rf -- "$check_directory"
   if [[ -n $snapshot && -f $snapshot/journal ]]; then
     # A snapshot with a journal knows what was already replaced, so the one recovery
     # routine decides how much of the update has to be undone.
@@ -1724,6 +1760,15 @@ recover_interrupted_updates() {
   qui_core_handover_recover_web "$registry" interactive \
     || fail '中断的网页初始化停核未确认，保留现场并中止更新。'
   for pending in "$registry"/discard.*; do
+    [[ -e $pending || -L $pending ]] || continue
+    if [[ ! -d $pending || -L $pending ]]; then
+      printf '跳过无法识别的残留：%s\n' "$pending" >&2
+      continue
+    fi
+    rm -rf -- "$pending"
+  done
+  # A kill -9 or power loss during preflight can leave private backup hardlinks.
+  for pending in "$registry"/check.*; do
     [[ -e $pending || -L $pending ]] || continue
     if [[ ! -d $pending || -L $pending ]]; then
       printf '跳过无法识别的残留：%s\n' "$pending" >&2

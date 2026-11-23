@@ -86,7 +86,7 @@ func TestAccessLogTailFollowsTheCoreFile(t *testing.T) {
 	waitForEmptyAccessLog(t, path)
 	// A line the core is still writing stays in the file: the tail hands over
 	// complete lines only, so a handover checkpoint can never split a line
-	// (docs/core-handover-plan.md §4.3). The rest of the line completes it below.
+	// (docs/archive/core-handover-plan.md §4.3). The rest of the line completes it below.
 	appendAccessLog(t, path, "2026/10/17 11:33:31.135462 from tcp:127.0.0.1:63165 accepted tcp:[::1]:63157")
 	time.Sleep(300 * time.Millisecond)
 	if strings.Contains(sink.String(), "tcp:[::1]:63157") {

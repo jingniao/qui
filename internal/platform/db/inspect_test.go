@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -250,11 +251,50 @@ func TestInspectReadsWriteAheadLogSidecar(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	beforeDatabase := fingerprint(t, filepath.Join(copied, "panel.db"))
+	beforeWAL := fingerprint(t, filepath.Join(copied, "panel.db-wal"))
 	inspection := Inspect(ctx, filepath.Join(copied, "panel.db"), files)
 	if inspection.Verdict != VerdictCompatible {
 		t.Fatalf("verdict %s: %+v", inspection.Verdict, inspection)
 	}
 	if !reflect.DeepEqual(inspection.Applied, []string{"a.sql", "b.sql"}) {
 		t.Fatalf("applied %v", inspection.Applied)
+	}
+	if fingerprint(t, filepath.Join(copied, "panel.db")) != beforeDatabase || fingerprint(t, filepath.Join(copied, "panel.db-wal")) != beforeWAL {
+		t.Fatal("inspection changed the offline database or WAL")
+	}
+	entries, err := os.ReadDir(copied)
+	if err != nil || len(entries) != 2 {
+		t.Fatal("inspection changed the offline file set", entries, err)
+	}
+}
+
+func TestInspectNeedsNoTemporaryCopy(t *testing.T) {
+	files := migrationSet(map[string]string{"a.sql": "CREATE TABLE a(id INTEGER);"})
+	path := createDatabase(t, files)
+	missing := filepath.Join(t.TempDir(), "no-temporary-directory")
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, missing)
+	}
+	inspection := Inspect(context.Background(), path, files)
+	if inspection.Verdict != VerdictCompatible {
+		t.Fatalf("offline inspection required another database copy: %+v", inspection)
+	}
+}
+
+func TestInspectRefusesRollbackJournal(t *testing.T) {
+	files := migrationSet(map[string]string{"a.sql": "CREATE TABLE a(id INTEGER);"})
+	path := createDatabase(t, files)
+	journal := path + "-journal"
+	if err := os.WriteFile(journal, []byte("unrecovered rollback journal"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, path)
+	inspection := Inspect(context.Background(), path, files)
+	if inspection.Verdict != VerdictDamaged || !strings.Contains(inspection.Integrity, "rollback journal") {
+		t.Fatalf("unrecovered rollback journal was ignored: %+v", inspection)
+	}
+	if fingerprint(t, path) != before {
+		t.Fatal("inspection modified a database requiring recovery")
 	}
 }

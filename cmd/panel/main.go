@@ -82,7 +82,7 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 	passwordPath := flags.String("restore-password-file", "", "protected local file containing the backup password")
 	setOwner := flags.Bool("set-owner-credentials", false, "replace the Owner username and password of a stopped panel, reading two lines from stdin")
 	adminEntryAction := flags.String("admin-entry", "", "show or reset the admin login path of a stopped panel (show|reset)")
-	checkDatabase := flags.String("check-database", "", "report whether this binary can open a stopped panel database file (read-only, works on a private copy)")
+	checkDatabase := flags.String("check-database", "", "report whether this binary can open a stopped panel database file (read-only, requires a writable parent directory for a private WAL index)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -110,6 +110,9 @@ func runWithContext(ctx context.Context, args []string) (resultErr error) {
 		if !valid {
 			return errors.New("database compatibility check requires a file and no other flag")
 		}
+		// An SSH hangup must also let Inspect remove its private WAL index.
+		ctx, cancel := signal.NotifyContext(ctx, syscall.SIGHUP)
+		defer cancel()
 		return checkDatabaseFile(ctx, *checkDatabase)
 	}
 	installationRequested := false

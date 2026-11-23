@@ -12,8 +12,9 @@ import (
 	"io"
 	"time"
 
-	"proxycontrol/internal/platform/db"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/agentidentity"
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/release"
@@ -144,7 +145,7 @@ func systemNodeReady(ctx context.Context, tx *sql.Tx, nodeID string, revision in
 	var enabled, supported, connected bool
 	var actual int64
 	var reason string
-	if err := tx.QueryRowContext(ctx, `SELECT n.enabled,coalesce(c.agent_system_supported,0),coalesce(c.agent_system_error,''),s.revision,n.status IN ('online','degraded') AND n.last_heartbeat>=? FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id LEFT JOIN node_update_capabilities c ON c.node_id=n.id WHERE n.id=? AND coalesce(n.deleted_at,'')=''`, time.Now().UTC().Add(-45*time.Second).Format("2006-01-02T15:04:05.000000000Z"), nodeID).Scan(&enabled, &supported, &reason, &actual, &connected); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT n.enabled,coalesce(c.agent_system_supported,0),coalesce(c.agent_system_error,''),s.revision,n.status IN ('online','degraded') AND n.last_heartbeat>=? FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id LEFT JOIN node_update_capabilities c ON c.node_id=n.id WHERE n.id=? AND coalesce(n.deleted_at,'')=''`, node.FreshSince(time.Now()), nodeID).Scan(&enabled, &supported, &reason, &actual, &connected); err != nil {
 		return err
 	}
 	if !enabled || !connected {

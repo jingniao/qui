@@ -1,6 +1,6 @@
 # 部署与升级
 
-当前发布状态见[项目说明书](project-spec.md#当前状态)，日常运维见[运维手册](operations.md)。升级顺序为**先面板，再逐台 Agent**；升级前备份数据库与身份目录，跨迁移降级面板必须使用匹配的升级前数据库。当前基线只接受从 **v1.7.5** 或更新版本升级与恢复（数据库须含迁移 `0158`，见[v1.7.6 发布说明](release-notes-1.7.6.md)）；更低版本 Agent 在控制连接时被拒绝，须先在终端升级。
+当前发布状态见[项目说明书](project-spec.md#当前状态)，日常运维见[运维手册](operations.md)。升级顺序为**先面板，再逐台 Agent**；升级前备份数据库与身份目录，跨迁移降级面板必须使用匹配的升级前数据库。当前基线只接受从 **v1.7.5** 或更新版本升级与恢复（数据库须含迁移 `0158`，见[v1.7.6 发布说明](releases/release-notes-1.7.6.md)）；更低版本 Agent 在控制连接时被拒绝，须先在终端升级。
 
 核心来源显式参数为 `--core-source qui|official`：sing-box 默认 `qui`，使用同一 qui 发布内的静态构建（amd64/arm64、glibc/musl 共用各架构归档），仅在官方非 naive 标签基础上增加 `with_v2ray_api`，其逐用户流量计入额度；`official` 保留官方版本与 musl 专用归档及摘要。Xray 与 GOST（仅 linux/amd64，固定 3.3.2）保持官方来源。Linux/amd64 的 systemd 与 Alpine/OpenRC 已实机验证；arm64 不能沿用 amd64 结论。
 
@@ -234,8 +234,8 @@ qui-update --version 1.7.5 --bundle proxy-control-1.7.5-linux-amd64.tar.gz --sum
 
 - **下载与校验**：从 GitHub Releases 拉取归档与 `SHA256SUMS` 校验后调用归档内 `install.sh` 原地替换程序、单元与脚本，保留配置、身份与数据库。受管 Agent 同时验证官方 Ed25519 签名清单（见第 5.3 节）。
 - **顺序与组件隔离**：先面板，再逐台节点。同机同时装有面板与节点时，省略 `--component` 默认先节点后面板；指定 `--component panel|agent` 后版本检查、启停、快照与回滚仅作用于该组件（共享工具随本次更新快照/恢复；`--component agent` 不可与 `--database` 合用）。
-- **数据库备份与预检（面板）**：停服后以 `.partial` + fsync + 逐字节校验备份至 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`（0600），再用目标程序只读执行 `--check-database <备份>`；跨迁移降级未带匹配备份时直接中止并列出可用备份。
-- **快照、健康检查与自动回滚**：面板在停服后、`install.sh` 前快照；Agent 在停服前完成快照及交接准备（见下文）。可能替换的文件与运行中的 `qui-update`/`service.sh` 副本保存到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），阶段日志 `journal` 为 `prepared` → `started` → `committed`/`restored`。启动后须通过 10 秒 PID 不变的稳定检查才提交并清理快照；Agent 还须满足认领与实际 worker 摘要核对。失败自动回滚，面板保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。
+- **数据库备份与预检（面板）**：停服后以 `.partial` + fsync + 逐字节校验备份主库与 WAL 至 `/var/lib/proxy-panel/backups/pre-update-<旧版本>-<时间>.db`（0600）。更新器在 root 登记目录 `/var/lib/proxycontrol-install/check.XXXXXXXX/` 内建立备份硬链接，再用目标程序只读执行 `--check-database <check.XXXXXXXX/panel.db>`，不再复制整库，保留完整 `integrity_check` 与迁移校验；root 不在面板账号目录内创建或删除检查材料。检查目录及临时 WAL 索引在结束或信号中断后清除，`kill -9` 或断电遗留的 `check.*` 真实目录由下次更新清理，非目录或符号链接会被跳过并报告；准备或删除失败均拒绝更新。检查期间必须没有写入者；手工运行 `--check-database` 仍要求被检查文件父目录可写且支持硬链接，临时 WAL 索引在其下的 0700 私有目录内创建并清除，检查模式收到 SIGHUP 也会取消检查并清理私有索引，原备份文件集合与内容不变。跨迁移降级未带匹配备份时直接中止并列出可用备份。
+- **快照、健康检查与自动回滚**：面板在停服前准备并持久化程序快照，准备失败时服务继续运行，停服失败时丢弃快照；最终数据库备份与预检仍在停服后完成，成功后才写 `prepared`。Agent 在停服前完成快照及交接准备（见下文）。可能替换的文件与运行中的 `qui-update`/`service.sh` 副本保存到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），阶段日志 `journal` 为 `prepared` → `started` → `committed`/`restored`。启动后须通过 10 秒 PID 不变的稳定检查才提交并清理快照；Agent 还须满足认领与实际 worker 摘要核对。失败自动回滚，面板保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。原子文件发布采用文件及目录 fsync，递归快照保留整体同步。旧更新器仍按旧顺序执行，提前快照在新脚本安装后的下次更新生效；新目标程序的检查优化可在首次升级时生效。
 - **中断与开机恢复**：Ctrl-C / `SIGTERM` / `SIGHUP`（断线输出写 `/var/lib/proxycontrol-install/interrupted-update.log`）触发自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery`（在服务启动前运行，输出写 `update-recovery.log`）或下一次 `qui-update` 幂等完成恢复。互斥锁为 `/var/lib/proxycontrol-install/update.lock`。`pre-update-*` 与 `failed-update-*` 需确认无用后手工清理。
 
 **Agent 核心交接（目标版本 1.10.0）**：`qui-update` 先用 `--core-handover-protocol` 探测源、目标及实际受管 worker 的能力。源或目标不支持时明确提示“本次更新会中断连接”；pidfd 不可用时不交接，说明原因后按停核更新，不使用裸 PID 替代。第一次升级到本版本由旧 Agent 执行，仍会断线。

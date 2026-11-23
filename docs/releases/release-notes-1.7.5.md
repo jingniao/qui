@@ -1,6 +1,6 @@
 # v1.7.5 发布说明
 
-状态：已正式发布 v1.7.5（发布当时未部署生产；后续生产观察见[项目说明书](project-spec.md#当前状态)）。
+状态：已正式发布 v1.7.5（发布当时未部署生产；后续生产观察见[当前生产环境](../operations.md#当前生产环境)）。
 
 ## 内容
 
@@ -26,13 +26,13 @@
 
 Owner 仅允许现有测试和发布门禁。本次不新增测试方法、测试实体、mock 或独立实机验证场景。实际检查、首轮失败与发布附件核验见下文；未运行的场景不计为通过。
 
-详细首错与复验过程见[实施与验证记录](v1.7.5-verification.md)。
+详细首错与复验过程见[实施与验证记录](../v1.7.5-verification.md)。
 
 ## 发布验证与记录
 
 tag `v1.7.5` → `56698e459796216eb77acd4bae7a158952bb5527`。本地完整门禁 `GATE 56698e4 PASS total=813s`：常规竞态/构建/脚本 813 秒、真实核心 303 秒（221 项）。同 SHA [GitHub 44734104269](https://github.com/jingniao/qui/actions/runs/44734104269) 四个常规分片、汇总 check、官方/qui 真实核心与发布包试构建通过。核心任务首轮下载 sing-box HTTP 403，因缺核心跳过的检查被门禁拒绝；仅失败任务按发布手册单次复跑后通过，常规分片未重复运行。
 
-首候选缺少既有门户夹具的成功线路证明、新迁移摘要登记，第二候选发现安装输出捕获改变父子关系，均修正后使用新提交完整门禁。第二候选还出现 mihomo 端口占用和两处真实核心统计观察失败，最终同 SHA 完整门禁通过；具体瞬时原因未定，未修改这些断言。全部首错和修正见[实施与验证记录](v1.7.5-verification.md)。
+首候选缺少既有门户夹具的成功线路证明、新迁移摘要登记，第二候选发现安装输出捕获改变父子关系，均修正后使用新提交完整门禁。第二候选还出现 mihomo 端口占用和两处真实核心统计观察失败，最终同 SHA 完整门禁通过；具体瞬时原因未定，未修改这些断言。全部首错和修正见[实施与验证记录](../v1.7.5-verification.md)。
 
 [Release 工作流 44740940966](https://github.com/jingniao/qui/actions/runs/44740940966) 成功，于 **2026-11-20T13:12:54Z** [正式发布 v1.7.5](https://github.com/jingniao/qui/releases/tag/v1.7.5)。13 个附件已实际下载，大小、GitHub SHA-256 与 `SHA256SUMS` 的 10 项摘要通过；两个架构的 Agent 官方 Ed25519 清单签名有效，版本 1.7.5、序号 **1007005**，原始二进制与包内 Agent 一致。面板/Agent 的架构、版本与干净源码提交匹配，安装/更新脚本和新桥接服务文件与标签源码一致；qui sing-box 归档与来源证明的二进制摘要一致。
 
@@ -40,10 +40,10 @@ amd64 面板与 Agent 在隔离 Linux 测试机仅执行 `--version`，分别返
 
 ## 生产环境
 
-发布当时未部署生产，未修改生产配置（后续生产观察见[项目说明书](project-spec.md#当前状态)）。
+发布当时未部署生产，未修改生产配置（后续生产观察见[当前生产环境](../operations.md#当前生产环境)）。
 
 ## 设计与实施依据
 
-- [离线持续时间](implementation-decisions.md#2026-11-20-node-offline-duration)
-- [网页与终端 Agent 升级统一](implementation-decisions.md#2026-11-20-agent-terminal-web-update)
-- [订阅完整线路可用性](implementation-decisions.md#2026-11-20-subscription-route-availability)
+- [离线持续时间](../implementation-decisions.md#2026-11-20-node-offline-duration)
+- [网页与终端 Agent 升级统一](../implementation-decisions.md#2026-11-20-agent-terminal-web-update)
+- [订阅完整线路可用性](../implementation-decisions.md#2026-11-20-subscription-route-availability)

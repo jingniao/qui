@@ -21,11 +21,13 @@
 # Knobs the fake honours (exported per scenario, see fake_reset):
 #   FAKE_INIT            systemd | openrc            (default systemd)
 #   FAKE_INSTALL         ok | fail-after-replace | kill-parent | sleep | probe
-#   FAKE_CHECK           compatible | newer | foreign | unsupported
+#   FAKE_CHECK           compatible | newer | foreign | unsupported | term-updater
+#   FAKE_CHECK_LOG       file receiving the checked path and its directory entries
 #   FAKE_TARGET          version whose start migrates panel.db
 #   FAKE_START_WRITES=1  starting the panel with the target version migrates panel.db
 #   FAKE_START_KILL=1    ... and then kills the updater (power loss at "started")
 #   FAKE_STOP_SLEEP=1    stopping the panel takes three seconds
+#   FAKE_STOP_FAIL=1     stopping the panel fails and leaves it active
 #   FAKE_UNHEALTHY_VERSION  version whose service_healthy always fails
 #
 # QUI_UPDATE_TEST_ALLOW_SKIP=1 turns the "not root / not Linux" refusal into a skip
@@ -150,6 +152,7 @@ service_start() {
 service_stop() {
   local name=$1
   fake_log "stop $name"
+  if [[ $name == proxy-panel && ${FAKE_STOP_FAIL:-0} == 1 ]]; then return 1; fi
   # The stop has completed before the call returns, exactly like systemctl stop, which
   # returns once the process is gone; FAKE_STOP_SLEEP only makes the call itself slow,
   # so a signal sent meanwhile arrives after the service is already down.
@@ -401,11 +404,20 @@ fi
 case ${1:-} in
   --version) printf 'proxy-%s %s\n' "$component" "$version"; exit 0 ;;
   --check-database)
+    if [ -n "${FAKE_CHECK_LOG:-}" ]; then
+      printf '%s\n' "$2" > "$FAKE_CHECK_LOG" || exit 4
+      ls -A -- "${2%/*}" >> "$FAKE_CHECK_LOG" || exit 4
+    fi
     case ${FAKE_CHECK:-compatible} in
       compatible) printf 'database: compatible\n'; exit 0 ;;
       newer) printf 'database: written by a newer panel\n' >&2; exit 3 ;;
       foreign) printf 'database: not a panel database\n' >&2; exit 4 ;;
       unsupported) printf 'flag provided but not defined: -check-database\n' >&2; exit 1 ;;
+      term-updater)
+        # preflight_database names the executable .check-panel.<updater PID>.
+        kill -TERM "${0##*.}" || exit 4
+        sleep 3
+        exit 0 ;;
       *) printf 'fake program: unknown FAKE_CHECK\n' >&2; exit 4 ;;
     esac ;;
 esac
@@ -462,7 +474,8 @@ new_scenario() {
 # a subtle leak).
 fake_reset() {
   unset FAKE_INIT FAKE_INSTALL FAKE_CHECK FAKE_TARGET FAKE_START_WRITES \
-    FAKE_START_KILL FAKE_STOP_SLEEP FAKE_UNHEALTHY_VERSION FAKE_MULTI_CORE || true
+    FAKE_START_KILL FAKE_STOP_SLEEP FAKE_STOP_FAIL FAKE_CHECK_LOG \
+    FAKE_UNHEALTHY_VERSION FAKE_MULTI_CORE || true
   export FAKE_INSTALL=ok FAKE_CHECK=compatible
 }
 
@@ -623,6 +636,182 @@ make_bundle() {
   ( cd -- "$dir/bundle" \
     && printf '%s  %s\n' "$(sha256sum -- "$name.tar.gz" | cut -d' ' -f1)" "$name.tar.gz" \
       > SHA256SUMS )
+}
+
+# Snapshot and synchronization observations use the real updater functions and
+# isolated files; exported shell functions reach its child Bash process.
+scenario_34() {
+  new_scenario scenario-34
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  cp() {
+    local target=${@: -1}
+    if [[ $target == */rollback.*/files/* ]]; then
+      [[ -f $FAKE_STATE/active/proxy-panel ]] || return 71
+      if [[ ! -f $FAKE_STATE/snapshot-seen ]]; then
+        touch "$FAKE_STATE/snapshot-seen"
+        printf 'WRITTEN-WHILE-RUNNING\n' >> "$FAKE_PANEL_DB"
+      fi
+    fi
+    command cp "$@"
+  }
+  export -f cp
+  update_bundle 1.0.4
+  expect_status '在线准备程序快照后更新成功' 0 "$LAST_STATUS"
+  expect_exists '程序快照发生在停服前' "$FAKE_STATE/snapshot-seen"
+  expect_glob_exists '最终数据库备份存在' "$BACKUPS" 'pre-update-*.db'
+  if [[ -n $FOUND_GLOB ]]; then
+    expect_grep '最终备份包含准备快照期间写入' WRITTEN-WHILE-RUNNING "$FOUND_GLOB"
+    expect_same '最终备份与停服后数据库一致' "$FAKE_PANEL_DB" "$FOUND_GLOB"
+  fi
+  expect_no_glob '无遗留快照' "$REGISTRY" 'rollback.*'
+}
+
+scenario_35() {
+  new_scenario scenario-35
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  cp() {
+    [[ ${@: -1} != */rollback.*/files/* ]] || return 72
+    command cp "$@"
+  }
+  export -f cp
+  update_bundle 1.0.4
+  expect_status '程序快照失败拒绝更新' 1 "$LAST_STATUS"
+  expect_eq '快照失败不得停止面板' '' "$(grep '^stop proxy-panel' "$FAKE_STATE/calls.log" || true)"
+  expect_eq '旧面板仍运行' active "$(service_state_file panel)"
+  expect_eq '旧面板版本不变' 1.0.3 "$(program_version panel)"
+}
+
+scenario_36() {
+  new_scenario scenario-36
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  sync() {
+    printf '%s\n' "$*" >> "$FAKE_STATE/sync.log"
+    [[ ${@: -1} != *.partial ]] || return 73
+    command sync "$@"
+  }
+  export -f sync
+  update_bundle 1.0.4
+  expect_status '备份同步失败中止更新' 1 "$LAST_STATUS"
+  expect_eq '同步失败恢复旧服务' active "$(service_state_file panel)"
+  expect_eq '同步失败不替换程序' 1.0.3 "$(program_version panel)"
+  expect_same '原库不变' "$dir/original.db" "$FAKE_PANEL_DB"
+  expect_no_glob '无不完整备份' "$BACKUPS" 'pre-update-*'
+  expect_no_glob '无遗留快照' "$REGISTRY" 'rollback.*'
+}
+
+scenario_37() {
+  new_scenario scenario-37
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  sync() {
+    local target=${@: -1}
+    printf '%s\n' "$*" >> "$FAKE_STATE/sync.log"
+    if [[ $target == *.partial || $target == */.journal.tmp || $target == *.installing.* || $target == /proc/self/fd/* ]]; then
+      [[ $1 == -- ]] || return 74
+    fi
+    command sync "$@"
+  }
+  export -f sync
+  update_bundle 1.0.4
+  expect_status '原子发布只同步相关文件和目录' 0 "$LAST_STATUS"
+  expect_grep '备份目标目录同步' '-- /proc/self/fd/' "$FAKE_STATE/sync.log"
+  eval "$(sed -n '/^publish()/,/^}/p' "$repo_dir/deploy/linux/install.sh")"
+  mkdir -p -- "$dir/new-parent/new-child"
+  : > "$FAKE_STATE/sync.log"
+  local target=$dir/new-parent/new-child/published publishing_temporary='' status=0
+  publish "$FAKE_PANEL_DB" "$target" root root 0600 || status=$?
+  expect_status '实际安装器文件发布成功' 0 "$status"
+  expect_same '发布文件完整' "$FAKE_PANEL_DB" "$target"
+  expect_eq '新建发布目录的父目录持久化' 1 "$(grep -Fxc -- "-- $dir/new-parent" "$FAKE_STATE/sync.log" || true)"
+  expect_eq '发布目录祖先持久化' 1 "$(grep -Fxc -- "-- $dir" "$FAKE_STATE/sync.log" || true)"
+  sync() { return 75; }
+  status=0
+  publish "$FAKE_PANEL_DB" "$dir/must-not-publish" root root 0600 || status=$?
+  expect_status '安装器同步错误暴露' 1 "$status"
+  expect_absent '同步失败不发布文件' "$dir/must-not-publish"
+}
+
+# 38. A failed panel stop must discard the snapshot prepared before downtime.
+scenario_38() {
+  new_scenario scenario-38
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  export FAKE_STOP_FAIL=1
+  update_bundle 1.0.4
+  expect_status '停服失败拒绝更新' 1 "$LAST_STATUS"
+  expect_no_glob '停服失败无遗留快照' "$REGISTRY" 'rollback.*'
+  expect_eq '旧面板版本不变' 1.0.3 "$(program_version panel)"
+  expect_eq '旧面板仍运行' active "$(service_state_file panel)"
+}
+
+# 39. Check hardlinks live in the root registry, away from the backup directory.
+scenario_39() {
+  new_scenario scenario-39
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  printf 'OFFLINE-WAL\n' > "$FAKE_PANEL_DB-wal"
+  make_bundle 1.0.4
+  export FAKE_CHECK_LOG=$dir/check.log
+  update_bundle 1.0.4
+  expect_status '私有目录预检后更新成功' 0 "$LAST_STATUS"
+  local checked=''
+  if [[ -f $FAKE_CHECK_LOG ]]; then IFS= read -r checked < "$FAKE_CHECK_LOG"; fi
+  case $checked in
+    "$REGISTRY"/check.*/panel.db) ;;
+    *) fail_note "检查路径应位于 root 登记目录：$checked";;
+  esac
+  expect_grep '检查目录包含主库' 'panel.db' "$FAKE_CHECK_LOG"
+  expect_grep '检查目录包含 WAL' 'panel.db-wal' "$FAKE_CHECK_LOG"
+  expect_no_glob '检查后无私有目录' "$REGISTRY" 'check.*'
+  expect_no_glob '备份目录无隐藏条目' "$BACKUPS" '.[!.]*'
+  expect_no_glob '备份目录无双点开头条目' "$BACKUPS" '..?*'
+  expect_eq '面板已更新' 1.0.4 "$(program_version panel)"
+}
+
+# 40. The next update removes private check directories left by an untrappable exit.
+scenario_40() {
+  new_scenario scenario-40
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  mkdir -- "$REGISTRY/check.stale"
+  printf 'STALE\n' > "$REGISTRY/check.stale/panel.db"
+  update_bundle 1.0.4
+  expect_status '清理遗留预检目录后更新成功' 0 "$LAST_STATUS"
+  expect_no_glob '遗留预检目录已删除' "$REGISTRY" 'check.*'
+}
+
+# 41. The checker signals the updater, then waits so TERM arrives during preflight.
+scenario_41() {
+  new_scenario scenario-41
+  fake_reset
+  install_component panel 1.0.3
+  create_database
+  make_bundle 1.0.4
+  export FAKE_CHECK=term-updater
+  start_update_bg 1.0.4
+  await_update_bg
+  expect_status '预检期间 SIGTERM 退出 143' 143 "$LAST_STATUS"
+  expect_no_glob '中断后无私有预检目录' "$REGISTRY" 'check.*'
+  expect_no_glob '中断后无快照' "$REGISTRY" 'rollback.*'
+  expect_eq '旧面板恢复运行' active "$(service_state_file panel)"
+  expect_eq '旧面板版本不变' 1.0.3 "$(program_version panel)"
+  expect_same '原库不变' "$dir/original.db" "$FAKE_PANEL_DB"
 }
 
 # --- assertions ------------------------------------------------------------
@@ -1794,6 +1983,14 @@ run_scenario '30 owner private database downgrade' scenario_30
 run_scenario '31 database comparison errors' scenario_31
 run_scenario '32 large database early difference recovery' scenario_32
 run_scenario '33 Agent downgrade refused' scenario_33
+run_scenario '34 snapshot before stop and final database backup' scenario_34
+run_scenario '35 snapshot failure keeps panel running' scenario_35
+run_scenario '36 database fsync failure restores panel' scenario_36
+run_scenario '37 scoped fsync and actual installer publication' scenario_37
+run_scenario '38 panel stop failure disposes snapshot' scenario_38
+run_scenario '39 private backup preflight directory' scenario_39
+run_scenario '40 stale preflight directory cleanup' scenario_40
+run_scenario '41 SIGTERM during backup preflight' scenario_41
 run_scenario '1 success' scenario_1
 run_scenario '2 install fails after replacing' scenario_2
 run_scenario '3 unhealthy new version' scenario_3

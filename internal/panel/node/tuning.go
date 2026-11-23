@@ -139,7 +139,7 @@ func (h *Handler) tuning(w http.ResponseWriter, r *http.Request) {
 	// Recheck under the write transaction: disconnect/deletion may have raced
 	// the initial view read. Do not leave a new pending command on an offline node.
 	var available bool
-	if err = tx.QueryRowContext(r.Context(), "SELECT enabled=1 AND deleted_at IS NULL AND status IN ('online','degraded') AND last_heartbeat>? FROM nodes WHERE id=?", timestamp(time.Now().Add(-45*time.Second)), n.ID).Scan(&available); err != nil {
+	if err = tx.QueryRowContext(r.Context(), "SELECT enabled=1 AND deleted_at IS NULL AND status IN ('online','degraded') AND last_heartbeat>? FROM nodes WHERE id=?", FreshSince(time.Now()), n.ID).Scan(&available); err != nil {
 		h.fail(w, err)
 		return
 	}

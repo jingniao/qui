@@ -6,7 +6,7 @@
 
 当前正式版为 **v1.10.2**（tag → `7a6add0`，迁移头 **0163**）；上一正式版为 v1.10.1（tag → `9f529f2`，迁移头 0163）。v1.10.2 修复监控整合阻塞数据库写连接及 Agent 升级与旧状态重置循环等待；本轮未连接或升级生产；Release 见 https://github.com/jingniao/qui/releases/tag/v1.10.2。最低兼容版本为 **v1.7.5**，其有效面板数据与在途任务继续保留。
 
-生产环境为德国 netcup `5.45.96.43`，面板 `https://qui.lluu.de`（管理员登录入口不写入文档）。操作生产前须重新只读核实实际版本与节点状态；逐版本发布与部署记录见[变更记录](changelog.md)。
+生产状态见[运维手册「当前生产环境」](operations.md#当前生产环境)（管理员登录入口不写入文档）。生产操作前须重新实时核实实际版本与节点状态；逐版本发布与部署记录见[变更记录](changelog.md)。
 
 ## 1. 文档目的
 
@@ -386,7 +386,7 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 | 采样 / 上报 | 每 5 秒采样写 spool；心跳间隔 15 秒批量上传 |
 | Xray / sing-box 访问行 | Xray tail `runtime/xray/access.log`；sing-box 从核心日志提取访问行（Linux 为文件 tail）。Linux 两者约 100 ms 轮询，只交出完整行，半行留在文件直到补全，追平后清空；20 MiB 隐私截断记录结构化丢弃事实。Windows 保留原读取行为 |
 
-Linux Xray、sing-box、GOST 已接入更新时的核心交接：认领沿用原 epoch/Revision 和累计计数，恢复已见计数源集合，来源消失时报记账失败；Xray/sing-box 共享文件 tail 从原 inode/完整行 checkpoint 接读，错误阻止交接就绪。Prepare 经原 TrafficSink 持久化最终采样并保存 checkpoint，Xray 还须证明静态路由 gate-free；Detach 仅释放句柄与 tail，Close 仍停止核心。认领 attach 期间保留文件，20 MiB 隐私上限仍生效并记录丢弃；认领成功后恢复追平清理。更新空窗内允许访问日志在文件积压，访问记录允许少量重复或缺失，不承诺恰好一次。sing-box 来源映射不持久化，交接前已建立连接的来源标记为 unavailable，不阻塞交接。“不漏计”仅承诺正常存活交接；核心在空窗内死亡后无法取得的尾部流量只记本机结构化 WARN `core_traffic_tail_unavailable`，不估算、不补零，不新增面板告警。验收范围见[交接设计 §9](core-handover-plan.md#9-实施与验收结果2026-11-22)。
+Linux Xray、sing-box、GOST 已接入更新时的核心交接：认领沿用原 epoch/Revision 和累计计数，恢复已见计数源集合，来源消失时报记账失败；Xray/sing-box 共享文件 tail 从原 inode/完整行 checkpoint 接读，错误阻止交接就绪。Prepare 经原 TrafficSink 持久化最终采样并保存 checkpoint，Xray 还须证明静态路由 gate-free；Detach 仅释放句柄与 tail，Close 仍停止核心。认领 attach 期间保留文件，20 MiB 隐私上限仍生效并记录丢弃；认领成功后恢复追平清理。更新空窗内允许访问日志在文件积压，访问记录允许少量重复或缺失，不承诺恰好一次。sing-box 来源映射不持久化，交接前已建立连接的来源标记为 unavailable，不阻塞交接。“不漏计”仅承诺正常存活交接；核心在空窗内死亡后无法取得的尾部流量只记本机结构化 WARN `core_traffic_tail_unavailable`，不估算、不补零，不新增面板告警。验收范围见[交接设计 §9](archive/core-handover-plan.md#9-实施与验收结果2026-11-22)。
 
 断线缓存、重连补传、Ack 后删；满时先淘汰最旧允许记录、保留阻断与流量。同一流量或访问批次连续被面板拒绝 3 次则隔离且不淘汰（1 小时后或重启重试），面板记限频 WARN「agent batch rejected」（不含用户名或域名）。删除用户前产生的批次按修订与凭据墓碑归属，仅累加仍存在用户。
 
@@ -697,7 +697,7 @@ GET  /agent-catalogue/...                         # 旧只读签名清单与归�
 合同要点：
 - `restart-core` 指定 `core` 须属于 `Capabilities.cores`，否则 409 `restart_conflict`；回滚到已移除核心的修订返回 409。
 - `POST /api/v1/agent-updates` 固定调用节点本机 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，完整沿用终端下载、信任与安装/恢复流程，不导入面板 Agent 文件。节点上报 `agentSystemUpdateSupported`、`agentSystemUpdateError`（原文保留换行/路径/退出码）与 `agentBootstrapVersion`，未就绪时提示终端迁移命令。
-- 既有 v1.7.5 worker 任务继续按原签名命令派发、重发、接收真实结果与保留恢复入口；`queued`/`running`/`failed_closed` 及排队恢复均持续占用节点直至真实结果释放，迟到原回执不可结束当前恢复尝试；日志分块持久化，未知结果保持待确认不自动重试。详见[v1.7.5 发布说明](release-notes-1.7.5.md)。
+- 既有 v1.7.5 worker 任务继续按原签名命令派发、重发、接收真实结果与保留恢复入口；`queued`/`running`/`failed_closed` 及排队恢复均持续占用节点直至真实结果释放，迟到原回执不可结束当前恢复尝试；日志分块持久化，未知结果保持待确认不自动重试。详见[v1.7.5 发布说明](releases/release-notes-1.7.5.md)。
 
 ## 27.10 用户订阅
 
@@ -789,6 +789,8 @@ GET    /portal/subscription                    POST   /portal/subscription/reset
 Owner 专用 `GET/POST /api/v1/system/panel-update`（查询 GitHub 最新正式版缓存 10 分钟，`?refresh=1` 强刷；不支持开发版 `dev_build` 或缺 helper `helper_missing`；仅允许升级最新正式版，不支持降级或 RC）。POST 校验版本严格较新后 202 返回 `{requestId,version}`（冲突码 `panel_update_unsupported`/`panel_update_busy`/`panel_update_stale`，查询失败 502 `panel_update_check_failed`）。
 
 固定文件合同：面板仅原子写 `/var/lib/proxy-panel/panel-update/request.json`，由 systemd `proxy-panel-update.path` 触发 root oneshot `proxy-panel-update.service` 运行 `/usr/local/lib/proxycontrol/panel-update-request`，严格校验后执行 `/usr/local/bin/qui-update --component panel --version X.Y.Z --yes` 并将固定状态码写回 `status.json`（输出仅追加至 root 0600 `/var/lib/proxycontrol-install/panel-update.log`）。同一 `requestId` 仅执行一次；`pending` 超 10 分钟为 `stalled`、`running` 超 35 分钟为 `interrupted`，均解除占用。仅更新面板，不更新节点 Agent。
+
+面板更新必须保留持久化回滚快照、停服后的最终主库与 WAL 独立备份及完整性、迁移校验；备份须逐字节比较并 fsync，预检成功才允许写 `prepared` 并安装，启动后须通过 10 秒 PID 稳定检查，失败自动回滚。`--check-database` 只接受离线输入，通过只读硬链接与私有 WAL 索引避免再次复制整库，不修改原库、WAL 或 SHM；更新器的检查材料限于 root 登记目录，root 不在面板账号目录内创建或删除检查材料，检查材料准备或删除失败必须拒绝更新。快照时机、检查目录与信号清理（含 SIGHUP）、中断恢复、文件同步及旧更新器首次升级的生效边界见[部署与升级 §5](deployment.md#5-升级)。
 
 ## 27.16 系统管理：证书与 Cloudflare DNS-01
 

@@ -159,7 +159,7 @@ func (r *Repository) rollbackNodeOperation(ctx context.Context, nodeID string, r
 	}
 	if restart {
 		var eligible int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=? AND s.revision=? AND n.enabled=1 AND n.core_restart_supported=1 AND n.status IN ('online','degraded') AND n.last_heartbeat>=?`, nodeID, revision, time.Now().UTC().Add(-45*time.Second).Format("2006-01-02T15:04:05.000000000Z")).Scan(&eligible); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=? AND s.revision=? AND n.enabled=1 AND n.core_restart_supported=1 AND n.status IN ('online','degraded') AND n.last_heartbeat>=?`, nodeID, revision, node.FreshSince(time.Now())).Scan(&eligible); err != nil {
 			return nil, err
 		}
 		if eligible != 1 {

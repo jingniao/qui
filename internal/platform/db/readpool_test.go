@@ -8,6 +8,26 @@ import (
 	"time"
 )
 
+func TestReadPoolRejectsNonPositiveConnections(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "panel.db")
+	writer, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	for _, connections := range []int{0, -1} {
+		reader, err := OpenReadPool(ctx, path, connections)
+		if reader != nil {
+			reader.Close()
+			t.Errorf("connections %d returned a read pool", connections)
+		}
+		if err == nil {
+			t.Errorf("connections %d: expected an error", connections)
+		}
+	}
+}
+
 // TestReadPoolServesQueriesWhileTheWriterIsBusy is the regression test for the
 // panel's single-writer design: a long write transaction must not block reads
 // that were routed through the read-only pool.

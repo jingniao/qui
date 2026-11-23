@@ -142,7 +142,7 @@ git push origin vX.Y.Z
 
 ## 6. 升级生产（需 Owner 单独同意）
 
-生产环境登记见[当前生产环境](operations.md#当前生产环境)（主服务器 `5.45.96.43` / 面板 `https://qui.lluu.de` 及受管节点；登录方式由 Owner 提供，不写入仓库）。**每次生产操作前必须实机核实当前主机版本、配置与节点清单**，不沿用历史记录推断。
+生产环境登记见[当前生产环境](operations.md#当前生产环境)（登录方式由 Owner 提供，不写入仓库）。**每次生产操作前必须实机核实当前主机版本、配置与节点清单**，不沿用历史记录推断。
 
 1. **记录基线：** 核实面板与各节点 `proxy-panel --version`／`proxy-agent --version`、面板 API 节点列表（在线状态与当前修订号）及服务状态（`systemctl show proxy-panel -p ActiveState,NRestarts`；Alpine 用 `rc-service proxy-agent status`）。
 2. **建立恢复点：** 通过面板 API 创建并校验加密备份（`POST /api/v1/backups` 与 `POST /api/v1/backups/{id}/verify`，需 Owner 会话与 CSRF），记录备份 ID；`qui-update` 也会自动生成 `pre-update-<旧版本>-<时间>.db`。
@@ -160,9 +160,9 @@ git push origin vX.Y.Z
 
 只改 Markdown，合并为一个提交，推到工作分支与 `main`（补丁版待生产升级完成后一并写齐验证、发布记录与生产升级）：
 
-- `docs/release-notes-X.Y.Z.md`：新增与改进、修复、迁移、验证（发布提交与耗时、GitHub `check`、实机测试）、发布记录（tag → SHA、release 运行）、生产升级（顺序、恢复点、核对结果与未覆盖项）；如实记录偶发失败与未验证范围。
+- `docs/releases/release-notes-X.Y.Z.md`：新增与改进、修复、迁移、验证（发布提交与耗时、GitHub `check`、实机测试）、发布记录（tag → SHA、release 运行）、生产升级（顺序、恢复点、核对结果与未覆盖项）；如实记录偶发失败与未验证范围。
 - `docs/changelog.md`：将顶部“未发布”更新为版本号与日期。
-- [docs/project-spec.md](project-spec.md#当前状态) “当前状态”：更新最新正式版、tag、迁移头、生产状态与恢复点。
+- [docs/project-spec.md](project-spec.md#当前状态) “当前状态”：更新最新正式版、tag 与发布迁移头；生产状态、最近核实日期与恢复点只更新到 [docs/operations.md「当前生产环境」](operations.md#当前生产环境)。
 - `README.md`、`docs/README.md`：同步最新版本号与发布说明链接。
 - 清理其他文档中过期的“未发布”或旧迁移头措辞。
 

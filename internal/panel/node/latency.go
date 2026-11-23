@@ -101,7 +101,7 @@ func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
 			}
 			continue
 		}
-		rows, err := r.Database.QueryContext(ctx, "SELECT n.id FROM nodes n WHERE enabled=1 AND deleted_at IS NULL AND tcp_probe_supported=1 AND last_heartbeat>=? AND "+effectiveLatencyTarget, timestamp(now.Add(-45*time.Second)), t.ID)
+		rows, err := r.Database.QueryContext(ctx, "SELECT n.id FROM nodes n WHERE enabled=1 AND deleted_at IS NULL AND tcp_probe_supported=1 AND last_heartbeat>=? AND "+effectiveLatencyTarget, FreshSince(now), t.ID)
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func (r *Repository) scheduleLatency(ctx context.Context, now time.Time) error {
 			_, err = r.Database.ExecContext(ctx, `INSERT INTO node_tcp_probes(id,node_id,target_id,command_json,created_at,deadline,status,source)
     SELECT ?,?,?,?,?,?,'queued','scheduled'
     WHERE EXISTS(SELECT 1 FROM nodes n WHERE n.id=? AND n.enabled=1 AND n.deleted_at IS NULL AND n.tcp_probe_supported=1 AND n.last_heartbeat>=? AND `+effectiveLatencyTarget+`)
-    AND NOT EXISTS(SELECT 1 FROM node_tcp_probes WHERE node_id=? AND target_id=? AND source='scheduled' AND status='queued')`, id, node, t.ID, string(raw), timestamp(now), timestamp(deadline), node, timestamp(now.Add(-45*time.Second)), t.ID, node, t.ID)
+    AND NOT EXISTS(SELECT 1 FROM node_tcp_probes WHERE node_id=? AND target_id=? AND source='scheduled' AND status='queued')`, id, node, t.ID, string(raw), timestamp(now), timestamp(deadline), node, FreshSince(now), t.ID, node, t.ID)
 			if err != nil {
 				return err
 			}

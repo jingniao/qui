@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"time"
@@ -86,7 +87,7 @@ func (h *Handler) publishedTopology(w http.ResponseWriter, r *http.Request) {
 		}
 		if !e.enabled {
 			item.Observation = "disabled"
-		} else if observed, err := time.Parse(time.RFC3339Nano, e.last); err == nil && !observed.After(at) && at.Sub(observed) <= 45*time.Second && (e.status == "online" || e.status == "degraded") {
+		} else if observed, err := time.Parse(time.RFC3339Nano, e.last); err == nil && !observed.After(at) && at.Sub(observed) <= node.HeartbeatFreshness && (e.status == "online" || e.status == "degraded") {
 			item.Observation = "fresh_control"
 			if item.ReportedRevision != e.revision {
 				item.Observation = "revision_mismatch"

@@ -30,7 +30,7 @@ Owner 明确要求删除这批测试。[提交 4120282](https://github.com/jingn
 
 [Release 工作流](https://github.com/jingniao/qui/actions/runs/44875282698) 成功，于 **2026-11-21T06:32:08Z** [正式发布 v1.7.6](https://github.com/jingniao/qui/releases/tag/v1.7.6)。13 个附件实际下载，文件大小、GitHub SHA-256 与 SHA256SUMS 的 10 项摘要通过；双架构 Agent 官方 Ed25519 签名有效，版本 1.7.6、序号 **1007006**，原始二进制与包内 Agent 相同。面板与 Agent 的 ELF 架构、干净源码提交、安装脚本及 sing-box 来源摘要通过核验。
 
-隔离 Linux 测试机仅执行 amd64 面板/Agent 的 --version，均返回 1.7.6。arm64 未运行原生实机验收。新 root 桥接独立 systemd/OpenRC 生命周期、断电/重启等既有未验收边界见[实施决定](implementation-decisions.md)。
+隔离 Linux 测试机仅执行 amd64 面板/Agent 的 --version，均返回 1.7.6。arm64 未运行原生实机验收。新 root 桥接独立 systemd/OpenRC 生命周期、断电/重启等既有未验收边界见[实施决定](../implementation-decisions.md)。
 
 ## 生产
 

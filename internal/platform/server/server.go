@@ -429,10 +429,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	// snapshot that lags a just-committed write is acceptable there. Pointing
 	// those reads at the read-only pool keeps /sub responsive while the single
 	// writer connection is busy.
-	subscriptionReads := database
-	if s.readPool != nil {
-		subscriptionReads = s.readPool
-	}
+	subscriptionReads := s.readPool
 	subscriptionUsers := *users
 	subscriptionUsers.Database = subscriptionReads
 	subscriptionNodes := *nodeRepository

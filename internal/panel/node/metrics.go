@@ -20,9 +20,12 @@ const sampleInsertColumns = metricColumns + ",tcp_out_segs,tcp_retrans_segs"
 // keeps last-write-wins.
 var keepMeasured = map[string]bool{"cpu_percent": true, "rx_bytes_per_second": true, "tx_bytes_per_second": true}
 
-// heartbeatFreshness is the age at which a stored heartbeat stops counting as a
+// HeartbeatFreshness is the age at which a stored heartbeat stops counting as a
 // current measurement.
-const heartbeatFreshness = 45 * time.Second
+const HeartbeatFreshness = 45 * time.Second
+
+// FreshSince returns the UTC cutoff for fresh stored heartbeats.
+func FreshSince(now time.Time) string { return timestamp(now.Add(-HeartbeatFreshness)) }
 
 // freshObservationTime returns the Agent's own message time when it is valid and
 // inside the freshness window; a stale or invalid message is never sampled.
@@ -31,7 +34,7 @@ func freshObservationTime(m *pb.AgentMessage, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	at := m.Timestamp.AsTime()
-	if at.Before(now.Add(-heartbeatFreshness)) || at.After(now.Add(heartbeatFreshness)) {
+	if at.Before(now.Add(-HeartbeatFreshness)) || at.After(now.Add(HeartbeatFreshness)) {
 		return time.Time{}, false
 	}
 	return at, true
@@ -39,7 +42,7 @@ func freshObservationTime(m *pb.AgentMessage, now time.Time) (time.Time, bool) {
 
 // freshHeartbeat reports whether a stored heartbeat time still counts as a
 // current measurement.
-func freshHeartbeat(at, now time.Time) bool { return now.Sub(at) <= heartbeatFreshness }
+func freshHeartbeat(at, now time.Time) bool { return now.Sub(at) <= HeartbeatFreshness }
 
 // recordMetricTx stores the last fresh heartbeat in a UTC minute. Replayed
 // sequence numbers never reach this function. Missing measurements stay NULL.

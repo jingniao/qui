@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"proxycontrol/internal/panel/node"
 	"time"
 )
 
@@ -85,10 +86,11 @@ func (w *Worker) tick(ctx context.Context) {
 	windowMinutes := 15
 	// A panel restart interrupts observation for every node. Let Agents reconnect
 	// before opening new offline episodes; persisted active episodes still resolve.
-	offlineAlertNotBefore := w.startedAt.Add(45 * time.Second)
+	// The minimum startup grace period equals the heartbeat freshness window.
+	offlineAlertNotBefore := w.startedAt.Add(node.HeartbeatFreshness)
 	for _, rule := range rules {
 		if rule.Kind == "node_offline" {
-			offlineAlertNotBefore = w.startedAt.Add(max(45*time.Second, time.Duration(rule.DurationMinutes)*time.Minute))
+			offlineAlertNotBefore = w.startedAt.Add(max(node.HeartbeatFreshness, time.Duration(rule.DurationMinutes)*time.Minute))
 		}
 		if rule.Enabled && (rule.Kind == "cpu" || rule.Kind == "memory") && rule.DurationMinutes > windowMinutes {
 			windowMinutes = rule.DurationMinutes

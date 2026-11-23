@@ -11,8 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/internal/platform/agentidentity"
+	"proxycontrol/internal/platform/httpapi"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/tcpprobe"
 	"strconv"
@@ -203,7 +203,7 @@ func (h *Handler) tcpProbes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var supported int
-	if err := h.Repository.Database.QueryRowContext(r.Context(), "SELECT count(*) FROM nodes WHERE id=? AND tcp_probe_supported=1 AND enabled=1 AND deleted_at IS NULL AND last_heartbeat>=?", r.PathValue("id"), timestamp(time.Now().UTC().Add(-45*time.Second))).Scan(&supported); err != nil {
+	if err := h.Repository.Database.QueryRowContext(r.Context(), "SELECT count(*) FROM nodes WHERE id=? AND tcp_probe_supported=1 AND enabled=1 AND deleted_at IS NULL AND last_heartbeat>=?", r.PathValue("id"), FreshSince(time.Now())).Scan(&supported); err != nil {
 		h.fail(w, err)
 		return
 	}

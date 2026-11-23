@@ -7,8 +7,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"net/http"
 	"proxycontrol/internal/panel/auth"
-	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/internal/platform/agentidentity"
+	"proxycontrol/internal/platform/httpapi"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"time"
 )
@@ -131,7 +131,7 @@ func (h *Handler) requestHealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var eligible int
-	if err := tx.QueryRowContext(r.Context(), `SELECT count(*) FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=? AND n.enabled=1 AND n.status IN ('online','degraded') AND n.last_heartbeat>=? AND n.health_check_supported=1 AND s.revision=?`, item.NodeID, timestamp(now.Add(-45*time.Second)), item.Revision).Scan(&eligible); err != nil {
+	if err := tx.QueryRowContext(r.Context(), `SELECT count(*) FROM nodes n JOIN node_runtime_state s ON s.node_id=n.id WHERE n.id=? AND n.enabled=1 AND n.status IN ('online','degraded') AND n.last_heartbeat>=? AND n.health_check_supported=1 AND s.revision=?`, item.NodeID, FreshSince(now), item.Revision).Scan(&eligible); err != nil {
 		h.fail(w, err)
 		return
 	}

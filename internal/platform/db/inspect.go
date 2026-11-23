@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,7 +29,7 @@ const (
 	// VerdictOutdated means the database has not reached v1.7.5.
 	// Upgrade it through v1.7.5 first (ErrPredatesBaseline).
 	VerdictOutdated Verdict = "outdated"
-	// VerdictDamaged means the file cannot be copied, opened, read as SQLite or
+	// VerdictDamaged means the file cannot be opened, read as SQLite or
 	// fails its own integrity check.
 	VerdictDamaged Verdict = "damaged"
 )
@@ -47,18 +46,46 @@ type Inspection struct {
 	Integrity string
 }
 
-// Inspect reports whether this binary can open the panel database at path. It
-// never opens the original: the file and its write-ahead log are copied into a
-// private directory first, so the check never touches the locks, sidecars or
-// bytes of the file it reports on. The file should belong to a stopped panel:
-// a copy taken while a panel writes is not guaranteed to be consistent.
-func Inspect(ctx context.Context, path string, files fs.FS) Inspection {
-	copied, cleanup, err := copyDatabase(path)
-	if err != nil {
-		return damaged(err)
+// Inspect checks an offline database and its WAL without copying or writing
+// either file. The caller must exclude writers for the entire inspection.
+// Private hardlinks keep SQLite's transient SHM index away from the backup.
+// The database and WAL are opened read-only and never checkpointed or copied.
+func Inspect(ctx context.Context, path string, files fs.FS) (result Inspection) {
+	for _, suffix := range []string{"", "-wal", "-journal"} {
+		info, err := os.Lstat(path + suffix)
+		if suffix != "" && errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return damaged(fmt.Errorf("inspect database: %w", err))
+		}
+		if !info.Mode().IsRegular() {
+			return damaged(fmt.Errorf("inspect database: %s is not a regular file", path+suffix))
+		}
+		// Do not allow recovery to write through the private hardlinks.
+		if suffix == "-journal" && info.Size() != 0 {
+			return damaged(errors.New("inspect database: nonempty rollback journal requires recovery"))
+		}
 	}
-	defer cleanup()
-	uri, err := URI(copied)
+	directory, err := os.MkdirTemp(filepath.Dir(path), ".proxy-panel-check-*")
+	if err != nil {
+		return damaged(fmt.Errorf("inspect database: %w", err))
+	}
+	defer func() {
+		if err := os.RemoveAll(directory); err != nil {
+			result = damaged(fmt.Errorf("inspect database: remove private index directory: %w", err))
+		}
+	}()
+	linked := filepath.Join(directory, "panel.db")
+	for _, suffix := range []string{"", "-wal"} {
+		if err := os.Link(path+suffix, linked+suffix); err != nil {
+			if suffix != "" && errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return damaged(fmt.Errorf("inspect database: link offline input: %w", err))
+		}
+	}
+	uri, err := fileURI(linked, "ro", []string{"foreign_keys(1)", "busy_timeout(5000)", "synchronous(NORMAL)", "query_only(1)"})
 	if err != nil {
 		return damaged(err)
 	}
@@ -66,8 +93,6 @@ func Inspect(ctx context.Context, path string, files fs.FS) Inspection {
 	if err != nil {
 		return damaged(err)
 	}
-	// The copy is opened read-write because SQLite replays the copied log into
-	// it, but the copy is private and removed again.
 	database.SetMaxOpenConns(1)
 	defer database.Close()
 	return inspect(ctx, database, files)
@@ -119,60 +144,6 @@ func inspect(ctx context.Context, database *sql.DB, files fs.FS) Inspection {
 		inspection.Verdict = VerdictCompatible
 	}
 	return inspection
-}
-
-// copyDatabase clones the database and its write-ahead log into a new private
-// directory and returns the clone path with the cleanup for that directory.
-func copyDatabase(path string) (string, func(), error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "", nil, fmt.Errorf("inspect database: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", nil, fmt.Errorf("inspect database: %s is not a regular file", path)
-	}
-	directory, err := os.MkdirTemp("", "proxy-panel-check-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("inspect database: %w", err)
-	}
-	cleanup := func() { os.RemoveAll(directory) }
-	target := filepath.Join(directory, "panel.db")
-	if err := copyFile(path, target); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("inspect database: %w", err)
-	}
-	// Ignore the shared-memory index: SQLite rebuilds it from the log itself.
-	if sidecar, err := os.Lstat(path + "-wal"); err == nil {
-		if !sidecar.Mode().IsRegular() {
-			cleanup()
-			return "", nil, fmt.Errorf("inspect database: %s-wal is not a regular file", path)
-		}
-		if err := copyFile(path+"-wal", target+"-wal"); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("inspect database: %w", err)
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		cleanup()
-		return "", nil, fmt.Errorf("inspect database: %w", err)
-	}
-	return target, cleanup, nil
-}
-
-func copyFile(source, target string) error {
-	input, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(output, input); err != nil {
-		output.Close()
-		return err
-	}
-	return output.Close()
 }
 
 // integrityCheck returns the first report row and whether the whole check

@@ -114,9 +114,29 @@ race_tests() {
   mkdir -p bin
   go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
 
+  # Database file tests exercise root-owned directories, chown and runuser. Keep
+  # compilation unprivileged on CI and elevate only these two test executables.
+  local listed package
+  local -a regular_packages=() database_packages=() database_exec=()
+  listed=$(go list "$@") || return $?
+  while IFS= read -r package; do
+    case $package in
+      proxycontrol/cmd/qui-update-db | proxycontrol/internal/platform/hostupdatedb)
+        database_packages+=("$package") ;;
+      *) regular_packages+=("$package") ;;
+    esac
+  done <<< "$listed"
+  if ((${#database_packages[@]})); then
+    step 'database file tests (root execution, unprivileged compilation)'
+    if ((EUID != 0)); then
+      database_exec=(-exec 'sudo -n --')
+    fi
+    go test -race -parallel 3 -timeout 55m "${database_exec[@]}" "${database_packages[@]}"
+  fi
+
   step "go test -race ${shard:-./...}"
   local test_log=$work/go-test.log status=0
-  AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -parallel 3 -timeout 55m "$@" 2>&1 | tee "$test_log" || status=$?
+  AGENT_BINARY=$root/bin/proxy-agent-storage-test go test -race -parallel 3 -timeout 55m "${regular_packages[@]}" 2>&1 | tee "$test_log" || status=$?
   if ((status != 0)) && ((annotate)); then
     grep -E -- '^(--- FAIL|FAIL|panic:|WARNING: DATA RACE)|_test\.go:[0-9]+:' "$test_log" |
       head -n 10 | while IFS= read -r line; do echo "::error::$line"; done

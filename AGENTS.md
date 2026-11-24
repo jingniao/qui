@@ -46,7 +46,7 @@
 qui 是面向 1～10 名内部用户的自托管代理控制平台：Go 单体、SQLite、Vue 3，面板与 Agent 数据面分离，只审计域名元数据。
 
 - 产品规则、字段语义、接口和安全边界见 [项目说明书](docs/project-spec.md)，修改行为时同步对应章节。
-- 最新正式版为 **v1.10.3**（tag `c910e89`，发布迁移头 **0163**），见[发布说明](docs/releases/release-notes-1.10.3.md)。后续只要求兼容 **v1.7.5**；仍须保留 v1.7.5 本身接受的有效数据与在途任务。
+- 最新正式版为 **v1.10.4**（tag `ac48994`，发布迁移头 **0163**），见[发布说明](docs/releases/release-notes-1.10.4.md)。后续只要求兼容 **v1.7.5**；仍须保留 v1.7.5 本身接受的有效数据与在途任务。
 - 生产状态与历史核实来源见[运维手册「当前生产环境」](docs/operations.md#当前生产环境)。管理员入口不写入文档。生产操作前须重新实时核实。
 - 文档入口：[导航](docs/README.md)、[架构](docs/architecture.md)、[部署与开发门禁](docs/deployment.md)、[运维](docs/operations.md)、[协议矩阵](docs/protocol-support-matrix.md)、[发布手册](docs/release-runbook.md)。逐版本部署、失败和验证记录保存在 [变更记录](docs/changelog.md)。
 

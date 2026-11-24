@@ -45,13 +45,12 @@ func (r *Repository) StateResetStatus(ctx context.Context, nodeID string) (State
 
 func recoveryBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, error) {
 	items := []Blocker{}
+	// Unresolved Agent or core updates must not prevent installation recovery.
+	// Keep their original tasks and receipts for reconciliation.
 	queries := []struct{ kind, table, query string }{
 		{"deployment_target", "deployment_targets", "SELECT CAST(revision AS TEXT),'' FROM deployment_targets WHERE node_id=? AND status='pending'"},
 		{"deployment_command", "deployment_commands", "SELECT id,operation FROM deployment_commands WHERE node_id=? AND status='pending'"},
 		{"deployment_batch", "deployment_batches", "SELECT DISTINCT b.id,b.name FROM deployment_batches b JOIN deployment_batch_items i ON i.batch_id=b.id WHERE i.node_id=? AND b.status IN ('deploying','rolling_back','rollback_failed')"},
-		{"agent_system_update", "agent_system_update_tasks", "SELECT id,status FROM agent_system_update_tasks WHERE node_id=? AND (status IN ('queued','running','unconfirmed') OR (status='failed' AND json_extract(result_json,'$.recovery.attempted')=1 AND json_extract(result_json,'$.recovery.success') IS NOT 1))"},
-		{"agent_update", "agent_update_tasks", "SELECT id,status FROM agent_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
-		{"core_update", "core_update_tasks", "SELECT id,status FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running','failed_closed')"},
 		{"core_remove", "core_remove_tasks", "SELECT id,component FROM core_remove_tasks WHERE node_id=? AND status IN ('queued','running')"},
 	}
 	for _, item := range queries {
@@ -212,6 +211,11 @@ func (r *Repository) consumeRecoveryTx(ctx context.Context, tx *sql.Tx, hash, no
 	changed, err := result.RowsAffected()
 	if err != nil || changed != 1 {
 		return ErrToken
+	}
+	if r.RecoveryUpdates != nil {
+		if err := r.RecoveryUpdates.SupersedeNodeUpdates(ctx, tx, nodeID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_certificate_renewals WHERE node_id=?", nodeID); err != nil {
 		return err

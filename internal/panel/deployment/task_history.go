@@ -47,7 +47,7 @@ const historyCTE = `WITH tasks AS (
 ), records AS (
  SELECT t.*,coalesce(n.name,t.node_id) node_name,
  CASE WHEN source='core' THEN component||' '||version WHEN version='—' OR substr(version,1,1)='v' THEN version ELSE 'v'||version END target_version,
- CASE t.status WHEN 'success' THEN '升级成功' WHEN 'running' THEN '下发中，待确认' WHEN 'queued' THEN '等待节点' WHEN 'rolled_back' THEN CASE source WHEN 'agent' THEN '已恢复原 Agent' ELSE '已回退上一核心' END WHEN 'rejected' THEN '节点拒绝' WHEN 'failed_closed' THEN '未确认已关闭' WHEN 'cleared' THEN '已清除' ELSE t.status END status_label
+ CASE t.status WHEN 'success' THEN '升级成功' WHEN 'running' THEN '下发中，待确认' WHEN 'queued' THEN '等待节点' WHEN 'rolled_back' THEN CASE source WHEN 'agent' THEN '已恢复原 Agent' ELSE '已回退上一核心' END WHEN 'rejected' THEN '节点拒绝' WHEN 'failed_closed' THEN '未确认已关闭' WHEN 'cleared' THEN '已清除' WHEN 'superseded' THEN '已由重装接替' ELSE t.status END status_label
  FROM tasks t LEFT JOIN nodes n ON n.id=t.node_id
 ) `
 
@@ -67,7 +67,7 @@ func (r *Repository) TaskHistory(ctx context.Context, kind, status, keyword stri
 		switch status {
 		case "failed":
 			where += " AND status IN ('rejected','failed_closed','failed')"
-		case "running", "queued", "success", "rolled_back", "cleared", "unconfirmed":
+		case "running", "queued", "success", "rolled_back", "cleared", "unconfirmed", "superseded":
 			where += " AND status=?"
 			args = append(args, status)
 		default:

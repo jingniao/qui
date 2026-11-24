@@ -54,11 +54,13 @@ func (r *Repository) ListAgentUpdateAttempts(ctx context.Context, taskID string,
 		}
 		if len(resultData) > 0 {
 			result, err := release.DecodeUpdateResult(resultData)
-			if err != nil || release.ValidateAgentResult(request, result) != nil || item.Current && result.Status != status {
+			if err != nil || release.ValidateAgentResult(request, result) != nil || item.Current && status != "superseded" && result.Status != status {
 				return nil, 0, release.ErrUpdate
 			}
 			item.Result = &result
-			item.Status = result.Status
+			if !item.Current || status != "superseded" {
+				item.Status = result.Status
+			}
 		}
 		items = append(items, item)
 	}

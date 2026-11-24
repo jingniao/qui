@@ -36,6 +36,9 @@ const (
 )
 
 type Repository struct {
+	RecoveryUpdates interface {
+		SupersedeNodeUpdates(context.Context, *sql.Tx, string) error
+	}
 	IdentityInvalidated func(string)
 	Liveness            *Liveness
 	GroupsChanged       func()

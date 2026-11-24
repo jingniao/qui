@@ -44,7 +44,7 @@ func validateCoreUpdates(ctx context.Context, database *sql.DB) error {
 			}
 		}
 		switch status {
-		case "queued", "running", "success", "rolled_back", "rejected", "failed_closed", "cleared":
+		case "queued", "running", "success", "rolled_back", "rejected", "failed_closed", "cleared", "superseded":
 		default:
 			return ErrArchive
 		}
@@ -78,9 +78,10 @@ func validateCoreUpdates(ctx context.Context, database *sql.DB) error {
 // status. A task the Owner cleared after the node reported is finished: its
 // result was stored first and keeps the terminal status the node sent, so it no
 // longer equals 'cleared'. Both decoders above already refuse a result that is
-// not terminal. Every other task status stores exactly its own result status.
+// not terminal. Reinstallation also keeps the original result under superseded.
+// Every other task status stores exactly its own result status.
 func coreResultMatches(status, resultStatus string) bool {
-	return status == "cleared" || status == resultStatus
+	return status == "cleared" || status == "superseded" || status == resultStatus
 }
 
 func catalogueReleases(ctx context.Context, database *sql.DB) (map[string]release.Signed, error) {

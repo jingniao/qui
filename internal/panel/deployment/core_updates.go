@@ -10,8 +10,8 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"proxycontrol/internal/panel/node"
-	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/agentidentity"
+	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"proxycontrol/pkg/contracts/release"
@@ -238,7 +238,15 @@ func coreUpdateRequest(t CoreUpdateTask) (release.CoreUpdateRequest, error) {
 // components never starve each other while a reconnect still retries the same
 // identity.
 func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.CoreUpdateCommand, error) {
-	t, err := scanCoreTask(r.Database.QueryRowContext(ctx, "SELECT "+coreTaskColumns+" FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running') ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END,updated_at,component LIMIT 1", nodeID))
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return nil, err
+	}
+	t, err := scanCoreTask(tx.QueryRowContext(ctx, "SELECT "+coreTaskColumns+" FROM core_update_tasks WHERE node_id=? AND status IN ('queued','running') ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END,updated_at,component LIMIT 1", nodeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -253,7 +261,18 @@ func (r *Repository) PendingCoreUpdate(ctx context.Context, nodeID string) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	if _, err := r.Database.ExecContext(ctx, "UPDATE core_update_tasks SET status='running',updated_at=? WHERE command_id=?", now(), t.CommandID); err != nil {
+	updated, err := tx.ExecContext(ctx, "UPDATE core_update_tasks SET status='running',updated_at=? WHERE command_id=? AND status IN ('queued','running')", now(), t.CommandID)
+	if err != nil {
+		return nil, err
+	}
+	changed, err := updated.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changed != 1 {
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &pb.CoreUpdateCommand{Component: t.Component, RequestJson: data}, nil
@@ -284,6 +303,9 @@ func (r *Repository) CoreUpdateResult(ctx context.Context, nodeID string, payloa
 		return err
 	}
 	if payload.Component != "" && payload.Component != t.Component {
+		return release.ErrUpdate
+	}
+	if t.Status == "superseded" {
 		return release.ErrUpdate
 	}
 	if result.Revision != t.Revision || result.TargetDigest != t.SHA256 {

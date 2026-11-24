@@ -188,6 +188,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		},
 		Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
 	nodeRepository.IdentityInvalidated = control.Disconnect
+	nodeRepository.RecoveryUpdates = deployments
 	s.relayCleanup = deployment.NewRelayCleanupDeployer(deployments, nodeRepository, logger)
 	control.Deployment = &relayCleanupControl{Repository: deployments, cleanup: s.relayCleanup}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {

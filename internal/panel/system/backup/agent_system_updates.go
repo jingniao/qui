@@ -48,11 +48,11 @@ func validateAgentSystemUpdates(ctx context.Context, database *sql.DB) error {
 		}
 		if len(resultData) > 0 {
 			r, err := release.DecodeAgentSystemUpdateResult(resultData)
-			if err != nil || r.AttemptID != id || r.TaskID != task || r.NodeID != node || r.Revision != revision || r.TargetVersion != target || id == current && r.Status != status {
+			if err != nil || r.AttemptID != id || r.TaskID != task || r.NodeID != node || r.Revision != revision || r.TargetVersion != target || id == current && status != "superseded" && r.Status != status {
 				rows.Close()
 				return ErrArchive
 			}
-		} else if id == current && status != "queued" && status != "running" && status != "unconfirmed" {
+		} else if id == current && status != "queued" && status != "running" && status != "unconfirmed" && status != "superseded" {
 			rows.Close()
 			return ErrArchive
 		}

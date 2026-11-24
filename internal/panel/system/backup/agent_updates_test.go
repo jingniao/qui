@@ -66,7 +66,7 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 	if err := validateAgentUpdates(ctx, database); err != nil {
 		t.Fatal("valid pending Agent archive rejected", err)
 	}
-	for _, status := range []string{"queued", "running", "failed_closed", "success", "rejected", "rolled_back"} {
+	for _, status := range []string{"queued", "running", "failed_closed", "success", "rejected", "rolled_back", "superseded"} {
 		exec("UPDATE agent_update_tasks SET status=?", status)
 		if err := db.Migrate(ctx, database, migrations.Files); err != nil {
 			t.Fatalf("migration rejected retained %s Agent task: %v", status, err)
@@ -120,6 +120,7 @@ func TestAgentArchiveInventoryAndConflictingUpdates(t *testing.T) {
 	if err := validateAgentUpdates(ctx, database); err != nil {
 		t.Fatal(err)
 	}
+	assertSupersededUpdatesArchive(t, source, nodeID, revision, signed.Manifest.SHA256)
 	exec("INSERT INTO node_update_capabilities(node_id,core_supported,agent_supported) VALUES(?,0,1)", nodeID)
 	exec("PRAGMA ignore_check_constraints=ON")
 	exec("UPDATE node_update_capabilities SET agent_supported=2")

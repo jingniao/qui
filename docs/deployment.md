@@ -312,6 +312,8 @@ qui-update --component agent --version 1.7.5 \
 - **网页完整升级（v1.7.5+）**：独立 root 桥接服务（systemd：`proxy-agent-update.{path,service}`；OpenRC：watcher + `proxy-agent-update`）在本机执行 `/usr/local/bin/qui-update --component agent --version X.Y.Z --yes`，覆盖引导与实际 Agent 两阶段更新、校验与失败恢复；节点需能访问 GitHub，不支持网页离线包。桥接材料位于 `/var/lib/proxycontrol-install/agent-system-updates/`，只读结果与输出位于 `/var/lib/proxy-agent-update/`。面板按实测桥接就绪状态展示入口，任务输出与阶段记录见「系统管理 → 任务记录」；验证详情见[v1.7.5 验证记录](v1.7.5-verification.md)。
 - **代理核心更新**：在面板「服务器 → 代理核心」填写稳定版本、官方 URL 与 SHA-256 下发（GOST 仅预填固定 3.3.2，仅 linux/amd64），Agent 校验切换、失败自动回滚。
 
+**升级卡住后重装 Agent**：既有 Agent 升级和核心更新任务不再阻止生成安装命令、旧 Agent 补传或恢复登记；配置发布和核心移除任务仍须先收尾。仅在新 Agent 成功核销恢复码、替换身份的同一事务内，将该节点未结束的系统升级、旧 worker 升级和核心更新标为 `superseded`（任务页显示「已由重装接替」）。旧任务不再下发或占用配置恢复，也不能重试或接受新身份回执；请求、阶段、原始结果、尝试及日志保留。仅签发恢复码、普通重连或核销失败不改变任务；该状态不表示远端安装已取消或成功，节点本机安装错误仍需按原错误排查。
+
 ### 5.4 面板网页更新
 
 Owner 在「系统管理 → 系统设置 → 系统信息 → 面板更新」可一键升级到最新正式版（合同见[项目说明书](project-spec.md) §27.15，排障见[运维手册](operations.md)）：

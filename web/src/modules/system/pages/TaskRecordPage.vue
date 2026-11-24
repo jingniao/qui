@@ -9,7 +9,7 @@
     <AppDialog :model-value="!!attemptTaskId" @update:model-value="v => { if (!v) attemptTaskId = ''; }" title="Agent 更新尝试记录" :show-confirm="false">
       <ErrorState v-if="attemptError" :message="attemptError" @retry="loadAttempts" />
       <LoadingSkeleton v-else-if="attemptLoading" />
-      <DataTable v-else-if="attempts.length"><template #header><th>代次 / 操作</th><th>状态</th><th>结果</th></template><template #body><tr v-for="a in attempts" :key="a.commandId"><td>{{ a.generation }} · {{ a.operation }} {{ a.current ? '（当前）' : '' }}</td><td>{{ a.status }}</td><td><template v-if="attemptMode === 'system'"><p class="whitespace-pre-wrap break-words">{{ a.systemResult?.error || a.dispatchError || a.phase || a.status }}</p><button class="ios-action-btn-secondary" @click="showSystemDetail(attemptTaskId, a.commandId, a.phase, a.systemResult, a.dispatchError)">详情与输出</button></template><template v-else>{{ updateResultLabel(a.result?.code) }}</template></td></tr></template></DataTable>
+      <DataTable v-else-if="attempts.length"><template #header><th>代次 / 操作</th><th>状态</th><th>结果</th></template><template #body><tr v-for="a in attempts" :key="a.commandId"><td>{{ a.generation }} · {{ a.operation }} {{ a.current ? '（当前）' : '' }}</td><td>{{ a.status === 'superseded' ? '已由重装接替' : a.status }}</td><td><template v-if="attemptMode === 'system'"><p class="whitespace-pre-wrap break-words">{{ a.systemResult?.error || a.dispatchError || a.phase || a.status }}</p><button class="ios-action-btn-secondary" @click="showSystemDetail(attemptTaskId, a.commandId, a.phase, a.systemResult, a.dispatchError)">详情与输出</button></template><template v-else>{{ updateResultLabel(a.result?.code) }}</template></td></tr></template></DataTable>
       <EmptyState v-else title="暂无尝试记录" />
       <Pagination :total="attemptTotal" :current-page="attemptPage" :page-size="20" @update:page="changeAttemptPage" />
     </AppDialog>
@@ -89,6 +89,7 @@
               <option value="success">升级成功</option>
               <option value="rolled_back">已回退 / 恢复</option>
               <option value="failed">拒绝 / 失败</option>
+              <option value="superseded">已由重装接替</option>
             </select>
             <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
               <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -344,7 +345,7 @@ const records = ref<TaskRecord[]>([]);
 const total = ref(0);
 
 const filterType = ref<'all' | 'agent' | 'xray' | 'sing-box'>('all');
-const filterStatus = ref<'all' | 'running' | 'unconfirmed' | 'queued' | 'success' | 'rolled_back' | 'failed'>('all');
+const filterStatus = ref<'all' | 'running' | 'unconfirmed' | 'queued' | 'success' | 'rolled_back' | 'failed' | 'superseded'>('all');
 const searchKeyword = ref('');
 
 const currentPage = ref(1);
@@ -429,6 +430,8 @@ function mapStatusMeta(status: string, source: 'agent' | 'core'): {
       return { label: '未确认已关闭', tone: 'red' };
     case 'cleared':
       return { label: '已清除', tone: 'gray' };
+    case 'superseded':
+      return { label: '已由重装接替', tone: 'gray' };
     default:
       return { label: status, tone: 'gray' };
   }
@@ -496,8 +499,8 @@ const allTasks = computed<UnifiedTask[]>(() => records.value.map(t => {
   const meta = mapStatusMeta(t.status, t.source);
   return { ...t, statusLabel: meta.label, statusTone: meta.tone,
     resultCode: t.result?.code, resultLabel: t.mode === 'system' ? (t.systemResult?.error || t.dispatchError || t.phase || meta.label) : updateResultLabel(t.result?.code),
-    resultGuidance: t.mode === 'system' ? [t.systemResult?.serviceError, t.systemResult?.logError, t.systemResult?.persistenceError].filter(Boolean).join('；') : updateResultGuidance(t.result?.code), installedVersion: t.mode === 'system' ? t.systemResult?.installedVersion.version : t.result?.installed_version,
-    timestamp: Date.parse(t.updatedAt), canClear: t.source === 'core' && t.status !== 'cleared' };
+    resultGuidance: t.status === 'superseded' ? '旧更新记录已保留，不再下发给重装后的 Agent；此状态不代表远端更新已取消。' : t.mode === 'system' ? [t.systemResult?.serviceError, t.systemResult?.logError, t.systemResult?.persistenceError].filter(Boolean).join('；') : updateResultGuidance(t.result?.code), installedVersion: t.mode === 'system' ? t.systemResult?.installedVersion.version : t.result?.installed_version,
+    timestamp: Date.parse(t.updatedAt), canClear: t.source === 'core' && !['cleared', 'superseded'].includes(t.status) };
 }));
 const filteredTasks = allTasks;
 const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1);

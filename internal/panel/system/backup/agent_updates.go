@@ -51,10 +51,10 @@ func validateAgentUpdates(ctx context.Context, database *sql.DB) error {
 		}
 		if len(resultData) > 0 {
 			result, err := release.DecodeUpdateResult(resultData)
-			if err != nil || release.ValidateAgentResult(request, result) != nil || commandID == current && result.Status != status {
+			if err != nil || release.ValidateAgentResult(request, result) != nil || commandID == current && status != "superseded" && result.Status != status {
 				return ErrArchive
 			}
-		} else if commandID == current && status != "queued" && status != "running" {
+		} else if commandID == current && status != "queued" && status != "running" && status != "superseded" {
 			return ErrArchive
 		}
 	}

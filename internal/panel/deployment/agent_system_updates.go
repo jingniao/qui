@@ -224,8 +224,16 @@ func (r *Repository) RetryAgentSystemUpdate(ctx context.Context, audit ReleaseAc
 	return t, tx.Commit()
 }
 func (r *Repository) PendingAgentSystemUpdate(ctx context.Context, nodeID string) (*pb.AgentSystemUpdateCommand, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return nil, err
+	}
 	var data []byte
-	err := r.Database.QueryRowContext(ctx, "SELECT a.request_json FROM agent_system_update_tasks t JOIN agent_system_update_attempts a ON a.attempt_id=t.attempt_id WHERE t.node_id=? AND t.status IN ('queued','running','unconfirmed')", nodeID).Scan(&data)
+	err = tx.QueryRowContext(ctx, "SELECT a.request_json FROM agent_system_update_tasks t JOIN agent_system_update_attempts a ON a.attempt_id=t.attempt_id WHERE t.node_id=? AND t.status IN ('queued','running','unconfirmed')", nodeID).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -239,11 +247,16 @@ func (r *Repository) PendingAgentSystemUpdate(ctx context.Context, nodeID string
 	if q.NodeID != nodeID {
 		return nil, fmt.Errorf("pending system update node mismatch")
 	}
-	if err := requireAgentVersion(ctx, r.Database, nodeID, q.TargetVersion); err != nil {
+	if err := requireAgentVersion(ctx, tx, nodeID, q.TargetVersion); err != nil {
 		return nil, err
 	}
-	_, err = r.Database.ExecContext(ctx, "UPDATE agent_system_update_tasks SET status='running',updated_at=? WHERE attempt_id=? AND status='queued'", now(), q.AttemptID)
-	return &pb.AgentSystemUpdateCommand{RequestJson: data}, err
+	if _, err := tx.ExecContext(ctx, "UPDATE agent_system_update_tasks SET status='running',updated_at=? WHERE attempt_id=? AND status='queued'", now(), q.AttemptID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &pb.AgentSystemUpdateCommand{RequestJson: data}, nil
 }
 func (r *Repository) AgentSystemUpdateEvent(ctx context.Context, nodeID string, e *pb.AgentSystemUpdateEvent) ([]byte, error) {
 	if e == nil {
@@ -298,7 +311,7 @@ func (r *Repository) AgentSystemUpdateEvent(ctx context.Context, nodeID string, 
 	var qData, oldResult, oldProgress, oldDispatchError []byte
 	var ack release.AgentSystemUpdateAck
 	ack.AttemptID = attempt
-	if err = tx.QueryRowContext(ctx, "SELECT a.request_json,a.result_json,a.progress_json,a.log_sequence,a.log_offset,a.dispatch_error_json FROM agent_system_update_attempts a JOIN agent_system_update_tasks t ON t.id=a.task_id WHERE a.attempt_id=? AND t.node_id=?", attempt, nodeID).Scan(&qData, &oldResult, &oldProgress, &ack.LogSequence, &ack.LogOffset, &oldDispatchError); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT a.request_json,a.result_json,a.progress_json,a.log_sequence,a.log_offset,a.dispatch_error_json FROM agent_system_update_attempts a JOIN agent_system_update_tasks t ON t.id=a.task_id WHERE a.attempt_id=? AND t.node_id=? AND t.status<>'superseded'", attempt, nodeID).Scan(&qData, &oldResult, &oldProgress, &ack.LogSequence, &ack.LogOffset, &oldDispatchError); err != nil {
 		return nil, err
 	}
 	q, err := release.DecodeAgentSystemUpdateRequest(qData)

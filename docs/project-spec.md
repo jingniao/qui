@@ -253,7 +253,7 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 
 Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/node-install.sh` 下载同版本发布包、校验 `SHA256SUMS`、建立面板证书信任 → Agent 本地生成私钥并提交 CSR → 面板签证并核销注册码 → 建立 mTLS 长连接（私钥永不上传）。安装命令默认填充「节点安装连接地址」（第 27.14 节），对话框「启用网页升级」默认勾选，命令带 `--web-upgrade`（脚本本身默认不启用）。
 
-- **原位身份恢复**：主机重装但保留节点身份时，Owner 签发绑定当前指纹的一次性恢复码（300–3600 秒，默认 900 秒，可选立即吊销旧证书；存在未完成任务时返回 409 `node_recovery_blocked` 与 `blockers`）。`node-install.sh --replace-agent` 在同机校验发行包、确认旧服务退出与最终补传后才清理固定数据目录并重新登记。新 Agent 经 `Enroll` 核销恢复码后保留节点 ID 与全部业务配置，旧指纹永久写入 `node_identity_retirements`（备份恢复亦不复活），并在首次能力上报后自动下发当前已发布配置。操作见[运维手册](operations.md#51-原位恢复推荐)。
+- **原位身份恢复**：主机重装但保留节点身份时，Owner 签发绑定当前指纹的一次性恢复码（300–3600 秒，默认 900 秒，可选立即吊销旧证书；存在未完成配置发布或核心移除任务时返回 409 `node_recovery_blocked` 与 `blockers`）。Agent 完整升级、既有 worker 升级及核心更新任务不阻止生成安装命令、旧 Agent 补传或恢复登记；仅在成功核销恢复码、切换身份的同一事务内，将该节点未结束的系统升级、worker 升级与核心更新标为 `superseded`（已由重装接替），不再下发或占用配置恢复；禁止重试和新身份回执，原请求、阶段、结果、尝试与日志保留。仅签发、普通重连或核销失败均不改任务；此状态不代表远端更新已取消或完成。`node-install.sh --replace-agent` 在同机校验发行包、确认旧服务退出与最终补传后才清理固定数据目录并重新登记。新 Agent 经 `Enroll` 核销恢复码后保留节点 ID 与全部业务配置，旧指纹永久写入 `node_identity_retirements`（备份恢复亦不复活），并在首次能力上报后自动下发当前已发布配置。操作见[运维手册](operations.md#51-原位恢复推荐)。
 - **删除与连带清理**：空白待登记节点取消登记时直接删除；已登记节点逻辑删除（`deleted_at`）、吊销证书、移出分组并关闭本节点待发布/更新/健康检查任务，保留历史流量与访问记录且不可重新启用（不停止远端进程）。删除连带移除该节点全部入站及涉及它的方案、隧道与规则；外部手工出站、出口组、代理链、策略或未收尾发布批次以 409 `node_delete_blocked` 返回 `error.blockers`。预览接口 `GET /api/v1/nodes/{id}/deletion-preview` 列出待删对象与阻塞项；删除成功返回 200 `{pendingNodes:[{nodeId,name,reason}]}`，详见[运维手册](operations.md)。
 
 ## 11.4 节点状态
@@ -559,7 +559,7 @@ system        系统设置、备份恢复、证书库、通知与操作日志
 - **隧道发布收尾（基线 0149 规则）**：部署批次含 Vault 密封收尾 journal 与完成标记，单节点发布亦使用持久批次；请求断开不取消发布，超 300 秒返回 202/`publishing`；终态、周期扫描与重启统一幂等收尾。**启动收尾失败只记日志，不阻止面板启动；未收尾批次继续占用其节点。**
 - **v1.7.5 有效历史数据保留**：保留安装记录 v1、旧迁移 checksum 链、历史修订中的 `budget`/`weighted` 与 `legacyRelayNodes`、只读 `port_forward`/GOST 画布连接、`user_source_grants` 兼容表、`users.max_devices`/`max_connections` 旧列、`canvas_entry_bindings` 创建基线双列同时 `NULL` 的旧行，以及历史 `null`/缺失画布数组的可读性（新写入严格校验数组）。
 - **导入与策略身份**：`content` 来源允许合法悬空精确成员，URL 整源成员仍合法，历史无法冻结引用保留诊断不自动重绑；客户端策略配置保留 `importKey` 服务端幂等去重。
-- **更新任务与流量事实**：既有 worker 更新任务与系统更新任务遵守真实占用、尝试历史与回执合同（不伪造终态、不清除排队恢复）；队列身份、未确认日志、最终补传证据与恢复 journal 不按年龄清理；旧无编号流量回执按第 21 节的 7 天完成记账窗口淘汰（无同批 pending），新协议须满足 `R ≤ A ≤ C` 且 ≥24 小时方可淘汰。
+- **更新任务与流量事实**：既有 worker 更新任务与系统更新任务遵守真实占用、尝试历史与回执合同（不伪造执行结果、不清除排队恢复）；显式身份恢复按第 11.3 节以 `superseded` 释放旧身份任务占用并保留执行证据；队列身份、未确认日志、最终补传证据与恢复 journal 不按年龄清理；旧无编号流量回执按第 21 节的 7 天完成记账窗口淘汰（无同批 pending），新协议须满足 `R ≤ A ≤ C` 且 ≥24 小时方可淘汰。
 
 # 27. API
 
@@ -617,7 +617,7 @@ GET    /install/ca.pem                       # 无需登录，返回面板顶层
 - 节点对象含 `tags`、`gostCoreSupported`、`relayCleanupPending`/`relayCleanupCode`、`publicIp`、`publicIpSource`、`publicAddresses`、`publicIpSelected`、`publicIpSelectionMissing`、`connectHost` 与只读 `countryCode`。`PUT /nodes/{id}` 与 `enrollment-token` 校验 `connectHost`（`netaddr.ValidHostName`，非法 400）。
 - `DELETE /nodes/{id}`（Owner）执行第 11.3 节连带删除，成功 200 `{pendingNodes}`，阻塞 409 `node_delete_blocked` 与 `error.blockers`。
 - `server-order` GET 允许 Owner/Viewer，PUT 仅 Owner＋CSRF（`{ids,expectedRevision}`，≤1000 个存在未删除 ID，冲突 409 `settings_conflict`）。
-- 原位恢复：`recovery-token` 201 返回一次性 `enrollmentToken`（`purpose:"recover"`，300–3600 秒）；未登记/禁用/已删 409 `node_not_enrolled`，存在未完成任务 409 `node_recovery_blocked` 与 `blockers`。
+- 原位恢复：`recovery-token` 201 返回一次性 `enrollmentToken`（`purpose:"recover"`，300–3600 秒）；未登记/禁用/已删 409 `node_not_enrolled`，存在未完成配置发布或核心移除任务 409 `node_recovery_blocked` 与 `blockers`；Agent 升级和核心更新任务不拦截安装恢复。
 - `metrics`（Owner/Viewer）：默认 24 小时，≤12 小时原始分钟点，>12 小时 epoch 对齐分桶（`intervalSeconds=ceil(hours×60/720)×60`），缺测为 `null`。
 - `tuning` PUT（Owner＋CSRF）：`{settings,clear,confirmNodeId,installMissingModules?}`，拒绝未知字段，202 `{requestId,status:"pending"}`；并发/能力/离线见第 22.0 节。`meta` 支持可选 `bandwidthMbps`（1–100000）与 `portRangeStart`/`portRangeEnd`（须同时设置或清空）。
 - 整机流量：GET 允许 Owner/Viewer，PUT settings 仅 Owner＋CSRF，须提交完整 `{method,interfaceName,allowanceBytes,resetDay}`（拒绝未知字段，字节为十进制字符串，`status` 为 `measured`/`stale`/`unknown`）。
@@ -900,7 +900,7 @@ POST /api/v1/notification-channels/{id}/test
 | 出站源绑定、隧道、画布与清理队列（`outbounds.source_*`、`tunnels*`、`port_claims`、`tunnel_objects`、`canvas_*`、`canvas_entry_bindings`、`relay_cleanup_nodes`） | 校验语法、ID 唯一归属、端口声明完整无冲突与快照合法，拒绝孤立/重复归属且不自动重建声明；密封 GOST 证书原样恢复不重签；历史 `canvas_entry_bindings` 双列同时 `NULL` 及旧 null/缺失画布数组合法可读；已发布隧道/画布对象恢复后标 `modified` 须手工发布；保留 `relay_cleanup_nodes` 交重试器继续处理 |
 | 分组成员与导入节点（`node_group_relays`、`imported_proxies`、`subscription_sources`、`user_source_grants`） | 校验 `node_group_relays` 每组 ≤500 且目标合法、`imported_proxies.revision ≥ 1` 且明文与密封一致、`latest_result_json` 为固定码且无自由文本；`content` 拒绝整源但允许合法悬空精确成员，URL 整源仍合法；成员、授权与导入节点按当前库保守权威规则合并，不复活已撤销访问、不按名配对、不重抓 |
 | 节点身份恢复与作废（`node_identity_retirements`、`node_identity_recoveries`） | 作废指纹只并入不复活，永不覆盖当前身份；恢复记录以当前库为准，`issued` 统一置过期，不重发恢复码、不重签证书 |
-| 多核心任务与 Agent 更新任务（`core_update_tasks`、`core_remove_tasks`、`agent_system_update_*`、既有 worker 任务） | 校验组件/结果一致且同组件无添加与移除冲突；核心 `queued`/`running` 置 `unconfirmed` 不重发。既有 worker 任务与系统更新任务严格按真实终态、节点、原命令与修订核对合并：当前仍有未收尾任务时明确拒绝恢复，绝不清除排队恢复或伪造终态 |
+| 多核心任务与 Agent 更新任务（`core_update_tasks`、`core_remove_tasks`、`agent_system_update_*`、既有 worker 任务） | 校验组件/结果一致且同组件无添加与移除冲突；核心 `queued`/`running` 置 `unconfirmed` 不重发。既有 worker 任务与系统更新任务严格按真实终态、节点、原命令与修订核对合并：当前仍有未收尾任务时明确拒绝恢复，绝不清除排队恢复或伪造执行结果；`superseded` 允许协调状态与原执行结果不同，按当前库保留记录且恢复后不重新激活 |
 | 调优与建议（`node_tuning`、`node_tuning_dismissals`） | 校验白名单键与值长度 ≤256；恢复以当前库为准，删归档独有行，将 `pending` 置 `unconfirmed`，不重发也不写宿主 sysctl |
 | 流量账本、核心小时与回执封存（`node_traffic_cursors`、`core_traffic_samples`、`core_traffic_hourly`、`traffic_storage_job`、`traffic_delivery_queues`、回执与 pending） | 作为整组事实保护：有当前冻结库时先认证并迁移证据副本，统计、游标、回执完成 `C`/确认 `A`/封存 `R` 以当前库为准，pending 并集冲突拒绝恢复，绝不复活 `R` 以内数据；旧无编号回执按 7 天完成记账窗口淘汰（无同批 pending），不复活当前库已淘汰的回执；窗口外重发可能重复计入 |
 | 整机月流量（`node_machine_traffic_settings`/`daily`/`cursors`） | 三表长期保留、全部校验；有当前冻结库时整组保留当前表（空表亦权威），避免丢失当前量或复活旧量 |

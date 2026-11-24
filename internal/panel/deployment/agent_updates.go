@@ -63,8 +63,16 @@ func agentUpdateAvailable(ctx context.Context, tx *sql.Tx, nodeID string) error 
 // PendingAgentUpdate only resumes an existing signed worker task. New upgrades
 // are queued exclusively through the full system updater.
 func (r *Repository) PendingAgentUpdate(ctx context.Context, nodeID string) (*pb.AgentUpdateCommand, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := agentidentity.CheckTx(ctx, tx, nodeID); err != nil {
+		return nil, err
+	}
 	var data []byte
-	err := r.Database.QueryRowContext(ctx, "SELECT a.request_json FROM agent_update_tasks t JOIN agent_update_attempts a ON a.command_id=t.command_id WHERE t.node_id=? AND t.status IN ('queued','running')", nodeID).Scan(&data)
+	err = tx.QueryRowContext(ctx, "SELECT a.request_json FROM agent_update_tasks t JOIN agent_update_attempts a ON a.command_id=t.command_id WHERE t.node_id=? AND t.status IN ('queued','running')", nodeID).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -75,19 +83,22 @@ func (r *Repository) PendingAgentUpdate(ctx context.Context, nodeID string) (*pb
 	if err != nil || request.NodeID != nodeID {
 		return nil, release.ErrUpdate
 	}
-	if err := requireAgentVersion(ctx, r.Database, nodeID, request.Release.Manifest.Version); err != nil {
+	if err := requireAgentVersion(ctx, tx, nodeID, request.Release.Manifest.Version); err != nil {
 		return nil, err
 	}
 	if request.Operation == "recover" {
 		var supported bool
-		if err := r.Database.QueryRowContext(ctx, "SELECT agent_supported AND agent_recovery_supported FROM node_update_capabilities WHERE node_id=?", nodeID).Scan(&supported); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT agent_supported AND agent_recovery_supported FROM node_update_capabilities WHERE node_id=?", nodeID).Scan(&supported); err != nil {
 			return nil, err
 		}
 		if !supported {
 			return nil, nil
 		}
 	}
-	if _, err := r.Database.ExecContext(ctx, "UPDATE agent_update_tasks SET status='running',updated_at=? WHERE command_id=? AND status='queued'", now(), request.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE agent_update_tasks SET status='running',updated_at=? WHERE command_id=? AND status='queued'", now(), request.ID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &pb.AgentUpdateCommand{RequestJson: data}, nil
@@ -110,7 +121,7 @@ func (r *Repository) AgentUpdateResult(ctx context.Context, nodeID string, paylo
 	}
 	var requestData, old []byte
 	var taskID string
-	if err := tx.QueryRowContext(ctx, "SELECT a.task_id,a.request_json,a.result_json FROM agent_update_attempts a JOIN agent_update_tasks t ON t.id=a.task_id WHERE a.command_id=? AND t.node_id=?", result.ID, nodeID).Scan(&taskID, &requestData, &old); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT a.task_id,a.request_json,a.result_json FROM agent_update_attempts a JOIN agent_update_tasks t ON t.id=a.task_id WHERE a.command_id=? AND t.node_id=? AND t.status<>'superseded'", result.ID, nodeID).Scan(&taskID, &requestData, &old); err != nil {
 		return err
 	}
 	request, err := release.DecodeAgentUpdateRequest(requestData)

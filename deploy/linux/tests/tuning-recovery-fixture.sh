@@ -67,17 +67,21 @@ systemctl() {
   if [[ $scenario == install-failure && $* == *start*probe.service* ]]; then return 1; fi
 }
 
+# The state tool (journal, own-copy check, discard) needs root-owned 0700
+# directories and is covered by update-test.sh. This fixture exercises tuning
+# unit recovery only, often as an ordinary user, so the state layer is bound
+# to the fixture like the init operations above.
+prepare_recovery_state_helper() { :; }
+journal_read() {
+  journal_component=agent journal_previous=previous-helper journal_target=candidate-helper
+  journal_was_active=false journal_backup='' journal_database_source='' journal_phase=prepared
+  journal_core_request='' journal_core_helper=''
+}
+journal_write() { printf 'phase=%s\n' "$1" > "$snapshot/journal"; }
+dispose_snapshot() { rm -rf -- "$snapshot"; snapshot=''; }
+
 recover_fixture() {
-  cat > "$snapshot/journal" <<EOF
-proxycontrol-update-journal-v1
-component=agent
-previous=previous-helper
-target=candidate-helper
-was_active=false
-backup=
-database_source=
-phase=prepared
-EOF
+  : > "$snapshot/journal"
   recover_snapshot "$snapshot" "$mode"
 }
 

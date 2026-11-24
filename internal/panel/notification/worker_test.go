@@ -73,7 +73,7 @@ func TestAlertMapsKnownKinds(t *testing.T) {
 		{alert: "certificate_renewal", wantTitle: "证书续期失败"},
 		{alert: "certificate_deploy_failed", wantTitle: "证书自动发布失败"},
 		{alert: "node_renewal", wantTitle: "服务器续费提醒"},
-		{alert: "auto_quota_failed", wantTitle: "自动额度发布失败"},
+		{alert: "user_access_failed", wantTitle: "自动额度发布失败"},
 		{alert: "other_unknown", wantTitle: "系统告警"},
 	} {
 		worker.Alert(ctx, map[string]any{
@@ -122,5 +122,23 @@ func TestAlertMapsKnownKinds(t *testing.T) {
 	itemsAfter, totalAfter, _ := repo.List(ctx, false, false, 1, 10)
 	if totalAfter != 5 || len(itemsAfter) != 5 {
 		t.Fatalf("alert should have been ignored when rule disabled, got total=%d", totalAfter)
+	}
+}
+
+func TestAlertCarriesNodeAndBody(t *testing.T) {
+	for _, anyMap := range []bool{false, true} {
+		for _, tc := range []struct{ kind, title string }{{"node_renewal", "服务器续费提醒"}, {"user_access", "用户访问状态变化"}, {"device_limit", "设备上限触发"}} {
+			repo, _ := newTestRepo(t)
+			w := Worker{Repository: repo}
+			var payload any = map[string]string{"alert": tc.kind, "nodeId": "deleted-node", "message": "服务器 details"}
+			if anyMap {
+				payload = map[string]any{"alert": tc.kind, "nodeId": "deleted-node", "message": "服务器 details"}
+			}
+			w.Alert(context.Background(), payload)
+			items, n, err := repo.List(context.Background(), false, false, 1, 10)
+			if err != nil || n != 1 || items[0].NodeID != "deleted-node" || items[0].Body != "服务器 details" || items[0].Title != tc.title {
+				t.Fatal(items, n, err)
+			}
+		}
 	}
 }

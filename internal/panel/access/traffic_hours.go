@@ -58,14 +58,14 @@ func PrepareNodeTrafficHours(ctx context.Context, database *sql.DB, limit int) (
 		if k.source == "account" {
 			minuteTable = "account_traffic_minutes"
 		}
-		sourceRows, err := conn.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM `+table+` WHERE node_id=? AND epoch=? AND substr(observed_at,1,13)=?
- UNION ALL SELECT upload_bytes,download_bytes FROM `+minuteTable+` WHERE node_id=? AND epoch=? AND substr(bucket,1,13)=?`, k.node, k.epoch, k.bucket[:13], k.node, k.epoch, k.bucket[:13])
+		sourceRows, err := conn.QueryContext(ctx, `SELECT upload_bytes,download_bytes,1 AS samples FROM `+table+` WHERE node_id=? AND epoch=? AND substr(observed_at,1,13)=?
+ UNION ALL SELECT upload_bytes,download_bytes,samples FROM `+minuteTable+` WHERE node_id=? AND epoch=? AND substr(bucket,1,13)=?`, k.node, k.epoch, k.bucket[:13], k.node, k.epoch, k.bucket[:13])
 		if err != nil {
 			return false, err
 		}
 		for sourceRows.Next() {
-			var u, d int64
-			if err := sourceRows.Scan(&u, &d); err != nil {
+			var u, d, count int64
+			if err := sourceRows.Scan(&u, &d, &count); err != nil {
 				sourceRows.Close()
 				return false, err
 			}
@@ -73,12 +73,12 @@ func PrepareNodeTrafficHours(ctx context.Context, database *sql.DB, limit int) (
 				sourceRows.Close()
 				return false, fmt.Errorf("negative traffic source sample")
 			}
-			if overflow || u > math.MaxInt64-up || d > math.MaxInt64-down || samples == math.MaxInt64 {
+			if overflow || u > math.MaxInt64-up || d > math.MaxInt64-down || count > math.MaxInt64-samples {
 				overflow = true
 			} else {
 				up += u
 				down += d
-				samples++
+				samples += count
 			}
 		}
 		readErr, closeErr := sourceRows.Err(), sourceRows.Close()

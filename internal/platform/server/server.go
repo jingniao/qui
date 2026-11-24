@@ -402,7 +402,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	s.quotaDeployer.record = systemRepository.Record
 	// A renewed certificate reaches the nodes that serve it through an automatic
 	// revision inside the Owner's deploy window.
-	s.certificateDeployer = newCertificateDeployer(logger, s.certificates, deployments, eventBus.Publish)
+	s.certificateDeployer = newCertificateDeployer(logger, s.certificates, deployments, s.nodeRepository, eventBus.Publish)
 	s.certificateDeployer.record = systemRepository.Record
 	s.certificateDeployer.location = func(ctx context.Context) (*time.Location, error) {
 		base, err := systemRepository.ReadBase(ctx)
@@ -659,12 +659,13 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(16)
+	jobs.Add(17)
 	defer func() { stopBackground(); jobs.Wait() }()
 	go func() { defer jobs.Done(); s.nodeRepository.Liveness.Run(background, s.Logger) }()
 	go func() { defer jobs.Done(); s.runtimeSnapshots.Run(background, s.Logger) }()
 	go func() { defer jobs.Done(); s.statistics.Run(background) }()
 	go func() { defer jobs.Done(); s.runRelayCleanup(background) }()
+	go func() { defer jobs.Done(); s.runSpaceMaintenance(background) }()
 	go func() { defer jobs.Done(); s.runTunnelFinalization(background) }()
 	go func() { defer jobs.Done(); s.cycleScheduler.run(background) }()
 	// One worker owns issuance and renewal: it marks interrupted runs, sweeps
@@ -720,32 +721,11 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 			if err != nil && background.Err() == nil {
 				s.Logger.Error("access and traffic storage cleanup failed", "error", err)
 			}
-			var spaceErr error
-			if err == nil && !pending && background.Err() == nil {
-				begin, beginCancel := context.WithTimeout(background, 2*time.Second)
-				attempt, beginErr := s.accessRepository.BeginSpaceMaintenance(begin)
-				beginCancel()
-				spaceErr = beginErr
-				if beginErr == nil {
-					maintenance, maintenanceCancel := context.WithTimeout(background, 2*time.Second)
-					mode, reclaimErr := db.ReclaimFreePages(maintenance, s.Database)
-					maintenanceCancel()
-					// Persist a short attempt's result even during shutdown. If storage
-					// remains unavailable, the durable running marker stays unconfirmed.
-					record, recordCancel := context.WithTimeout(context.Background(), 2*time.Second)
-					recordErr := s.accessRepository.FinishSpaceMaintenance(record, attempt, mode, reclaimErr != nil)
-					recordCancel()
-					spaceErr = errors.Join(reclaimErr, recordErr)
-				}
-				if spaceErr != nil && background.Err() == nil {
-					s.Logger.Error("SQLite free page reclamation failed; committed retention progress is preserved")
-				}
-			}
 			delay := time.Hour
 			if pending {
 				delay = time.Second
 			}
-			if err != nil || spaceErr != nil {
+			if err != nil {
 				delay = time.Minute
 			}
 			timer := time.NewTimer(delay)

@@ -10,6 +10,63 @@ import (
 	"proxycontrol/internal/platform/db"
 )
 
+func TestTrafficHoursPreserveMinuteSampleCounts(t *testing.T) {
+	r, _, record := fixture(t)
+	ctx := context.Background()
+	start := time.Date(2026, 11, 30, 23, 0, 0, 0, time.UTC)
+	for _, statement := range []string{
+		`INSERT INTO core_traffic_samples(node_id,core,epoch,observed_at,upload_bytes,download_bytes) VALUES(?,'xray','c',?,2,3)`,
+		`INSERT INTO account_traffic_samples(node_id,epoch,credential_id,observed_at,user_id,device_id,upload_bytes,download_bytes) VALUES(?,'a','cred',?,'u','d',5,7)`,
+		`INSERT INTO core_traffic_minutes(node_id,core,epoch,bucket,upload_bytes,download_bytes,samples) VALUES(?,'xray','c',?,11,13,3)`,
+		`INSERT INTO account_traffic_minutes(node_id,epoch,credential_id,bucket,user_id,device_id,upload_bytes,download_bytes,samples) VALUES(?,'a','cred',?,'u','d',17,19,5)`,
+	} {
+		if _, err := r.Database.Exec(statement, record.NodeID, nanoTimestamp(start)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []NodeTrafficTotal{{NodeID: record.NodeID, Upload: 35, Download: 42, Samples: 10}}
+	before, err := ReadNodeTraffic(ctx, r.Database, start, start.Add(time.Hour), record.NodeID, false)
+	if err != nil || !reflect.DeepEqual(before, want) {
+		t.Fatalf("before=%+v err=%v want=%+v", before, err, want)
+	}
+	if more, err := PrepareNodeTrafficHours(ctx, r.Database, 2); err != nil || more {
+		t.Fatalf("prepare more=%v err=%v", more, err)
+	}
+	after, err := ReadNodeTraffic(ctx, r.Database, start, start.Add(time.Hour), record.NodeID, false)
+	if err != nil || !reflect.DeepEqual(after, want) {
+		t.Fatalf("after=%+v err=%v want=%+v", after, err, want)
+	}
+}
+
+func TestTrafficHoursMinuteSampleCountOverflowIsVisible(t *testing.T) {
+	for _, source := range []string{"core", "account"} {
+		t.Run(source, func(t *testing.T) {
+			r, _, record := fixture(t)
+			ctx := context.Background()
+			start := time.Date(2026, 11, 30, 23, 0, 0, 0, time.UTC)
+			query := `INSERT INTO core_traffic_minutes(node_id,core,epoch,bucket,upload_bytes,download_bytes,samples) VALUES(?,'xray','e',?,1,2,?)`
+			if source == "account" {
+				query = `INSERT INTO account_traffic_minutes(node_id,epoch,credential_id,bucket,user_id,device_id,upload_bytes,download_bytes,samples) VALUES(?,'e','cred',?,'u','d',1,2,?)`
+			}
+			for i, samples := range []int64{math.MaxInt64, 1} {
+				if _, err := r.Database.Exec(query, record.NodeID, nanoTimestamp(start.Add(time.Duration(i)*time.Minute)), samples); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := PrepareNodeTrafficHours(ctx, r.Database, 1); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadNodeTraffic(ctx, r.Database, start, start.Add(time.Hour), record.NodeID, false); err == nil {
+				t.Fatal("minute sample count overflow hidden by prepared hour")
+			}
+			var count int
+			if err := r.Database.QueryRow(`SELECT count(*) FROM ` + source + `_traffic_minutes`).Scan(&count); err != nil || count != 2 {
+				t.Fatalf("source count=%d err=%v", count, err)
+			}
+		})
+	}
+}
+
 func TestTrafficHoursExactChangesAndSourceSwitch(t *testing.T) {
 	r, _, record := fixture(t)
 	ctx := context.Background()

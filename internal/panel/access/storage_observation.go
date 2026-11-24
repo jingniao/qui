@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"proxycontrol/internal/platform/db"
 	"proxycontrol/internal/platform/httpapi"
 )
 
@@ -27,6 +28,7 @@ type StorageObservation struct {
 	MainDatabaseAllocatedBytes int64                     `json:"mainDatabaseAllocatedBytes"`
 	MainDatabaseReusableBytes  int64                     `json:"mainDatabaseReusableBytes"`
 	MainDatabaseReclaimMode    string                    `json:"mainDatabaseReclaimMode"`
+	MainDatabaseReclaimPending bool                      `json:"mainDatabaseReclaimPending"`
 	WarningBytes               int64                     `json:"warningBytes"`
 	CriticalBytes              int64                     `json:"criticalBytes"`
 	WarningLevel               string                    `json:"warningLevel"`
@@ -51,13 +53,15 @@ func (r *Repository) StorageObservation(ctx context.Context) (StorageObservation
 		{"access_rollups", "domain_minutes", "policy"},
 		{"traffic_hourly", "domain_hours", "policy"},
 		{"account_traffic_hourly", "account_hours", "policy"},
-		{"account_traffic_samples", "account_samples", "policy"},
+		{"account_traffic_samples", "account_samples", "one_day"},
 		{"traffic_daily", "domain_days", "long_term"},
 		{"account_traffic_daily", "account_days", "long_term"},
 		{"access_batches", "access_receipts", "replay_protection"},
+		// Numbered confirmation windows and the seven-day completed legacy
+		// window both contribute to the same retired_receipts counter.
 		{"traffic_batches", "account_receipts", "confirmed_window"},
 		{"traffic_cursors", "account_cursors", "replay_protection"},
-		{"core_traffic_samples", "core_samples", "seven_days"},
+		{"core_traffic_samples", "core_samples", "one_day"},
 		{"core_traffic_minutes", "core_minutes", "seven_days"},
 		{"core_traffic_hourly", "core_hours", "long_term"},
 		{"account_traffic_minutes", "account_minutes", "policy"},
@@ -97,6 +101,7 @@ func (r *Repository) StorageObservation(ctx context.Context) (StorageObservation
 		result.MainDatabaseReclaimMode = "full"
 	case 2:
 		result.MainDatabaseReclaimMode = "incremental"
+		result.MainDatabaseReclaimPending = free > db.ReclaimFreePageThreshold
 	default:
 		return result, ErrInvalid
 	}

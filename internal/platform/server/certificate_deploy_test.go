@@ -308,7 +308,7 @@ func TestCertificateDeployGivesUpAfterThreeFailedWindows(t *testing.T) {
 			t.Fatalf("day %d: a failed node was retried inside the same window", day)
 		}
 	}
-	if alerts := c.alerts.payloads("certificate_deploy_failed"); len(alerts) != 1 || alerts[0]["nodeId"] != c.nodeID {
+	if alerts := c.alerts.payloads("certificate_deploy_failed"); len(alerts) != 1 || alerts[0]["nodeId"] != c.nodeID || !strings.Contains(alerts[0]["message"], "节点「Quota Node」证书自动发布连续 3 次失败，已停止重试：") {
 		t.Fatalf("alerts: %v", c.alerts.alerts)
 	}
 	if countAdminOperations(t, c.quotaFixture, "证书自动发布失败") != 1 {
@@ -346,7 +346,7 @@ func TestCertificateDeployerReconcilesAtStartAndOnRenewal(t *testing.T) {
 	// A renewal made while the panel was down: the restarted deployer finds the
 	// difference in its first pass.
 	c.renew(t)
-	restarted := newCertificateDeployer(c.deployer.logger, c.app.certificates, c.app.deployments, c.deployer.publish)
+	restarted := newCertificateDeployer(c.deployer.logger, c.app.certificates, c.app.deployments, c.app.nodeRepository, c.deployer.publish)
 	restarted.now, restarted.location, restarted.record = c.deployer.now, c.deployer.location, c.deployer.record
 	ctx, stop := context.WithCancel(c.ctx)
 	done := make(chan struct{})

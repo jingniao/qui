@@ -59,6 +59,6 @@ func pruneInTx(ctx context.Context, tx *sql.Tx, now time.Time, retention Retenti
 	if _, err := tx.ExecContext(ctx, "DELETE FROM account_traffic_samples WHERE observed_at<?", now.AddDate(0, 0, -retention.HourlyDays).UTC().Format("2006-01-02T15:04:05.000000000Z")); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, "DELETE FROM account_traffic_minutes WHERE bucket<?", timestamp(now.AddDate(0, 0, -retention.HourlyDays)))
+	_, err := tx.ExecContext(ctx, "DELETE FROM account_traffic_minutes WHERE bucket<?", nanoTimestamp(now.AddDate(0, 0, -retention.HourlyDays)))
 	return err
 }

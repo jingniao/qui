@@ -721,7 +721,7 @@ func TestQuotaAgentFailureRetriesWithANewRevisionAndGivesUp(t *testing.T) {
 	if count := countAdminOperations(t, f, "自动额度发布失败"); count != 1 {
 		t.Fatalf("admin operations recording the failure: %d", count)
 	}
-	if published := alerts.payloads("user_access_failed"); published[0]["nodeId"] != f.nodeID {
+	if published := alerts.payloads("user_access_failed"); published[0]["nodeId"] != f.nodeID || !strings.Contains(published[0]["message"], "节点「Quota Node」自动额度发布连续 3 次失败，已停止重试：") {
 		t.Fatalf("failure alert named the wrong node: %v", published[0])
 	}
 }
@@ -1146,6 +1146,7 @@ func TestQuotaRenewalKeepsQuickAccessInbound(t *testing.T) {
 func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
 	t.Parallel()
 	f := newQuotaFixture(t)
+	alerts := f.recordAlerts()
 	account, credential := f.addProtocolUser(t, "quick_cycle_user", "", "socks5")
 	f.publish(t)
 	f.quickAccess(t, "socks5", "0.0.0.0", 1080)
@@ -1183,6 +1184,15 @@ func TestQuotaDisableAndReEnableKeepQuickAccessInbound(t *testing.T) {
 	}
 	if !inboundIntentNames(intent, inbound.ID) {
 		t.Fatalf("the automatic revision lost the owner-enabled inbound: %v", intent)
+	}
+	payloads := alerts.payloads("user_access")
+	if len(payloads) != 2 {
+		t.Fatal(payloads)
+	}
+	for _, payload := range payloads {
+		if !strings.Contains(payload["message"], "用户「quick_cycle_user」") || !strings.Contains(payload["message"], "下一次自动额度发布") {
+			t.Fatal(payload)
+		}
 	}
 }
 

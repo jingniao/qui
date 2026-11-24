@@ -60,7 +60,17 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
-	if _, err = database.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err == nil {
+	// Set the file format before the first table is created. Existing databases
+	// retain their mode: converting NONE/FULL is an Owner maintenance decision.
+	var tables int
+	err = database.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE type='table'").Scan(&tables)
+	if err == nil && tables == 0 {
+		_, err = database.ExecContext(ctx, "PRAGMA auto_vacuum = INCREMENTAL")
+	}
+	if err == nil {
+		_, err = database.ExecContext(ctx, "PRAGMA journal_mode = WAL")
+	}
+	if err == nil {
 		err = Migrate(ctx, database, migrations.Files)
 	}
 	if err != nil {

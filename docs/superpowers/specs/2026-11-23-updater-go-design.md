@@ -1,6 +1,6 @@
 # 更新器 Go 化设计（B3）
 
-> 状态：Owner 已于 2026-11-23 选择方案 B（渐进下沉）。数据库文件链路已随 v1.10.4 发布；其余阶段仍为后续范围。实施见[数据库 Go 下沉计划](../plans/2026-11-23-update-database-go.md)，验证见[发布说明](../../releases/release-notes-1.10.4.md)。来源：2026-11-23 项目审查第二部分第 3 条。
+> 状态：Owner 已于 2026-11-23 选择方案 B（渐进下沉）。数据库文件链路已随 v1.10.4 发布；journal/快照丢弃/事件下沉已进入后续版本源码，尚未发布。实施见[数据库 Go 下沉计划](../plans/2026-11-23-update-database-go.md)，验证见[发布说明](../../releases/release-notes-1.10.4.md)。来源：2026-11-23 项目审查第二部分第 3 条。
 
 ## 1. 现状
 
@@ -15,7 +15,7 @@
 对外合同（任何方案都不能变）：
 
 - 命令行参数、退出码；`--system-update-contract` 输出 `proxy-agent-system-update-v1`（`agent-update-request.sh:127` 校验）。
-- `QUI_UPDATE_REPORT_FD`（3～8）上的 JSON 事件行 `{"stage","state","exitCode","error"}` 与阶段名，`panel-update-request.sh`、`agent-update-request.sh` 依赖。
+- `QUI_UPDATE_REPORT_FD`（3～8）上的 JSON 事件行 `{"stage","state","exitCode","error"}` 与阶段名，`agent-update-request.sh` 依赖；`panel-update-request.sh` 不传报告 fd、不消费这些事件。
 - 登记目录布局：`rollback.*`、`discard.*`、`check.*`、`web-handover.*`、`update.lock`（fd 9 + flock，Alpine busybox 只有 `-n`）、journal v1 文本格式。
 - 开机单元固定用 Bash 调用快照内的 `updater` 文件。
 - 旧版本写下的快照由快照内自带的旧 updater 恢复（`recover_interrupted_updates` 现有机制），新实现只需能转交。
@@ -73,4 +73,4 @@
 
 Owner 已选择方案 B：保留 Bash 入口，冻结脚本规模，后续新增复杂逻辑及现有热点逐项下沉到 Go。方案 A 留作比较记录，不进入实施。
 
-v1.10.3 未包含 Go 下沉。Owner 随后明确要求先实施数据库备份比较与预检，并与 B1 在线判定改造一起完成；当前工作区已落地该首项，验证见实施计划。journal/快照丢弃与事件 JSON 下沉仍为后续独立范围。
+v1.10.3 未包含 Go 下沉。Owner 随后明确要求先实施数据库备份比较与预检，并与 B1 在线判定改造一起完成；当前工作区已落地该首项，验证见实施计划。journal/快照丢弃与事件 JSON 下沉由独立 `qui-update-state` 实现，保留 Bash 编排与旧 updater 恢复合同；实施与验证记录见 [状态工具计划](../plans/2026-11-23-update-state-go.md)。

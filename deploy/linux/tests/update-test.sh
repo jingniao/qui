@@ -101,6 +101,7 @@ trap cleanup_top EXIT
 
 mkdir -p -- "$TOP/harness"
 (cd -- "$repo_dir" && go build -o "$TOP/harness/qui-update-db" ./cmd/qui-update-db)
+(cd -- "$repo_dir" && go build -o "$TOP/harness/qui-update-state" ./cmd/qui-update-state)
 
 
 # Write the fake init-system library. update.sh and the updater a snapshot carries both
@@ -327,6 +328,7 @@ install_everything() {
     fi
   fi
   install -m 0755 "$(dirname -- "$0")/../../bin/qui-update-db" "$library_dir/qui-update-db"
+  install -m 0755 "$(dirname -- "$0")/../../bin/qui-update-state" "$library_dir/qui-update-state"
   program_digest=$(sha256sum "$program")
   program_digest=${program_digest%% *}
   unit_digest=$(sha256sum "$unit")
@@ -467,6 +469,7 @@ new_scenario() {
   export FAKE_SERVICE_SOURCE=$WORK/service.sh
   export TMPDIR=$dir/tmp
   install -m 0755 -- "$TOP/harness/qui-update-db" "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
+  install -m 0755 -- "$TOP/harness/qui-update-state" "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
   install -m 0755 -- "$update_script" "$WORK/qui-update"
   install -m 0755 -- "$TOP/harness/service.sh" "$WORK/service.sh"
   : > "$FAKE_STATE/calls.log"
@@ -560,6 +563,7 @@ component_files_list() {
     printf '%s\n' "$ROOT/etc/init.d/proxy-$component"
   fi
   printf '%s\n' "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
+  printf '%s\n' "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
   printf '%s\n' "$ROOT/usr/local/bin/qui-update" \
     "$ROOT/usr/local/lib/proxycontrol/service.sh"
   printf '%s\n' "$ROOT/usr/local/bin/qui" "$ROOT/usr/local/lib/proxycontrol/uninstall.sh"
@@ -630,6 +634,7 @@ make_bundle() {
   rm -rf -- "$dir/bundle"
   mkdir -p -- "$base/bin" "$base/deploy/linux"
   install -m 0755 -- "$TOP/harness/qui-update-db" "$base/bin/qui-update-db"
+  install -m 0755 -- "$TOP/harness/qui-update-state" "$base/bin/qui-update-state"
   write_program "$base/bin/proxy-panel" panel "$version"
   write_program "$base/bin/proxy-agent" agent "$version"
   install -m 0755 -- "$TOP/harness/install.sh" "$base/deploy/linux/install.sh"
@@ -991,6 +996,8 @@ make_restored_snapshot() {
   chmod 0700 -- "$snapshot"
   install -m 0600 -- "$WORK/qui-update" "$snapshot/updater"
   install -m 0600 -- "$WORK/service.sh" "$snapshot/service.sh"
+  install -m 0500 -- "$TOP/harness/qui-update-state" "$snapshot/state-helper"
+  sha256sum -- "$snapshot/state-helper" | cut -d ' ' -f 1 > "$snapshot/state-helper.sha256"
   {
     printf 'proxycontrol-update-journal-v1\n'
     printf 'component=panel\n'
@@ -1531,7 +1538,7 @@ scenario_19() {
       # Exclude the two shared files, but include the other program, unit,
       # manifest, panel menu or Agent host-network pair.
       snapshot_file_hashes "$other" "$dir/all-before.sha"
-      grep -vE '/(qui|qui-update|qui-update-db|service.sh|uninstall.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
+      grep -vE '/(qui|qui-update|qui-update-db|qui-update-state|service.sh|uninstall.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
       cp -- "$FAKE_PANEL_DB" "$dir/db-before"
       export FAKE_INSTALL=$outcome
       update_bundle 1.1.0-rc.1 --component "$selected"
@@ -1551,7 +1558,7 @@ scenario_19() {
         expect_same_tree 'selected files restored' "$dir/selected-before.sha" "$dir/selected-after.sha"
       fi
       snapshot_file_hashes "$other" "$dir/all-after.sha"
-      grep -vE '/(qui|qui-update|qui-update-db|service.sh|uninstall.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
+      grep -vE '/(qui|qui-update|qui-update-db|qui-update-state|service.sh|uninstall.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
       expect_same_tree 'other component untouched' "$dir/other-before.sha" "$dir/other-after.sha"
       expect_eq 'other version unchanged' 1.0.9 "$(program_version "$other")"
       if grep -E "^(start|stop|restart) proxy-$other$" "$FAKE_STATE/calls.log"; then
@@ -2034,6 +2041,188 @@ scenario_47() {
   expect_eq '面板仍运行' active "$(service_state_file panel)"
 }
 
+scenario_48() {
+  local component phase damage pending
+  for component in panel agent; do for phase in prepared started; do for damage in missing digest replaced; do
+    new_scenario "scenario-48-$component-$phase-$damage"
+    fake_reset; install_component "$component" 1.7.5
+    if [[ $component == panel ]]; then create_database; fi
+    make_bundle 1.10.4
+    if [[ $phase == prepared ]]; then export FAKE_INSTALL=kill-parent
+    elif [[ $component == agent ]]; then state_failure_tool; export STATE_TOOL_TEST_KILL_PHASE=started
+    else export FAKE_START_KILL=1 FAKE_START_WRITES=1 FAKE_TARGET=1.10.4; fi
+    update_bundle 1.10.4 --component "$component"
+    expect_glob_exists 'state recovery snapshot' "$REGISTRY" 'rollback.*'; pending=$FOUND_GLOB
+    expect_exists 'snapshot state helper' "$pending/state-helper"
+    expect_exists 'snapshot state digest' "$pending/state-helper.sha256"
+    case $damage in
+      missing) rm -- "$pending/state-helper";;
+      digest) printf '%064d\n' 0 > "$pending/state-helper.sha256";;
+      replaced) printf '#!/bin/sh\nexit 99\n' > "$pending/state-helper";;
+    esac
+    unset STATE_TOOL_TEST_KILL_PHASE
+    : > "$FAKE_STATE/calls.log"
+    fake_reset; run_snapshot_recovery "$pending"
+    expect_status 'damaged own helper refuses recovery' 1 "$LAST_STATUS"
+    expect_exists 'refusal keeps journal' "$pending/journal"
+    expect_eq 'refusal does not touch services' '' "$(cat "$FAKE_STATE/calls.log")"
+  done; done; done
+}
+
+state_failure_tool() {
+  export STATE_TOOL_TEST_REAL=$TOP/harness/qui-update-state
+  cat > "$ROOT/usr/local/lib/proxycontrol/qui-update-state" <<'STATE_TOOL'
+#!/bin/bash
+set -euo pipefail
+if [[ $1 == discard && ${STATE_TOOL_TEST_DISCARD:-} == yes ]]; then printf 'injected discard failure\n' >&2; exit 1; fi
+if [[ $1 == journal-write && -n ${STATE_TOOL_TEST_PHASE:-} && " $* " == *" --phase $STATE_TOOL_TEST_PHASE "* ]]; then printf 'injected phase write failure\n' >&2; exit 1; fi
+if [[ $1 == journal-write && -n ${STATE_TOOL_TEST_KILL_PHASE:-} && " $* " == *" --phase $STATE_TOOL_TEST_KILL_PHASE "* ]]; then "$STATE_TOOL_TEST_REAL" "$@"; kill -9 "$PPID"; exit 0; fi
+exec "$STATE_TOOL_TEST_REAL" "$@"
+STATE_TOOL
+  chmod 0755 "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+}
+
+scenario_49() {
+  local mode pending component case_name
+  # Agent has no stop-failure knob and its unwritten commit is a rollback, so
+  # only the shared committed/restored meanings run for both components.
+  for case_name in panel:committed panel:committed-unwritten panel:restored panel:restored-unwritten panel:before \
+    agent:committed agent:restored agent:restored-unwritten; do
+    component=${case_name%%:*} mode=${case_name#*:}
+    new_scenario "scenario-49-$component-$mode"
+    fake_reset; install_component "$component" 1.7.5
+    if [[ $component == panel ]]; then create_database; fi
+    make_bundle 1.10.4
+    state_failure_tool
+    export STATE_TOOL_TEST_DISCARD=yes STATE_TOOL_TEST_PHASE=''
+    case $mode in
+      committed-unwritten) export STATE_TOOL_TEST_PHASE=committed;;
+      restored) export FAKE_INSTALL=fail-after-replace;;
+      restored-unwritten) export FAKE_INSTALL=fail-after-replace STATE_TOOL_TEST_PHASE=restored;;
+      before) export FAKE_STOP_FAIL=1;;
+    esac
+    update_bundle 1.10.4 --component "$component"
+    case $mode in
+      committed) expect_status 'committed cleanup warning keeps success' 0 "$LAST_STATUS"; expect_grep 'cleanup warning visible' '更新成功但快照清理失败' "$dir/update.out";;
+      committed-unwritten) expect_status 'unfinished phase cannot succeed' 1 "$LAST_STATUS"; expect_grep 'rollback hazard visible' '下次运行会回滚本次更新' "$dir/update.out";;
+      restored) expect_status 'installation still fails' 1 "$LAST_STATUS"; expect_grep 'restored cleanup is a warning' '恢复已完成但快照清理失败' "$dir/update.out";;
+      restored-unwritten) expect_status 'unfinished restore fails' 1 "$LAST_STATUS"; expect_grep 'repeat restore warning' '下次运行会重新恢复' "$dir/update.out";;
+      before) expect_status 'original stop failure retained' 1 "$LAST_STATUS"; expect_grep 'original error visible' '无法停止' "$dir/update.out"; expect_grep 'discard error visible' '快照丢弃失败' "$dir/update.out";;
+    esac
+    expect_no_glob 'no active helper after exit' "$REGISTRY" '.state-helper.*'
+    unset STATE_TOOL_TEST_DISCARD STATE_TOOL_TEST_PHASE
+    fake_reset
+    if [[ $mode == committed || $mode == restored ]]; then
+      update_bundle 1.10.4 --component "$component"
+      expect_status 'next run finishes cleanup' 0 "$LAST_STATUS"
+      expect_no_glob 'no unfinished snapshots' "$REGISTRY" 'rollback.*'
+    fi
+  done
+}
+
+scenario_50() {
+  local mode pending component before_helpers
+  for component in panel agent; do
+    new_scenario "scenario-50-$component"
+    fake_reset; install_component "$component" 1.7.5
+    if [[ $component == panel ]]; then create_database; fi
+    make_bundle 1.10.4; export FAKE_INSTALL=kill-parent
+    update_bundle 1.10.4 --component "$component"
+    expect_glob_exists 'interrupted snapshot exists' "$REGISTRY" 'rollback.*'; pending=$FOUND_GLOB
+    rm -- "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+    before_helpers=$(find "$REGISTRY" -maxdepth 1 -name '.state-helper.*' -print | sort)
+    fake_reset; run_snapshot_recovery "$pending"
+    expect_status 'own helper survives installed helper missing' 0 "$LAST_STATUS"
+    expect_exists 'rollback restores installed helper' "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+    expect_eq 'recover exit removes its active helper, leaves killed predecessor for next-run' "$before_helpers" "$(find "$REGISTRY" -maxdepth 1 -name '.state-helper.*' -print | sort)"
+  done
+  for mode in latest cancel early-fail; do
+    new_scenario "scenario-50-$mode"
+    fake_reset; install_component panel 1.7.5; create_database
+    touch "$REGISTRY/.database-helper.killed" "$REGISTRY/.state-helper.killed" "$REGISTRY/.update-event.killed"
+    if [[ $mode == latest ]]; then make_bundle 1.7.5; update_bundle 1.7.5 --component panel
+    elif [[ $mode == cancel ]]; then
+      make_bundle 1.10.4
+      run_update --version 1.10.4 --component panel --bundle "$BUNDLE" --sums "$SUMS" < /dev/null
+    else
+      # Fails after helper pinning, before download/stop.
+      install_component agent 1.7.5; make_bundle 1.0.4; update_bundle 1.0.4 --component agent
+    fi
+    expect_no_glob 'active state helper removed' "$REGISTRY" '.state-helper.*'
+    expect_no_glob 'stale database helper removed' "$REGISTRY" '.database-helper.*'
+    expect_no_glob 'stale event removed' "$REGISTRY" '.update-event.*'
+  done
+}
+
+scenario_51() {
+  local version mode component
+  for component in panel agent; do for version in 1.7.5 1.10.3 1.10.4; do for mode in next boot; do
+    new_scenario "scenario-51-$component-$version-$mode"
+    fake_reset; install_component "$component" 1.7.5
+    if [[ $component == panel ]]; then create_database; fi
+    make_bundle 1.10.4
+    gzip -dc "$repo_dir/internal/platform/hostupdatestate/testdata/updater-$version.sh.gz" > "$WORK/qui-update"
+    export FAKE_INSTALL=kill-parent
+    update_bundle 1.10.4 --component "$component"
+    expect_status 'released updater creates interrupted snapshot' 137 "$LAST_STATUS"
+    expect_glob_exists 'real legacy snapshot exists' "$REGISTRY" 'rollback.*'
+    expect_absent 'legacy snapshot has no state helper' "$FOUND_GLOB/state-helper"
+    # Current installed tool cannot influence the old snapshot's own updater.
+    printf '#!/bin/sh\nexit 99\n' > "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+    install -m 0755 -- "$update_script" "$WORK/qui-update"
+    fake_reset
+    if [[ $mode == boot ]]; then run_boot_recovery
+    else
+      # Recovery completes before pinning rejects the replaced installed tool.
+      update_bundle 1.10.4 --component "$component"
+    fi
+    expect_no_glob 'old updater independently recovers snapshot' "$REGISTRY" 'rollback.*'
+    expect_eq 'released recovery restores original program' 1.7.5 "$(program_version "$component")"
+    if [[ $component == panel ]]; then
+      expect_same 'released recovery preserves original database' "$dir/original.db" "$FAKE_PANEL_DB"
+    fi
+    if [[ $mode == boot ]]; then expect_status 'boot transfer succeeds' 0 "$LAST_STATUS"
+    else expect_grep 'next-run transfers old updater' '发现被中断的更新' "$dir/update.out"; fi
+  done; done; done
+}
+
+scenario_52() {
+  new_scenario scenario-52
+  fake_reset; install_component panel 1.7.5; create_database; make_bundle 1.10.4
+  export FAKE_INSTALL=fail-after-replace QUI_UPDATE_REPORT_FD=3
+  exec 3< /dev/null
+  update_bundle 1.10.4 --component panel
+  exec 3<&-
+  unset QUI_UPDATE_REPORT_FD
+  expect_status 'report failure is nonzero' 1 "$LAST_STATUS"
+  expect_eq 'report failure still restores original program' 1.7.5 "$(program_version panel)"
+  expect_same 'report failure still restores original database' "$dir/original.db" "$FAKE_PANEL_DB"
+  expect_eq 'old panel is active' active "$(service_state_file panel)"
+  expect_grep 'report error retained' '更新事件未写出' "$dir/update.out"
+  expect_grep 'operation error retained' 'install.sh 失败' "$dir/update.out"
+  expect_no_glob 'report temporary removed' "$REGISTRY" '.update-event.*'
+  expect_no_glob 'state helper removed' "$REGISTRY" '.state-helper.*'
+}
+
+scenario_53() {
+  new_scenario scenario-53
+  fake_reset; install_component panel 1.7.5; create_database; make_bundle 1.10.4
+  rm -- "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+  WORK=$dir/current-package/deploy/linux
+  mkdir -p "$WORK" "$WORK/../../bin"
+  install -m 0755 "$update_script" "$WORK/qui-update"
+  install -m 0755 "$TOP/harness/service.sh" "$WORK/service.sh"
+  install -m 0755 "$TOP/harness/install.sh" "$WORK/install.sh"
+  install -m 0755 "$TOP/harness/qui-update-state" "$WORK/../../bin/qui-update-state"
+  install -m 0755 "$TOP/harness/qui-update-db" "$WORK/../../bin/qui-update-db"
+  export FAKE_UPDATER_SOURCE=$WORK/qui-update FAKE_INSTALL=fail-after-replace
+  update_bundle 1.10.4 --component panel
+  expect_status 'installation fails and rolls back' 1 "$LAST_STATUS"
+  expect_eq 'rollback restores old target' 1.7.5 "$(program_version panel)"
+  expect_absent 'old snapshot without tool removes newly installed tool' "$ROOT/usr/local/lib/proxycontrol/qui-update-state"
+  expect_no_glob 'private helper survives rollback until cleanup, then removed' "$REGISTRY" '.state-helper.*'
+}
+
 run_scenario() {
   local name=$1 body=$2 status=0 reasons=''
   : > "$failure_file"
@@ -2068,6 +2257,12 @@ run_scenario '44 tool failure and malformed status' scenario_44
 run_scenario '45 killed preflight helper' scenario_45
 run_scenario '46 shared tool with old panel' scenario_46
 run_scenario '47 missing helper keeps panel running' scenario_47
+run_scenario '48 own state helper validation' scenario_48
+run_scenario '49 discard failures preserve phase meaning' scenario_49
+run_scenario '50 state helper lifetime and rollback' scenario_50
+run_scenario '51 released updater recovery transfer' scenario_51
+run_scenario '52 report failure still rolls back' scenario_52
+run_scenario '53 rollback to a snapshot without state tool' scenario_53
 run_scenario '22 multi-core rollback and boot recovery' scenario_22
 run_scenario '23 v1 single core to v2 migration' scenario_23
 run_scenario '24 panel web-UI update bridge in the file list' scenario_24

@@ -410,6 +410,18 @@ func TestStartupTurnsIssuingRowsIntoInterruptedFailures(t *testing.T) {
 
 func TestExpiryAlertIsPublishedOncePerDay(t *testing.T) {
 	fixture := newIssuanceFixture(t)
+	previousPublish := fixture.service.Publish
+	fixture.service.Publish = func(kind string, data any) {
+		if kind == "system.alert" {
+			payload := data.(map[string]string)
+			for _, part := range []string{"证书 edge.example.com 续期失败", "UTC 过期，还剩", "失败代码：" + CodeACMEOrderFailed, "下次重试："} {
+				if !strings.Contains(payload["message"], part) {
+					t.Error("missing certificate detail", part, payload)
+				}
+			}
+		}
+		previousPublish(kind, data)
+	}
 	ctx := context.Background()
 	item := fixture.store(t, []string{"edge.example.com"}, false)
 	fixture.service.run(ctx, item)
@@ -431,6 +443,29 @@ func TestExpiryAlertIsPublishedOncePerDay(t *testing.T) {
 	}
 	if writes := fixture.service.Audit.(*fakeAuditor).actions("证书续期失败"); writes != 2 {
 		t.Fatalf("audit rows: %d", writes)
+	}
+}
+
+func TestExpiryAlertDetails(t *testing.T) {
+	for _, tc := range []struct {
+		remaining time.Duration
+		part      string
+	}{{51 * time.Hour, "还剩 2 天 3 小时"}, {-time.Hour, "已于"}} {
+		f := newIssuanceFixture(t)
+		item := Certificate{ID: "alert-details", Domains: []string{"first.example.com", "second.example.com"}, HasMaterial: true, NotAfter: Stamp(f.now.Add(tc.remaining))}
+		var message string
+		f.service.Publish = func(kind string, data any) {
+			if kind == "system.alert" {
+				message = data.(map[string]string)["message"]
+			}
+		}
+		next := nextAttemptAt(f.now, 2)
+		f.service.alertIfExpiring(context.Background(), item, f.now, CodeACMEOrderFailed, next)
+		for _, part := range []string{"first.example.com（另 1 个域名）", tc.part, "UTC", CodeACMEOrderFailed, "下次重试：" + f.now.Add(6*time.Hour).UTC().Format("2006-01-02 15:04 UTC")} {
+			if !strings.Contains(message, part) {
+				t.Fatal(part, message)
+			}
+		}
 	}
 }
 

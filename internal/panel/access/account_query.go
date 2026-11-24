@@ -45,9 +45,9 @@ func (r *Repository) AccountSummary(ctx context.Context, filter Filter) (Account
 		if boundary.Equal(boundary.Truncate(time.Minute)) {
 			continue
 		}
-		minute := timestamp(boundary.Truncate(time.Minute))
+		minute := secondPrefix(boundary.Truncate(time.Minute))
 		var count int
-		where, args := accountWhere(filter, minute, timestamp(boundary.Truncate(time.Minute).Add(time.Minute)), "bucket")
+		where, args := accountWhere(filter, minute, secondPrefix(boundary.Truncate(time.Minute).Add(time.Minute)), "bucket")
 		if err := r.Database.QueryRowContext(ctx, "SELECT count(*) FROM account_traffic_minutes"+where, args...).Scan(&count); err != nil {
 			return result, err
 		}

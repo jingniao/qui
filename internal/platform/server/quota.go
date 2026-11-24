@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -138,9 +139,21 @@ func (d *quotaDeployer) evaluateTransitions(ctx context.Context, userIDs []strin
 	return transitions
 }
 
+func userAccessMessage(username, reason string) string {
+	text := map[string]string{"disabled": "已被禁用", "quota_exceeded": "流量额度已用尽", "expired": "已到期", "deleted": "已被删除"}[reason]
+	if reason == "reactivated" {
+		text = "已恢复访问，节点凭据将在下一次自动额度发布中重新下发"
+	} else if text != "" {
+		text += "，节点凭据将在下一次自动额度发布中移除"
+	} else {
+		text = reason
+	}
+	return "用户「" + username + "」" + text + "。"
+}
+
 func (d *quotaDeployer) emitTransitions(ctx context.Context, transitions []user.Transition) {
 	for _, transition := range transitions {
-		d.publish("system.alert", map[string]string{"alert": "user_access", "userId": transition.UserID, "username": transition.Username, "reason": transition.Reason})
+		d.publish("system.alert", map[string]string{"alert": "user_access", "userId": transition.UserID, "username": transition.Username, "reason": transition.Reason, "message": userAccessMessage(transition.Username, transition.Reason)})
 		d.schedule(ctx, transition)
 	}
 }
@@ -185,7 +198,7 @@ func (d *quotaDeployer) accessRemoved(ctx context.Context, userID, username, rea
 	if userID == "" {
 		return
 	}
-	d.publish("system.alert", map[string]string{"alert": "user_access", "userId": userID, "username": username, "reason": reason})
+	d.publish("system.alert", map[string]string{"alert": "user_access", "userId": userID, "username": username, "reason": reason, "message": userAccessMessage(username, reason)})
 	d.schedule(ctx, user.Transition{UserID: userID, Username: username, Reason: reason})
 	// Only a deleted user is forgotten. A deleted device leaves its owner very
 	// much alive, and dropping the owner's entry would swallow its next
@@ -800,7 +813,8 @@ func (d *quotaDeployer) fail(ctx context.Context, nodeID string, entry *quotaPen
 		return quotaRetry
 	}
 	d.logger.Error("automatic quota revision gave up", "node", nodeID, "reason", reason, "attempts", entry.attempts, "users", quotaSummary(entry.transitions))
-	d.publish("system.alert", map[string]string{"alert": "user_access_failed", "nodeId": nodeID, "reason": reason})
+	message := fmt.Sprintf("%s自动额度发布连续 %d 次失败，已停止重试：%s", alertNodeName(ctx, d.nodes, d.logger, nodeID), quotaAttemptLimit, reason)
+	d.publish("system.alert", map[string]string{"alert": "user_access_failed", "nodeId": nodeID, "reason": reason, "message": message})
 	if d.record != nil {
 		if err := d.record(ctx, "system", "自动额度发布失败", nodeID, "失败", ""); err != nil {
 			d.logger.Error("automatic quota failure could not be recorded", "node", nodeID, "error", err)

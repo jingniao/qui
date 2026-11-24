@@ -236,34 +236,44 @@ func (h *Handler) putMeta(w http.ResponseWriter, r *http.Request) {
 	h.getMeta(w, r)
 }
 
+type RenewalAlert struct {
+	NodeID, Name, RenewDate string
+	DaysLeft                int
+	AutoRenew               bool
+}
+
 // RenewalAlerts claims a local calendar day before publishing, preventing a
 // panel restart (or simultaneous scheduler calls) from duplicating an alert.
-func (r *Repository) RenewalAlerts(ctx context.Context, now time.Time, location *time.Location) ([]string, error) {
+func (r *Repository) RenewalAlerts(ctx context.Context, now time.Time, location *time.Location) ([]RenewalAlert, error) {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	day := now.In(location).Format("2006-01-02")
-	rows, err := tx.QueryContext(ctx, "SELECT m.node_id,m.renew_date,m.renew_notice_days FROM node_meta m JOIN nodes n ON n.id=m.node_id WHERE n.deleted_at IS NULL AND m.renew_date<>'' AND m.last_alert_day<?", day)
+	rows, err := tx.QueryContext(ctx, "SELECT m.node_id,n.name,m.renew_date,m.renew_notice_days,m.auto_renew FROM node_meta m JOIN nodes n ON n.id=m.node_id WHERE n.deleted_at IS NULL AND m.renew_date<>'' AND m.last_alert_day<?", day)
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{}
+	alerts := []RenewalAlert{}
 	for rows.Next() {
-		var id, date string
+		var item RenewalAlert
 		var days int
-		if err = rows.Scan(&id, &date, &days); err != nil {
+		if err = rows.Scan(&item.NodeID, &item.Name, &item.RenewDate, &days, &item.AutoRenew); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		renew, parseErr := time.ParseInLocation("2006-01-02", date, location)
+		renew, parseErr := time.ParseInLocation("2006-01-02", item.RenewDate, location)
 		if parseErr != nil {
 			rows.Close()
 			return nil, parseErr
 		}
 		if day >= renew.AddDate(0, 0, -days).Format("2006-01-02") {
-			ids = append(ids, id)
+			// Count calendar dates, including across DST changes in panel timezone.
+			y, m, d := now.In(location).Date()
+			ry, rm, rd := renew.Date()
+			item.DaysLeft = int(time.Date(ry, rm, rd, 0, 0, 0, 0, time.UTC).Unix()/86400 - time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix()/86400)
+			alerts = append(alerts, item)
 		}
 	}
 	err = rows.Err()
@@ -271,12 +281,12 @@ func (r *Repository) RenewalAlerts(ctx context.Context, now time.Time, location 
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range ids {
-		if _, err = tx.ExecContext(ctx, "UPDATE node_meta SET last_alert_day=? WHERE node_id=?", day, id); err != nil {
+	for _, item := range alerts {
+		if _, err = tx.ExecContext(ctx, "UPDATE node_meta SET last_alert_day=? WHERE node_id=?", day, item.NodeID); err != nil {
 			return nil, err
 		}
 	}
-	return ids, tx.Commit()
+	return alerts, tx.Commit()
 }
 
 // RenewedNode is one automatic renewal: the passed date and the date it moved to.

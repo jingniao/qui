@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"proxycontrol/internal/panel/connections"
 	"proxycontrol/internal/panel/node"
 	pb "proxycontrol/pkg/contracts/agentpb"
@@ -234,7 +235,7 @@ func (o *DeviceObserver) Command(ctx context.Context, nodeID string) (*pb.Device
 		_, gates, _ := o.Admission.State(uid, u.DeviceLimit)
 		if len(gates) > 0 {
 			r.Entries = append(r.Entries, devicegate.Entry{CredentialID: cid, Keys: gates})
-			o.alert(uid)
+			o.alert(uid, u.Username, u.DeviceLimit)
 		}
 	}
 	data, err := json.Marshal(r)
@@ -265,7 +266,7 @@ func (o *DeviceObserver) Changed() {
 		}
 	}
 }
-func (o *DeviceObserver) alert(userID string) {
+func (o *DeviceObserver) alert(userID, username string, limit int) {
 	now := time.Now()
 	if o.Now != nil {
 		now = o.Now()
@@ -282,6 +283,6 @@ func (o *DeviceObserver) alert(userID string) {
 	o.alerted[userID] = now
 	o.mu.Unlock()
 	if o.Publish != nil {
-		o.Publish("system.alert", map[string]any{"category": "user_access", "userId": userID, "message": "同时在线设备上限已触发"})
+		o.Publish("system.alert", map[string]any{"alert": "device_limit", "userId": userID, "message": fmt.Sprintf("用户「%s」已触发同时在线设备上限（%d 台），超出的设备被拦截。", username, limit)})
 	}
 }

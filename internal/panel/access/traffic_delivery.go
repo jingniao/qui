@@ -315,6 +315,11 @@ func (r *Repository) AdvanceTrafficStorage(ctx context.Context, now time.Time) (
 		more, err = r.retireTrafficReceipts(ctx, now)
 		pending = pending || more
 	}
+	if err == nil {
+		var more bool
+		more, err = r.retireLegacyTrafficReceipts(ctx, now)
+		pending = pending || more
+	}
 	code := ""
 	if err != nil {
 		code = "traffic_storage_failed"
@@ -322,4 +327,37 @@ func (r *Repository) AdvanceTrafficStorage(ctx context.Context, now time.Time) (
 	// Preserve the original error even if persisting the diagnostic also fails.
 	_, saveErr := r.Database.ExecContext(ctx, "UPDATE traffic_storage_job SET error_code=?,last_success_at=CASE WHEN ?='' THEN ? ELSE last_success_at END WHERE id=1", code, code, timestamp(now))
 	return pending, errors.Join(err, saveErr)
+}
+
+func (r *Repository) retireLegacyTrafficReceipts(ctx context.Context, now time.Time) (bool, error) {
+	tx, err := r.Database.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	// An Agent may resend the same batch_id after losing its acknowledgement.
+	// Keep seven days of deduplication. Beyond that window a replay can count
+	// again as a new batch; the Owner explicitly accepts this boundary.
+	cutoff := now.UTC().Add(-7 * 24 * time.Hour)
+	end := cutoff.Truncate(time.Second)
+	if cutoff.Nanosecond() != 0 {
+		end = end.Add(time.Second)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM traffic_batches WHERE rowid IN (
+ SELECT b.rowid FROM traffic_batches b
+ WHERE b.delivery_seq=0 AND b.accounting_completed_at<>'' AND b.received_at<?
+ AND CASE WHEN b.received_at>=? THEN `+normalizedTrafficTimeSQL("b.received_at")+`<? ELSE 1 END
+ AND NOT EXISTS(SELECT 1 FROM traffic_pending_batches p WHERE p.node_id=b.node_id AND p.batch_id=b.batch_id)
+ LIMIT 500)`, secondPrefix(end), secondPrefix(cutoff), nanoTimestamp(cutoff))
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE traffic_storage_job SET retired_receipts=retired_receipts+?,updated_at=? WHERE id=1", count, timestamp(now)); err != nil {
+		return false, err
+	}
+	return count == 500, tx.Commit()
 }

@@ -23,21 +23,21 @@ func TestDeviceObserverHourlyAlertContainsOnlyUserIdentity(t *testing.T) {
 		defer mu.Unlock()
 		calls++
 		fields, ok := payload.(map[string]any)
-		if event != "system.alert" || !ok || len(fields) != 3 || fields["category"] != "user_access" || fields["userId"] != "u" {
+		if event != "system.alert" || !ok || len(fields) != 3 || fields["alert"] != "device_limit" || fields["userId"] != "u" || fields["message"] != "用户「alice」已触发同时在线设备上限（2 台），超出的设备被拦截。" {
 			t.Error("alert contains unexpected material")
 		}
 	}}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); o.alert("u") }()
+		go func() { defer wg.Done(); o.alert("u", "alice", 2) }()
 	}
 	wg.Wait()
 	if calls != 1 {
 		t.Fatal("duplicate alert in one hour")
 	}
 	now = now.Add(time.Hour)
-	o.alert("u")
+	o.alert("u", "alice", 2)
 	if calls != 2 {
 		t.Fatal("next hourly alert suppressed")
 	}

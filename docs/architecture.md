@@ -14,6 +14,8 @@
 
 中央端是一个 Go 程序加本地 SQLite，前端构建产物通过 `web.Files()` 嵌入同一程序（`cmd/panel/main.go`）。代理流量不经过中央端。
 
+主机更新保留 Bash 服务编排、锁及恢复入口。`cmd/qui-update-db` / `internal/platform/hostupdatedb` 处理数据库文件事务；后续版本源码的 `cmd/qui-update-state` / `internal/platform/hostupdatestate` 处理 journal v1、受限快照丢弃和事件 JSON。两种工具均随程序归档共享发布，快照保存自身工具与摘要，旧快照交给自己的旧 updater。面板网页桥接不消费报告 fd；Agent 网页桥接依赖固定事件布局与原始错误 JSON。
+
 ## 2. 监听与数据面
 
 | 端口 | 用途 | 协议 |
@@ -134,7 +136,7 @@ Linux Agent 更新时，仅有效本机更新授权允许 prepared→detached �
 | 节点 | `/usr/local/bin/proxy-agent`、`/usr/local/lib/proxy-agent/<core>` | Agent 引导镜像与安装器放置的代理核心 |
 | 节点 | `/etc/proxy-agent/` | `config.yaml` 与 `tls/ca.crt`（受信中央 CA） |
 | 节点 | `/var/lib/proxy-agent/` | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/`、`host-network/` |
-| 两端 | `/usr/local/bin/qui-update`、`/usr/local/lib/proxycontrol/qui-update-db`、`/var/lib/proxycontrol-install/` | 升级状态机、Go 数据库工具、安装记录与操作锁 |
+| 两端 | `/usr/local/bin/qui-update`、`/usr/local/lib/proxycontrol/qui-update-db`、`/usr/local/lib/proxycontrol/qui-update-state`、`/var/lib/proxycontrol-install/` | 升级状态机、Go 数据库/状态工具、安装记录与操作锁 |
 
 完整路径、属主与权限见[部署与升级 §7](deployment.md#7-目录与权限)。日志由两个程序直接写 stdout，systemd 收集至 journald（`internal/platform/logging`），OpenRC 经 `logger` 写 syslog，不写 `/var/log` 下的独立文件。
 
@@ -166,6 +168,8 @@ Linux Agent 更新时，仅有效本机更新授权允许 prepared→detached �
 
 ## 流量回执与核心历史整理
 
-access 拥有核心小时汇总、统一节点查询和回执检查点；Agent bound spool v2 认证队列身份、固定编号、原文及持久删除事实，control 只传交付身份与确认。完成、确认、封存使用独立于控制连接的连续编号；两端协商后切换，旧回执继续保留。候选双方确认段至少等待 24 小时后分批原子删除回执并推进封存进度，缺口和待续输入阻止跨越。队列表按节点和队列身份保留各代检查点，每节点唯一活动队列；只有显式身份恢复核销可关闭旧队列、授权新队列，普通握手拒绝换身份。恢复把统计、游标、回执及封存状态作为一组保留当前冻结库事实，旧冻结证据认证后迁移副本再读取，冲突暴露为恢复失败。调度复用既有访问清理生命周期，停止和恢复等待同一后台循环。
+access 拥有核心小时汇总、统一节点查询和回执检查点；Agent bound spool v2 认证队列身份、固定编号、原文及持久删除事实，control 只传交付身份与确认。完成、确认、封存使用独立于控制连接的连续编号；两端协商后切换；旧无编号回执仅在接收超过 7 天、记账完成且无同批 pending 时，每批最多 500 行以独立短事务淘汰，与编号回执共用淘汰计数。Agent 丢失确认后可能重发，窗口内仍可去重；窗口外重发可能重复计入，Owner 接受此边界。候选双方确认段至少等待 24 小时后分批原子删除回执并推进封存进度，缺口和待续输入阻止跨越。队列表按节点和队列身份保留各代检查点，每节点唯一活动队列；只有显式身份恢复核销可关闭旧队列、授权新队列，普通握手拒绝换身份。恢复把统计、游标、回执及封存状态作为一组保留当前冻结库事实，旧冻结证据认证后迁移副本再读取，冲突暴露为恢复失败。流量整理复用既有访问清理循环；空闲页回收使用独立循环，整理报错仍按 1 分钟重试，回收不受其成功或 pending 状态阻挡。两个循环共同受停止/恢复生命周期管理。新空库建表前默认 incremental；回收每分钟检查，freelist 超过 32 页时按每段最多 256 页、每轮最多 2048 页和 2 秒预算处理，仍超阈值则 1 秒续跑。已有 NONE/FULL 库不自动转换，不执行全库 VACUUM。
+
+小时展示索引回填累加分钟行的原始 `samples`。迁移 0164 只将含分钟汇总的已就绪小时索引标为待回填，纠正旧版本已有计数；后台继续每轮最多 16 桶，未准备完时查询使用精确源数据，原始样本、分钟汇总和账本保持原样。
 
 详见[实施决定](implementation-decisions.md#2026-11-18-traffic-storage-retirement)。

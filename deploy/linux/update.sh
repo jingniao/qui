@@ -41,35 +41,121 @@ repository=jingniao/qui
 # execution facts; the ordinary terminal uses the very same branches below.
 update_stage=request_check
 update_error=''
-report_json() {
-  local value=$1 number character escaped
-  value=${value//\\/\\\\}; value=${value//\"/\\\"}
-  for ((number=1; number<32; number++)); do
-    printf -v character '%b' "\\$(printf '%03o' "$number")"
-    printf -v escaped '\\u%04x' "$number"
-    value=${value//"$character"/"$escaped"}
-  done
-  printf '"%s"' "$value"
+state_helper='' state_helper_temporary='' event_temporary='' report_failed=false
+state_helper_source() {
+  local prefix=${root:-${QUI_UPDATE_TEST_ROOT:-}} script_directory=''
+  script_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || return 1
+  if [[ -f $script_directory/install.sh ]]; then
+    printf '%s\n' "$script_directory/../../bin/qui-update-state"
+  else
+    printf '%s\n' "$prefix/usr/local/lib/proxycontrol/qui-update-state"
+  fi
+}
+validate_state_helper() {
+  local helper=$1 protocol=''
+  [[ -f $helper && ! -L $helper && $(stat -c '%u:%g' -- "$helper") == 0:0 ]] || return 1
+  case $(stat -c '%a' -- "$helper") in 500|755) ;; *) return 1;; esac
+  protocol=$("$helper" --protocol 9>&-) || return 1
+  [[ $protocol == qui-update-state-v1 ]]
+}
+state_cli() { "$state_helper" "$@" 9>&-; }
+prepare_state_helper() {
+  local source=${1:-} previous=$state_helper_temporary candidate=''
+  [[ -n $source ]] || source=$(state_helper_source) || return 1
+  validate_state_helper "$source" || { printf '缺少可用的状态工具：%s\n' "$source" >&2; return 1; }
+  candidate=$(mktemp "$registry/.state-helper.XXXXXXXX") || return 1
+  if ! install -o root -g root -m 0500 -- "$source" "$candidate" || ! validate_state_helper "$candidate"; then
+    rm -f -- "$candidate" || return 1
+    return 1
+  fi
+  state_helper_temporary=$candidate
+  state_helper=$candidate
+  [[ -z $previous ]] || rm -f -- "$previous" || return 1
+}
+prepare_recovery_state_helper() {
+  local source=$1/state-helper expected='' actual=''
+  [[ -f $source && ! -L $source && $(stat -c '%u:%g:%a' -- "$source") == 0:0:500 ]] || { printf '快照缺少可用状态工具：%s\n' "$1" >&2; return 1; }
+  [[ -f $1/state-helper.sha256 && ! -L $1/state-helper.sha256 ]] || return 1
+  expected=$(cat -- "$1/state-helper.sha256") || return 1
+  actual=$(sha256sum -- "$source") || return 1
+  [[ $expected =~ ^[0-9a-f]{64}$ && $expected == "${actual%% *}" ]] || { printf '快照状态工具摘要不匹配：%s\n' "$1" >&2; return 1; }
+  prepare_state_helper "$source" || return 1
+  actual=$(sha256sum -- "$state_helper") || return 1
+  [[ $expected == "${actual%% *}" ]] || { printf '状态工具活动副本摘要不匹配：%s\n' "$1" >&2; return 1; }
+}
+report_event() {
+  [[ -n ${QUI_UPDATE_REPORT_FD:-} ]] || return 0
+  local helper=$state_helper event_registry=${registry:-${QUI_UPDATE_TEST_ROOT:-}/var/lib/proxycontrol-install} status=0
+  [[ $QUI_UPDATE_REPORT_FD =~ ^[3-8]$ ]] || { printf '更新事件未写出：Invalid update report descriptor.\n' >&2; return 1; }
+  if [[ -z $helper ]]; then
+    helper=$(state_helper_source) || return 1
+    validate_state_helper "$helper" || { printf '更新事件未写出：状态工具缺失或协议无效：%s\n' "$helper" >&2; return 1; }
+  fi
+  if [[ -z $event_temporary ]]; then
+    event_temporary=$(mktemp "$event_registry/.update-event.XXXXXXXX") || { printf '更新事件未写出：无法创建私有事件文件。\n' >&2; return 1; }
+  fi
+  printf '%s' "$4" | "$helper" event --stage "$1" --state "$2" --exit-code "$3" "${@:5}" 9>&- > "$event_temporary" || status=$?
+  if ((status != 0)); then
+    printf '更新事件未写出：状态工具编码失败（%s）。\n' "$status" >&2
+    if [[ ${5:-} == --error-json && $status == 1 ]]; then return 2; fi
+    return 1
+  fi
+  cat -- "$event_temporary" >&"$QUI_UPDATE_REPORT_FD" || { printf '更新事件未写出：事件转发失败。\n' >&2; return 1; }
 }
 report_update() {
-  [[ -n ${QUI_UPDATE_REPORT_FD:-} ]] || return 0
-  [[ $QUI_UPDATE_REPORT_FD =~ ^[3-8]$ ]] || { printf 'Invalid update report descriptor.\n' >&2; exit 1; }
-  printf '{"stage":"%s","state":"%s","exitCode":%s,"error":%s}\n' \
-    "$update_stage" "$1" "${2:-null}" "$(report_json "${3:-}")" >&"$QUI_UPDATE_REPORT_FD"
+  if ! report_event "$update_stage" "$1" "${2:-null}" "${3:-}"; then
+    printf '原始操作错误：%s\n' "${3:-$update_error}" >&2
+    report_failed=true
+  fi
+  # Reporting must not interrupt required core-stop or database/file recovery.
+  # EXIT converts this accumulated failure into a nonzero result.
+  return 0
+}
+report_structured() {
+  local status=0
+  report_event "$1" "$2" "$3" "$4" --error-json || status=$?
+  if ((status == 2)); then
+    printf '结构化错误无效，已按原文上报。\n' >&2
+    report_event "$1" "$2" "$3" "$5" || report_failed=true
+  elif ((status != 0)); then
+    printf '原始操作错误：%s\n' "$5" >&2
+    report_failed=true
+  fi
 }
 report_stage() { update_stage=$1; report_update running; }
+sync_report_fd() {
+  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
+    sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD" || { printf '更新事件未写出：报告 fd 同步失败。\n' >&2; report_failed=true; }
+  fi
+  return 0
+}
 report_terminal() {
   local status=$1
+  if $report_failed && ((status == 0)); then status=1; fi
   update_stage=terminal
   if ((status == 0)); then report_update success "$status"; else report_update failed "$status"; fi
-  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"; fi
+  sync_report_fd
+  ! $report_failed
 }
 fail() { update_error=$*; report_update failed null "$*"; printf '更新被拒绝：%s\n' "$*" >&2; exit 1; }
 if [[ $# == 1 && $1 == --system-update-contract ]]; then
   printf 'proxy-agent-system-update-v1\n'
   exit 0
 fi
-trap 'report_terminal "$?"' EXIT
+cleanup_state_files() {
+  local file status=0
+  for file in "$event_temporary" "${database_helper_temporary:-}" "$state_helper_temporary"; do
+    [[ -z $file ]] || rm -f -- "$file" || status=1
+  done
+  return "$status"
+}
+early_cleanup() {
+  local status=$?
+  report_terminal "$status" || { if ((status == 0)); then status=1; fi; }
+  cleanup_state_files || { if ((status == 0)); then status=1; fi; }
+  exit "$status"
+}
+trap early_cleanup EXIT
 usage() {
   cat <<USAGE
 用法：qui-update [--version X.Y.Z[-rc.N]] [--component panel|agent] [--yes] [--database FILE]
@@ -445,8 +531,8 @@ install_managed_release() {
     # Bind the original managed request before Queue or Apply. The root event
     # journal outlives the bootstrap snapshot and the disposable input directory.
     local_manifest=$(base64 -w 0 "$agent_inputs/manifest.json")
-    printf '{"stage":"managed_request","state":"bound","exitCode":null,"error":"%s:%s:%s"}\n' "$local_request" "$local_digest" "$local_manifest" >&"$QUI_UPDATE_REPORT_FD"
-    sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"
+    report_event managed_request bound null "$local_request:$local_digest:$local_manifest" || report_failed=true
+    sync_report_fd
   fi
   if output=$(agent_cli --install-agent-release --agent-manifest "$agent_inputs/manifest.json" \
     --agent-binary "$agent_inputs/proxy-agent" --agent-version "$version" "${install_options[@]}" 2>&1); then
@@ -458,7 +544,7 @@ install_managed_release() {
     original_json=$(sed -n 's/^proxy-agent-install-original-error-v1 //p' <<< "$output")
     recovery_json=$(sed -n 's/^proxy-agent-install-recovery-v1 //p' <<< "$output")
     if [[ -n $original_json && $original_json != '""' && -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
-      printf '{"stage":"agent_install","state":"failed","exitCode":%s,"error":%s}\n' "$install_status" "$original_json" >&"$QUI_UPDATE_REPORT_FD"
+      report_structured agent_install failed "$install_status" "$original_json" "$output"
     else report_update failed "$install_status" "$output"; fi
     if [[ -n $recovery_json && -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
       recovery_error_json=${recovery_json#*,\"error\":}; recovery_error_json=${recovery_error_json%\}}
@@ -467,7 +553,7 @@ install_managed_release() {
         if [[ $recovery_json == *'"success":true'* ]]; then recovery_state=success
         elif [[ $recovery_json == *'"success":false'* ]]; then recovery_state=failed; fi
       fi
-      printf '{"stage":"managed_recovery","state":"%s","exitCode":null,"error":%s}\n' "$recovery_state" "$recovery_error_json" >&"$QUI_UPDATE_REPORT_FD"
+      report_structured managed_recovery "$recovery_state" null "$recovery_error_json" "$output"
     fi
     printf '[proxy-agent] 引导程序版本：%s；实际 Agent 更新失败，以上错误和受管安装记录已保留。\n' "$(installed_version agent)" >&2
     managed_core_rollback || fail "worker 回滚停核屏障失败，保留现场：$managed_core_journal"
@@ -752,6 +838,7 @@ component_files() {
     printf '%s\n' "$root/etc/init.d/proxy-$component"
   fi
   printf '%s\n' "$root/usr/local/lib/proxycontrol/qui-update-db"
+  printf '%s\n' "$root/usr/local/lib/proxycontrol/qui-update-state"
   printf '%s\n' "$program_directory/qui-update" "$root/usr/local/lib/proxycontrol/service.sh"
   printf '%s\n' "$program_directory/qui" "$root/usr/local/lib/proxycontrol/uninstall.sh"
   if [[ $component == panel ]]; then
@@ -810,6 +897,31 @@ take_snapshot() {
     mkdir -p -- "${target%/*}" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
     cp -a -- "$path" "$target" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
   done < <(component_files "$component")
+  # A half-built snapshot without a journal would later read as a legacy leftover.
+  if ! snapshot_helpers "$component"; then
+    rm -rf -- "$snapshot"
+    snapshot=''
+    return 1
+  fi
+  if [[ ! -f $directory/updater || ! -f $directory/service.sh ]] \
+    || ! install -o root -g root -m 0600 -- "$directory/updater" "$snapshot/updater" \
+    || ! install -o root -g root -m 0600 -- "$directory/service.sh" "$snapshot/service.sh" \
+    || ! chmod 0700 -- "$snapshot" \
+    || ! sync -f -- "$snapshot"; then
+    rm -rf -- "$snapshot"
+    snapshot=''
+    return 1
+  fi
+}
+# Copy the private tools a recovery verifies into $snapshot. Every step is
+# checked; take_snapshot removes the whole directory when one fails.
+snapshot_helpers() {
+  local component=$1 state_digest=''
+  install -o root -g root -m 0500 -- "$state_helper" "$snapshot/state-helper" || return 1
+  state_digest=$(sha256sum -- "$snapshot/state-helper") || return 1
+  printf '%s\n' "${state_digest%% *}" > "$snapshot/state-helper.sha256" || return 1
+  sync -f -- "$snapshot/state-helper" || return 1
+  sync -f -- "$snapshot/state-helper.sha256" || return 1
   if [[ $component == panel ]]; then
     install -o root -g root -m 0500 -- "$database_helper" "$snapshot/database-helper" || return 1
     local database_digest=''
@@ -827,85 +939,30 @@ take_snapshot() {
     sync -f -- "$snapshot/core-stop-helper" || return 1
     sync -f -- "$snapshot/core-stop-helper.sha256" || return 1
   fi
-  if [[ ! -f $directory/updater || ! -f $directory/service.sh ]] \
-    || ! install -o root -g root -m 0600 -- "$directory/updater" "$snapshot/updater" \
-    || ! install -o root -g root -m 0600 -- "$directory/service.sh" "$snapshot/service.sh" \
-    || ! chmod 0700 -- "$snapshot" \
-    || ! sync -f -- "$snapshot"; then
-    rm -rf -- "$snapshot"
-    snapshot=''
-    return 1
-  fi
 }
-# Print the value of one key=value line of a journal, or fail. The journal is read with
-# a regex per line and is never sourced and never eval'd: it is written by whichever
-# updater ran last, and a file that is read as root must not be executable code.
-journal_value() {
-  local file=$1 key=$2 line
-  while IFS= read -r line || [[ -n $line ]]; do
-    if [[ $line =~ ^([a-z0-9_]+)=(.*)$ ]] && [[ ${BASH_REMATCH[1]} == "$key" ]]; then
-      printf '%s' "${BASH_REMATCH[2]}"
-      return 0
-    fi
-  done < "$file"
-  return 1
-}
-
-# Write the journal of the snapshot in $snapshot from the active_* globals. The whole
-# file goes to a dot-prefixed temporary in the snapshot, is synced, renamed over the
-# journal and the snapshot directory is synced again, so a power loss leaves either the
-# old phase or the new one and never half a line.
+# The state tool owns journal bytes and persistence. Bash only selects the phase
+# and passes the active transaction's fields; journal text is never executed.
 journal_write() {
-  local phase=$1 temporary=$snapshot/.journal.tmp
-  {
-    printf 'proxycontrol-update-journal-v1\n'
-    printf 'component=%s\n' "$active_component"
-    printf 'previous=%s\n' "$active_previous"
-    printf 'target=%s\n' "$active_target"
-    printf 'was_active=%s\n' "$active_was_active"
-    printf 'backup=%s\n' "$active_backup"
-    printf 'database_source=%s\n' "$active_database_source"
-    printf 'phase=%s\n' "$phase"
-    if [[ $active_component == agent ]]; then
-      printf 'core_request=%s\n' "$core_request"
-      printf 'core_helper=%s\n' "${core_helper:+v1}"
-    fi
-  } > "$temporary" || { rm -f -- "$temporary"; return 1; }
-  if ! chmod 0600 -- "$temporary" \
-    || ! sync -- "$temporary" \
-    || ! mv -T -- "$temporary" "$snapshot/journal"; then
-    rm -f -- "$temporary"
-    return 1
-  fi
-  sync -- "$snapshot"
+  local phase=$1
+  local args=(journal-write --snapshot "$snapshot" --component "$active_component"
+    --previous "$active_previous" --target "$active_target" --was-active "$active_was_active"
+    --backup "$active_backup" --database-source "$active_database_source" --phase "$phase")
+  if [[ $active_component == agent ]]; then args+=(--core-request "$core_request" --core-helper "${core_helper:+v1}"); fi
+  state_cli "${args[@]}"
 }
 
-# Read the journal of FILE into the journal_* locals of the caller (bash resolves those
-# dynamically) and validate every field the recovery relies on. A field that is missing,
-# a component or phase this version does not know, and a backup that is not a regular
-# file directly inside $backups are all a refusal: guessing here decides which files and
-# which database a host ends up with.
+# Read exactly nine NUL-delimited fields after checking the tool's exit status.
+# The Go reader retains historical optional fields and nested backup paths.
 journal_read() {
-  local file=$1
-  journal_component='' journal_previous='' journal_target='' journal_phase=''
-  journal_was_active='' journal_backup='' journal_database_source=''
-  [[ -f $file && ! -L $file ]] || return 1
-  [[ $(sed -n '1p' -- "$file") == proxycontrol-update-journal-v1 ]] || return 1
-  journal_component=$(journal_value "$file" component) || return 1
-  case $journal_component in agent|panel) ;; *) return 1 ;; esac
-  journal_previous=$(journal_value "$file" previous) || journal_previous='未知'
-  journal_target=$(journal_value "$file" target) || journal_target='未知'
-  journal_was_active=$(journal_value "$file" was_active) || return 1
-  case $journal_was_active in true|false) ;; *) return 1 ;; esac
-  journal_backup=$(journal_value "$file" backup) || journal_backup=''
-  journal_database_source=$(journal_value "$file" database_source) || journal_database_source=''
-  journal_phase=$(journal_value "$file" phase) || return 1
-  case $journal_phase in prepared|started|committed|restored) ;; *) return 1 ;; esac
-  if [[ -n $journal_backup ]]; then
-    [[ $journal_backup == "$backups"/* ]] || return 1
-    [[ -f $journal_backup && ! -L $journal_backup ]] || return 1
-  fi
-  return 0
+  local temporary='' values=() status=0
+  temporary=$(mktemp "$registry/.update-event.XXXXXXXX") || return 1
+  state_cli journal-read --file "$1" --backups "$backups" > "$temporary" || status=$?
+  if ((status == 0)); then mapfile -d '' -t values < "$temporary" || status=$?; fi
+  rm -f -- "$temporary" || return 1
+  ((status == 0 && ${#values[@]} == 9)) || return 1
+  journal_component=${values[0]} journal_previous=${values[1]} journal_target=${values[2]}
+  journal_was_active=${values[3]} journal_backup=${values[4]} journal_database_source=${values[5]}
+  journal_phase=${values[6]} journal_core_request=${values[7]} journal_core_helper=${values[8]}
 }
 
 # Remove a finished snapshot in one step that an interrupted rm -rf cannot confuse: the
@@ -914,19 +971,29 @@ journal_read() {
 # that happens in the middle of the deletion finds a discard.* directory that the next
 # run removes instead of a half-removed rollback that looks like a pending update.
 dispose_snapshot() {
-  local discard=''
   [[ -n $snapshot ]] || return 0
-  if [[ ! -d $snapshot ]]; then snapshot=''; return 0; fi
-  discard=$registry/discard.${snapshot##*/rollback.}
-  if ! mv -T -- "$snapshot" "$discard"; then
-    printf '无法移除快照 %s；下次运行会再试。\n' "$snapshot" >&2
-    snapshot=''
-    return 1
-  fi
+  state_cli discard --registry "$registry" --snapshot "$snapshot" || return 1
   snapshot=''
-  sync -f -- "$registry" || true
-  rm -rf -- "$discard"
-  return 0
+}
+
+snapshot_cleanup_warning() {
+  local message=$1
+  printf '%s\n' "$message" >&2
+  if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then report_update running null "$message"; fi
+}
+
+dispose_before_failure() {
+  if ! dispose_snapshot; then snapshot_cleanup_warning "快照丢弃失败，恢复材料保留在 $snapshot 或 $registry/discard.${snapshot##*/rollback.}"; fi
+}
+
+dispose_after_commit() {
+  if ! dispose_snapshot; then
+    if ! $journal_finalized; then
+      printf '快照停在未完成阶段，下次运行会回滚本次更新，请先人工处理：%s\n' "$snapshot" >&2
+      return 1
+    fi
+    snapshot_cleanup_warning "更新成功但快照清理失败：$snapshot 或 $registry/discard.${snapshot##*/rollback.}"
+  fi
 }
 
 # Delete the .partial copies a backup or a preserve left behind. backup_database runs
@@ -1100,17 +1167,25 @@ finish_recovered_snapshot() {
     printf '恢复步骤已执行，但安装输出转发失败；快照保留在 %s。\n' "$snapshot" >&2
     return 1
   fi
-  dispose_snapshot
+  if ! dispose_snapshot; then
+    if ! $journal_finalized; then
+      printf '恢复进度未持久化且快照清理失败，下次运行会重新恢复（started 面板会先保留当前库再覆盖数据库）：%s\n' "$snapshot" >&2
+      return 1
+    fi
+    snapshot_cleanup_warning "恢复已完成但快照清理失败：$snapshot 或 $registry/discard.${snapshot##*/rollback.}"
+  fi
 }
 recover_snapshot() {
   local directory_arg=$1 mode=$2 name='' component='' previous='' target='' was_active=false
-  local backup='' phase='' preserved='' restore=false output_status=${3:-0}
+  local backup='' phase='' preserved='' restore=false output_status=${3:-0} journal_finalized=true
+  local journal_core_request='' journal_core_helper=''
   local journal_component='' journal_previous='' journal_target='' journal_phase=''
   local journal_was_active='' journal_backup='' journal_database_source=''
   if [[ ! -d $directory_arg || -L $directory_arg ]]; then
     printf '不是更新快照目录：%s\n' "$directory_arg" >&2
     return 1
   fi
+  prepare_recovery_state_helper "$directory_arg" || return 1
   if ! journal_read "$directory_arg/journal"; then
     printf '快照 %s 的进度日志无效，未做任何修改。\n' "$directory_arg" >&2
     return 1
@@ -1129,7 +1204,7 @@ recover_snapshot() {
   core_request=''
   if [[ $component == agent ]]; then
     core_helper=''
-    core_request=$(journal_value "$directory_arg/journal" core_request) || core_request=''
+    core_request=$journal_core_request
     if [[ -f $snapshot/core-stop-helper || -L $snapshot/core-stop-helper ]]; then
       core_helper=$snapshot/core-stop-helper
       # Recovery never trusts an old detached receipt to authorize preservation.
@@ -1138,7 +1213,7 @@ recover_snapshot() {
       else
         snapshot_core_cli --core-handover-revoke --request "$core_request" --reason rollback || return 1
       fi
-    elif [[ $(journal_value "$directory_arg/journal" core_helper) == v1 ]]; then
+    elif [[ $journal_core_helper == v1 ]]; then
       printf '缺少新停核 helper，保留快照并停止恢复：%s\n' "$snapshot" >&2
       return 1
     fi
@@ -1228,7 +1303,9 @@ recover_snapshot() {
       fi
     fi
   fi
+  journal_finalized=true
   if ! journal_write restored; then
+    journal_finalized=false
     printf '[%s] 无法记录恢复进度；下次运行会重新恢复（重复恢复是安全的）。\n' "$name"
   fi
   if [[ $mode == boot ]]; then
@@ -1481,7 +1558,7 @@ update_component() {
       rollback_component "$component" "$previous" "$was_active" '停止 Agent 失败' \
         || report_failure "$name" "$previous" "$backup"
     else
-      dispose_snapshot || true
+      dispose_before_failure
     fi
     fail "无法停止 $name，保留恢复材料。"
   fi
@@ -1511,7 +1588,7 @@ update_component() {
     if ! backup=$(backup_database "$previous"); then
       remove_database_partials
       restore_service_after_stop
-      dispose_snapshot || true
+      dispose_before_failure
       fail "[$name] 数据库备份失败，更新没有开始。"
     fi
     active_backup=$backup
@@ -1531,12 +1608,12 @@ update_component() {
           # the copy is removed again instead of piling up with every refused attempt.
           rm -f -- "$backup" "$backup-wal"
           restore_service_after_stop
-          dispose_snapshot || true
+          dispose_before_failure
           downgrade_guidance "$version"
           exit 1;;
         *)
           restore_service_after_stop
-          dispose_snapshot || true
+          dispose_before_failure
           fail "[$name] 数据库无法用于这次更新，更新没有开始（备份保留在 $backup）。";;
       esac
     fi
@@ -1545,13 +1622,13 @@ update_component() {
   if [[ $component == panel ]] && ! journal_write prepared; then
     # Every later phase would fail the same way, so the update must not start; the
     # snapshot holds nothing install.sh replaced and is removed again.
-    dispose_snapshot || true
+    dispose_before_failure
     restore_service_after_stop
     fail "[$name] 无法写入回滚快照的进度日志，更新没有开始。"
   fi
   if [[ -n ${QUI_UPDATE_REPORT_FD:-} ]]; then
-    printf '{"stage":"snapshot_prepared","state":"running","exitCode":null,"error":%s}\n' "$(report_json "$snapshot")" >&"$QUI_UPDATE_REPORT_FD"
-    sync -f "/proc/self/fd/$QUI_UPDATE_REPORT_FD"
+    report_event snapshot_prepared running null "$snapshot" || report_failed=true
+    sync_report_fd
   fi
   digest=$(sha256sum -- "$binary"); digest=${digest%% *}
   # QUI_UPDATE tells install.sh this is an update: it is run from an update that
@@ -1611,11 +1688,13 @@ update_component() {
     # The update of this component is complete: record that, then remove the snapshot. A
     # snapshot left at an unfinished phase would make the next run roll a working update
     # back, so it is removed even when the record cannot be written.
+    journal_finalized=true
     if ! journal_write committed; then
+      journal_finalized=false
       if [[ $component == agent ]]; then fail '无法提交未运行 Agent 的更新日志，快照已保留。'; fi
       printf '[%s] 无法把更新记录为完成。\n' "$name"
     fi
-    dispose_snapshot || true
+    dispose_after_commit || return 1
     if [[ $component == agent ]]; then
       printf '[%s] 已更新到 %s；服务原本未运行，未启动，网页升级未启用（启动服务后重跑 qui-update --component agent）。\n' "$name" "$version"
     else
@@ -1642,7 +1721,9 @@ update_component() {
   if service_start "$name" && component_healthy; then
     if [[ $component == agent && -f /etc/systemd/system/proxy-agent-state-reset.service ]]; then systemctl start --no-block proxy-agent-state-reset.service || fail '???? Agent ????????'; elif [[ $component == agent && -f /etc/init.d/proxy-agent-state-reset ]]; then rc-service proxy-agent-state-reset start || fail '???? Agent ????????'; fi
     service_stopped=false
+    journal_finalized=true
     if ! journal_write committed; then
+      journal_finalized=false
       if [[ $component == agent ]]; then
         rollback_component "$component" "$previous" "$was_active" '无法提交 Agent 更新日志' \
           || report_failure "$name" "$previous" "$backup"
@@ -1657,7 +1738,7 @@ update_component() {
       core_request=''
       printf '[%s] 核心交接已认领并提交：%s。\n' "$name" "$adopted_request"
     fi
-    dispose_snapshot || true
+    dispose_after_commit || return 1
     if [[ $component == agent ]]; then
       agent_enable_web_upgrade || true
       if [[ -f ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervisor.enc && ! -e ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending && ! -L ${QUI_AGENT_DATA:-/var/lib/proxy-agent}/identity/agent-supervision-init.pending ]]; then
@@ -1740,19 +1821,23 @@ on_signal() {
 # journal was left by an updater from before journals existed; nothing of it replaced
 # anything, so it is only reported. a discard.* directory is a snapshot whose removal was
 # interrupted and holds nothing that is needed any more.
+remove_discarded_snapshots() {
+  local pending=''
+  for pending in "$registry"/discard.*; do
+    [[ -e $pending || -L $pending ]] || continue
+    if [[ ! -d $pending || -L $pending ]]; then printf '跳过无法识别的残留：%s\n' "$pending" >&2; continue; fi
+    state_cli discard --registry "$registry" --discarded "$pending" || fail "无法清理已丢弃快照：$pending"
+  done
+}
+
 recover_interrupted_updates() {
-  local pending='' updater=''
+  local pending='' updater='' temporary=''
   local journal_component='' journal_previous='' journal_target='' journal_phase=''
   local journal_was_active='' journal_backup='' journal_database_source=''
   qui_core_handover_recover_web "$registry" interactive \
     || fail '中断的网页初始化停核未确认，保留现场并中止更新。'
-  for pending in "$registry"/discard.*; do
-    [[ -e $pending || -L $pending ]] || continue
-    if [[ ! -d $pending || -L $pending ]]; then
-      printf '跳过无法识别的残留：%s\n' "$pending" >&2
-      continue
-    fi
-    rm -rf -- "$pending"
+  for temporary in "$registry"/.state-helper.* "$registry"/.update-event.* "$registry"/.database-helper.*; do
+    [[ ! -f $temporary || -L $temporary ]] || rm -f -- "$temporary" || fail "无法删除残留工具或事件：$temporary"
   done
   # A kill -9 or power loss during preflight can leave private backup hardlinks.
   for pending in "$registry"/check.*; do
@@ -1772,15 +1857,11 @@ recover_interrupted_updates() {
       printf '保留的旧快照：%s（旧版 qui-update 留下，可手工检查后删除）\n' "$pending"
       continue
     fi
-    # journal_read fills the journal_* locals declared above (bash resolves them
-    # dynamically) and validates every field a recovery depends on.
-    if ! journal_read "$pending/journal"; then
-      fail "快照 $pending 的进度日志无效（请检查后手工处理）。"
-    fi
-    printf '发现被中断的更新：%s（%s %s → %s，阶段 %s），先恢复 ...\n' \
-      "$pending" "$journal_component" "$journal_previous" "$journal_target" "$journal_phase"
+    [[ $(stat -c '%u:%g:%a' -- "$pending") == 0:0:700 ]] || fail "快照目录权限无效：$pending"
+    [[ -f $pending/journal && ! -L $pending/journal && $(stat -c '%u:%g:%a' -- "$pending/journal") == 0:0:600 ]] || fail "快照 journal 权限无效：$pending"
+    printf '发现被中断的更新：%s，交给其快照 updater 恢复。\n' "$pending"
     updater=$pending/updater
-    if [[ ! -f $updater || -L $updater ]]; then
+    if [[ ! -f $updater || -L $updater || $(stat -c '%u:%g:%a' -- "$updater") != 0:0:600 ]]; then
       fail "快照 $pending 没有 updater，无法恢复（请检查后手工处理）。"
     fi
     PROXYCONTROL_UPDATE_LOCKED=1 QUI_UPDATE_REPORT_FD= bash "$updater" --recover "$pending" 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- \
@@ -1795,6 +1876,21 @@ recover_interrupted_updates() {
 # was replaced removes that risk; the rename install.sh uses already gives the new file a
 # new inode, so this is the second line of defence rather than the only one. The call is
 # guarded by a comparison with $0 because the tests source this file instead of running it.
+cleanup() {
+  local original_status=$? guard_status=0
+  release_agent_bootstrap || guard_status=$?
+  if $managed_installing && ! managed_core_rollback; then
+    printf 'worker 停核屏障失败，现场保留在 %s。\n' "$managed_core_journal" >&2
+    if ((original_status == 0)); then original_status=1; fi
+  fi
+  if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs" || guard_status=1; fi
+  if [[ -n $directory ]]; then rm -rf -- "$directory" || guard_status=1; fi
+  if ((original_status == 0 && guard_status != 0)); then original_status=$guard_status; fi
+  report_terminal "$original_status" || { if ((original_status == 0)); then original_status=1; fi; }
+  cleanup_state_files || { if ((original_status == 0)); then original_status=1; fi; }
+  exit "$original_status"
+}
+
 main() {
   local assume_yes=false bundle_file='' sums_file='' agent_manifest_file='' arch='' base='' bundle=''
   local release='' tag='' expected='' actual='' up_to_date=true answer=''
@@ -1826,7 +1922,7 @@ main() {
         recover_directory=$2; shift 2;;
       --boot) boot=true; shift;;
       --yes) assume_yes=true; shift;;
-      --help) usage; exit 0;;
+      --help) trap - EXIT; usage; exit 0;;
       *) fail "未知参数：$1（用 --help 查看用法）";;
     esac
   done
@@ -1958,7 +2054,10 @@ main() {
   if [[ $selected_component != agent ]] && record_complete panel; then
     ensure_database_record || fail '无法确认面板数据库路径，更新没有开始。'
   fi
+  trap cleanup EXIT
   recover_interrupted_updates
+  prepare_state_helper || fail '无法固定本次状态工具，服务未停止。'
+  remove_discarded_snapshots
 
   if $has_agent; then
     agent_read_status || fail '无法读取本机 Agent 升级状态。'
@@ -2054,21 +2153,6 @@ main() {
   # Only the temporary download directory is removed by the trap: a rollback snapshot is
   # removed by the update that took it, or kept for the operator when the rollback itself
   # did not come up.
-  cleanup() {
-    local original_status=$? guard_status=0
-    release_agent_bootstrap || guard_status=$?
-    if $managed_installing && ! managed_core_rollback; then
-      printf 'worker 停核屏障失败，现场保留在 %s。\n' "$managed_core_journal" >&2
-      original_status=1
-    fi
-    if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs"; fi
-    if [[ -n $database_helper_temporary ]]; then rm -f -- "$database_helper_temporary"; fi
-    if [[ -n $directory ]]; then rm -rf -- "$directory"; fi
-    if ((original_status == 0 && guard_status != 0)); then original_status=$guard_status; fi
-    report_terminal "$original_status"
-    return "$original_status"
-  }
-  trap cleanup EXIT
   directory=$(mktemp -d) || fail '无法创建临时目录。'
   if [[ " ${components[*]} " == *' panel '* ]]; then prepare_database_helper || fail '无法固定本次数据库工具，服务未停止。'; fi
   # The running script and the library it sourced are staged here, because take_snapshot

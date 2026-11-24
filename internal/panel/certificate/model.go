@@ -89,12 +89,16 @@ var backoff = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour}
 
 // NextAttempt is the timestamp (UTC, RFC 3339 with nanoseconds) the scheduler
 // may retry at after n failed attempts, n starting at 1.
-func NextAttempt(now time.Time, attempts int) string {
+func NextAttempt(now time.Time, attempts int) string { return Stamp(nextAttemptAt(now, attempts)) }
+
+// nextAttemptAt is the retry time NextAttempt stores, for callers that also
+// display it.
+func nextAttemptAt(now time.Time, attempts int) time.Time {
 	step := backoff[len(backoff)-1]
 	if attempts >= 1 && attempts <= len(backoff) {
 		step = backoff[attempts-1]
 	}
-	return Stamp(now.Add(step))
+	return now.Add(step)
 }
 
 // Stamp formats a time the way every other panel table stores one.

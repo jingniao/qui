@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/system"
 	"proxycontrol/internal/panel/user"
@@ -43,8 +44,24 @@ func (s *cycleScheduler) step(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range nodes {
-		s.publish("system.alert", map[string]string{"alert": "node_renewal", "nodeId": id})
+	for _, item := range nodes {
+		name := item.Name
+		if name == "" {
+			name = "未命名服务器（节点 " + item.NodeID + "）"
+		}
+		var message string
+		switch {
+		case item.DaysLeft > 0:
+			message = fmt.Sprintf("服务器「%s」将于 %s 到期，还剩 %d 天。", name, item.RenewDate, item.DaysLeft)
+		case item.DaysLeft == 0:
+			message = fmt.Sprintf("服务器「%s」今天（%s）到期。", name, item.RenewDate)
+		default:
+			message = fmt.Sprintf("服务器「%s」已于 %s 到期，已过 %d 天。", name, item.RenewDate, -item.DaysLeft)
+		}
+		if item.AutoRenew {
+			message += "已开启自动续费，日期将自动顺延。"
+		}
+		s.publish("system.alert", map[string]string{"alert": "node_renewal", "nodeId": item.NodeID, "message": message})
 	}
 	renewed, err := s.nodes.AutoRenew(ctx, now, location, func(ctx context.Context, tx *sql.Tx, item node.RenewedNode) error {
 		return s.settings.RecordTx(ctx, tx, "system", "自动续费 "+item.From+" → "+item.To, item.NodeID, "成功", "")

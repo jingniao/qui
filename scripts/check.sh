@@ -115,13 +115,13 @@ race_tests() {
   go build -trimpath -ldflags '-X main.version=1.0.0-storage-test' -o bin/proxy-agent-storage-test ./cmd/agent
 
   # Database file tests exercise root-owned directories, chown and runuser. Keep
-  # compilation unprivileged on CI and elevate only these two test executables.
+  # compilation unprivileged on CI and elevate only the file-operation packages.
   local listed package
   local -a regular_packages=() database_packages=() database_exec=()
   listed=$(go list "$@") || return $?
   while IFS= read -r package; do
     case $package in
-      proxycontrol/cmd/qui-update-db | proxycontrol/internal/platform/hostupdatedb)
+      proxycontrol/cmd/qui-update-db | proxycontrol/internal/platform/hostupdatedb | proxycontrol/cmd/qui-update-state | proxycontrol/internal/platform/hostupdatestate)
         database_packages+=("$package") ;;
       *) regular_packages+=("$package") ;;
     esac
@@ -239,6 +239,7 @@ go build -o bin/proxy-panel ./cmd/panel
 
 step 'build the database update tool'
 go build -o bin/qui-update-db ./cmd/qui-update-db
+go build -o bin/qui-update-state ./cmd/qui-update-state
 
 step 'build the agent'
 go build -o bin/proxy-agent ./cmd/agent
@@ -267,6 +268,7 @@ done
 if [ -f deploy/linux/tests/update-test.sh ]; then
   bash -n -- deploy/linux/tests/update-test.sh
   "${as_root[@]}" bash deploy/linux/tests/update-test.sh
+  "${as_root[@]}" bash deploy/linux/tests/update-state-event-test.sh
 fi
 if [ -f deploy/linux/tests/host-network-test.sh ]; then
   bash -n -- deploy/linux/tests/host-network-test.sh

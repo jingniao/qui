@@ -564,7 +564,7 @@ stage=$(mktemp -d "$registry/staging.XXXXXXXX")
 publishing_started=false
 cleanup() {
   rm -f -- "$stage/agent-update-request" "$stage/agent-update-service" "$stage/agent-update-path"
-  rm -f -- "$stage/uninstall" "$stage/qui-update-db"
+  rm -f -- "$stage/uninstall" "$stage/qui-update-db" "$stage/qui-update-state"
   if [[ -n $publishing_temporary ]]; then rm -f -- "$publishing_temporary"; fi
   if $publishing_started; then
     printf 'Installation stopped after it had begun replacing files: the installed program and service files may be a mix of the old and the new version. Re-running the same install.sh completes the upgrade, and qui-update restores the previous version by itself.\n' >&2
@@ -579,6 +579,11 @@ database_helper_source=$root/../bin/qui-update-db
 [[ -f $database_helper_source && ! -L $database_helper_source ]] || fail "Missing packaged database tool: $database_helper_source"
 install -o root -g root -m 0500 -- "$database_helper_source" "$stage/qui-update-db"
 [[ $("$stage/qui-update-db" --protocol) == qui-update-database-v1 ]] || fail 'Unsupported database tool protocol.'
+
+state_helper_source=$root/../bin/qui-update-state
+[[ -f $state_helper_source && ! -L $state_helper_source ]] || fail "Missing packaged state tool: $state_helper_source"
+install -o root -g root -m 0500 -- "$state_helper_source" "$stage/qui-update-state"
+[[ $("$stage/qui-update-state" --protocol) == qui-update-state-v1 ]] || fail 'Unsupported state tool protocol.'
 
 install -o root -g root -m 0600 -- "$binary" "$stage/program"
 verify_binary "$stage/program" "$digest"
@@ -850,6 +855,7 @@ publish "$stage/service-library" "$library" root root 0644
 publish "$stage/update-recovery" "$recovery" root root 0755
 publish "$stage/uninstall" /usr/local/lib/proxycontrol/uninstall.sh root root 0755
 publish "$stage/qui-update-db" /usr/local/lib/proxycontrol/qui-update-db root root 0755
+publish "$stage/qui-update-state" /usr/local/lib/proxycontrol/qui-update-state root root 0755
 if [[ $component == agent ]]; then
   # The request directory belongs to the Agent. Never follow its writable
   # names with root's mkdir/chown during a later installation.

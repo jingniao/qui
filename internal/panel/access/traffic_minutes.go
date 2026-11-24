@@ -11,6 +11,19 @@ import (
 
 const trafficMinuteBatch = 500
 
+// secondPrefix is an inclusive boundary for the whole UTC second, including
+// both "...:00Z" and "...:00.834410219Z". The shorter prefix sorts before
+// either suffix; adjacent minute prefixes therefore define exact [start,end).
+// Use for whole-second/coarse bounds; fractional cuts also need normalization.
+func secondPrefix(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05") }
+
+func nanoTimestamp(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000000000Z") }
+
+// column is a fixed, module-owned SQL identifier, never user input.
+func normalizedTrafficTimeSQL(column string) string {
+	return "(substr(" + column + ",1,19)||'.'||substr((CASE WHEN substr(" + column + ",20,1)='.' THEN substr(" + column + ",21,length(" + column + ")-21) ELSE '' END)||'000000000',1,9)||'Z')"
+}
+
 type coreMinuteKey struct{ node, core, epoch, bucket string }
 type accountMinuteKey struct{ node, epoch, credential, user, device, bucket string }
 
@@ -38,7 +51,7 @@ func (r *Repository) compactTrafficMinutes(ctx context.Context, now time.Time) (
 	defer tx.Rollback()
 	cutoff := now.UTC().Add(-24 * time.Hour).Truncate(time.Minute)
 	var before int64
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM core_traffic_samples WHERE observed_at<?)+(SELECT count(*) FROM account_traffic_samples WHERE observed_at<?)`, timestamp(cutoff), timestamp(cutoff)).Scan(&before); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM core_traffic_samples WHERE observed_at<?)+(SELECT count(*) FROM account_traffic_samples WHERE observed_at<?)`, secondPrefix(cutoff), secondPrefix(cutoff)).Scan(&before); err != nil {
 		return false, err
 	}
 	coreMore, err := compactCoreMinutesTx(ctx, tx, cutoff)
@@ -50,7 +63,7 @@ func (r *Repository) compactTrafficMinutes(ctx context.Context, now time.Time) (
 		return false, err
 	}
 	var after int64
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM core_traffic_samples WHERE observed_at<?)+(SELECT count(*) FROM account_traffic_samples WHERE observed_at<?)`, timestamp(cutoff), timestamp(cutoff)).Scan(&after); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM core_traffic_samples WHERE observed_at<?)+(SELECT count(*) FROM account_traffic_samples WHERE observed_at<?)`, secondPrefix(cutoff), secondPrefix(cutoff)).Scan(&after); err != nil {
 		return false, err
 	}
 	if after > before {
@@ -67,7 +80,7 @@ func (r *Repository) compactTrafficMinutes(ctx context.Context, now time.Time) (
 
 func compactCoreMinutesTx(ctx context.Context, tx *sql.Tx, cutoff time.Time) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,core,epoch,substr(observed_at,1,16)||':00.000000000Z' AS bucket
- FROM core_traffic_samples WHERE observed_at<? GROUP BY node_id,core,epoch,bucket ORDER BY bucket,node_id,core,epoch LIMIT ?`, timestamp(cutoff), trafficMinuteBatch)
+ FROM core_traffic_samples WHERE observed_at<? GROUP BY node_id,core,epoch,bucket ORDER BY bucket,node_id,core,epoch LIMIT ?`, secondPrefix(cutoff), trafficMinuteBatch)
 	if err != nil {
 		return false, err
 	}
@@ -88,7 +101,7 @@ func compactCoreMinutesTx(ctx context.Context, tx *sql.Tx, cutoff time.Time) (bo
 		if err != nil {
 			return false, err
 		}
-		end := timestamp(start.Add(time.Minute))
+		end := secondPrefix(start.Add(time.Minute))
 		var up, down, samples int64
 		if err := sumCoreMinute(ctx, tx, key, end, &up, &down, &samples); err != nil {
 			return false, err
@@ -104,7 +117,7 @@ WHERE core_traffic_minutes.upload_bytes<=? - excluded.upload_bytes AND core_traf
 		} else if n != 1 {
 			return false, fmt.Errorf("traffic minute counter overflow")
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM core_traffic_samples WHERE node_id=? AND core=? AND epoch=? AND observed_at>=? AND observed_at<?`, key.node, key.core, key.epoch, key.bucket, end); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM core_traffic_samples WHERE node_id=? AND core=? AND epoch=? AND observed_at>=? AND observed_at<?`, key.node, key.core, key.epoch, key.bucket[:19], end); err != nil {
 			return false, err
 		}
 	}
@@ -112,7 +125,7 @@ WHERE core_traffic_minutes.upload_bytes<=? - excluded.upload_bytes AND core_traf
 }
 
 func sumCoreMinute(ctx context.Context, tx *sql.Tx, key coreMinuteKey, end string, up, down, samples *int64) error {
-	rows, err := tx.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM core_traffic_samples WHERE node_id=? AND core=? AND epoch=? AND observed_at>=? AND observed_at<?`, key.node, key.core, key.epoch, key.bucket, end)
+	rows, err := tx.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM core_traffic_samples WHERE node_id=? AND core=? AND epoch=? AND observed_at>=? AND observed_at<?`, key.node, key.core, key.epoch, key.bucket[:19], end)
 	if err != nil {
 		return err
 	}
@@ -141,7 +154,7 @@ func sumCoreMinute(ctx context.Context, tx *sql.Tx, key coreMinuteKey, end strin
 
 func compactAccountMinutesTx(ctx context.Context, tx *sql.Tx, cutoff time.Time) (bool, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,epoch,credential_id,user_id,device_id,substr(observed_at,1,16)||':00.000000000Z' AS bucket
- FROM account_traffic_samples WHERE observed_at<? GROUP BY node_id,epoch,credential_id,user_id,device_id,bucket ORDER BY bucket,node_id,epoch,credential_id LIMIT ?`, timestamp(cutoff), trafficMinuteBatch)
+ FROM account_traffic_samples WHERE observed_at<? GROUP BY node_id,epoch,credential_id,user_id,device_id,bucket ORDER BY bucket,node_id,epoch,credential_id LIMIT ?`, secondPrefix(cutoff), trafficMinuteBatch)
 	if err != nil {
 		return false, err
 	}
@@ -162,9 +175,9 @@ func compactAccountMinutesTx(ctx context.Context, tx *sql.Tx, cutoff time.Time) 
 		if err != nil {
 			return false, err
 		}
-		end := timestamp(start.Add(time.Minute))
+		end := secondPrefix(start.Add(time.Minute))
 		var up, down, samples int64
-		rows, err := tx.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM account_traffic_samples WHERE node_id=? AND epoch=? AND credential_id=? AND user_id=? AND device_id=? AND observed_at>=? AND observed_at<?`, key.node, key.epoch, key.credential, key.user, key.device, key.bucket, end)
+		rows, err := tx.QueryContext(ctx, `SELECT upload_bytes,download_bytes FROM account_traffic_samples WHERE node_id=? AND epoch=? AND credential_id=? AND user_id=? AND device_id=? AND observed_at>=? AND observed_at<?`, key.node, key.epoch, key.credential, key.user, key.device, key.bucket[:19], end)
 		if err != nil {
 			return false, err
 		}
@@ -202,7 +215,7 @@ WHERE account_traffic_minutes.upload_bytes<=? - excluded.upload_bytes AND accoun
 		} else if n != 1 {
 			return false, fmt.Errorf("traffic minute counter overflow")
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM account_traffic_samples WHERE node_id=? AND epoch=? AND credential_id=? AND user_id=? AND device_id=? AND observed_at>=? AND observed_at<?`, key.node, key.epoch, key.credential, key.user, key.device, key.bucket, end); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM account_traffic_samples WHERE node_id=? AND epoch=? AND credential_id=? AND user_id=? AND device_id=? AND observed_at>=? AND observed_at<?`, key.node, key.epoch, key.credential, key.user, key.device, key.bucket[:19], end); err != nil {
 			return false, err
 		}
 	}

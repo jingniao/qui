@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/user"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,9 @@ func TestAutoRenewOmissionAndSchedulerOrder(t *testing.T) {
 		if data["alert"] != "node_renewal" || data["nodeId"] != n.ID {
 			t.Fatal(payload)
 		}
+		if !strings.Contains(data["message"], "服务器「auto renewal」") || !strings.Contains(data["message"], "2025-01-31") || !strings.Contains(data["message"], "已开启自动续费") {
+			t.Fatal("missing renewal body", data)
+		}
 		m, _, err := app.nodeRepository.Meta(ctx, n.ID)
 		if err != nil || m.RenewDate != "2025-01-31" {
 			t.Fatal("date advanced before reminder", m, err)
@@ -74,6 +78,52 @@ func TestAutoRenewOmissionAndSchedulerOrder(t *testing.T) {
 	if err := app.Database.QueryRow("SELECT COUNT(*) FROM admin_operations WHERE operator='system' AND action=? AND target=?", "自动续费 2025-01-31 → 2025-02-28", n.ID).Scan(&audits); err != nil || audits != 1 {
 		t.Fatal(audits, err)
 	}
+}
+
+func TestRenewalAlertCalendarDetails(t *testing.T) {
+	for _, tc := range []struct{ date, part string }{{"2026-03-09", "还剩 2 天"}, {"2026-03-07", "今天（2026-03-07）到期"}, {"2026-03-06", "已过 1 天"}, {"1600-03-07", "已过 155593 天"}} {
+		t.Run(tc.date, func(t *testing.T) {
+			app := testServer(t)
+			owner := budgetOwner(t, app)
+			ctx := context.Background()
+			n, _, _, err := app.nodeRepository.CreateEnrollment(ctx, "renewal server", time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res := owner.call("PUT", "/api/v1/nodes/"+n.ID+"/meta", map[string]any{"renewDate": tc.date, "renewNoticeDays": 7, "renewCycle": "一次性"}); res.Code != 200 {
+				t.Fatal(res.Body.String())
+			}
+			app.cycleScheduler.now = func() time.Time { return time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC) }
+			var message string
+			app.cycleScheduler.publish = func(_ string, payload any) { message = payload.(map[string]string)["message"] }
+			if err = app.cycleScheduler.step(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(message, tc.part) || !strings.Contains(message, "renewal server") {
+				t.Fatal(message)
+			}
+		})
+	}
+	t.Run("DST uses calendar days", func(t *testing.T) {
+		app := testServer(t)
+		owner := budgetOwner(t, app)
+		ctx := context.Background()
+		n, _, _, err := app.nodeRepository.CreateEnrollment(ctx, "DST", time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res := owner.call("PUT", "/api/v1/nodes/"+n.ID+"/meta", map[string]any{"renewDate": "2026-03-09", "renewNoticeDays": 7, "renewCycle": "一次性"}); res.Code != 200 {
+			t.Fatal(res.Body.String())
+		}
+		location, err := time.LoadLocation("America/New_York")
+		if err != nil {
+			t.Fatal(err)
+		}
+		items, err := app.nodeRepository.RenewalAlerts(ctx, time.Date(2026, 3, 7, 23, 30, 0, 0, location), location)
+		if err != nil || len(items) != 1 || items[0].DaysLeft != 2 {
+			t.Fatal(items, err)
+		}
+	})
 }
 
 func TestCycleSchedulerReactivatesThroughAutomaticRevision(t *testing.T) {

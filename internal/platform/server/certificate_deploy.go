@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"proxycontrol/internal/panel/certificate"
 	"proxycontrol/internal/panel/deployment"
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -40,6 +42,7 @@ type certificateDeployer struct {
 	logger       *slog.Logger
 	certificates *certificate.Service
 	deployments  *deployment.Repository
+	nodes        *node.Repository
 	publish      func(string, any)
 	// record writes the admin operation of a failure the Owner has to know about.
 	record func(ctx context.Context, actor, action, target, result, ip string) error
@@ -73,8 +76,8 @@ type staleInbound struct {
 	keyPEM        string
 }
 
-func newCertificateDeployer(logger *slog.Logger, certificates *certificate.Service, deployments *deployment.Repository, publish func(string, any)) *certificateDeployer {
-	return &certificateDeployer{logger: logger, certificates: certificates, deployments: deployments, publish: publish,
+func newCertificateDeployer(logger *slog.Logger, certificates *certificate.Service, deployments *deployment.Repository, nodes *node.Repository, publish func(string, any)) *certificateDeployer {
+	return &certificateDeployer{logger: logger, certificates: certificates, deployments: deployments, nodes: nodes, publish: publish,
 		now: time.Now, interval: certificateDeployInterval, wake: make(chan struct{}, 1), entries: map[string]*certificateEntry{}}
 }
 
@@ -347,7 +350,8 @@ func (d *certificateDeployer) fail(ctx context.Context, nodeID string, entry *ce
 		return
 	}
 	d.logger.Error("automatic certificate deploy gave up", "node", nodeID, "reason", reason, "attempts", certificateAttemptLimit)
-	d.publish("system.alert", map[string]string{"alert": "certificate_deploy_failed", "nodeId": nodeID, "reason": reason})
+	message := fmt.Sprintf("%s证书自动发布连续 %d 次失败，已停止重试：%s", alertNodeName(ctx, d.nodes, d.logger, nodeID), certificateAttemptLimit, reason)
+	d.publish("system.alert", map[string]string{"alert": "certificate_deploy_failed", "nodeId": nodeID, "reason": reason, "message": message})
 	if d.record != nil {
 		if err := d.record(ctx, "system", "证书自动发布失败", nodeID, "失败", ""); err != nil {
 			d.logger.Error("automatic certificate failure could not be recorded", "node", nodeID, "error", err)

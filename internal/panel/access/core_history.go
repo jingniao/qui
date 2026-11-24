@@ -41,11 +41,11 @@ func readNodeTrafficSnapshot(ctx context.Context, tx *db.ReadSnapshot, from, to 
 	for _, boundary := range []time.Time{from, to} {
 		if !boundary.Equal(boundary.Truncate(time.Minute)) {
 			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM core_traffic_minutes WHERE bucket=? AND (?='' OR node_id=?)`, timestamp(boundary.Truncate(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM core_traffic_minutes WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`, secondPrefix(boundary.Truncate(time.Minute)), secondPrefix(boundary.Truncate(time.Minute).Add(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
 				return nil, err
 			}
 			if count == 0 {
-				if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM account_traffic_minutes WHERE bucket=? AND (?='' OR node_id=?)`, timestamp(boundary.Truncate(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM account_traffic_minutes WHERE bucket>=? AND bucket<? AND (?='' OR node_id=?)`, secondPrefix(boundary.Truncate(time.Minute)), secondPrefix(boundary.Truncate(time.Minute).Add(time.Minute)), nodeID, nodeID).Scan(&count); err != nil {
 					return nil, err
 				}
 			}
@@ -242,7 +242,7 @@ func (r *Repository) compactCoreTraffic(ctx context.Context, now time.Time) (boo
 }
 
 func compactCoreMinutesToHoursTx(ctx context.Context, tx *sql.Tx, now time.Time) (bool, error) {
-	cutoff := timestamp(now.UTC().Add(-7 * 24 * time.Hour).Truncate(time.Hour))
+	cutoff := secondPrefix(now.UTC().Add(-7 * 24 * time.Hour).Truncate(time.Hour))
 	rows, err := tx.QueryContext(ctx, `SELECT node_id,core,bucket,upload_bytes,download_bytes,samples FROM core_traffic_minutes WHERE bucket<? ORDER BY bucket,node_id,core LIMIT 500`, cutoff)
 	if err != nil {
 		return false, err

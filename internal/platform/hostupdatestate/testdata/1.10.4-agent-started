@@ -1,0 +1,10 @@
+proxycontrol-update-journal-v1
+component=agent
+previous=1.7.5
+target=1.10.4
+was_active=true
+backup=
+database_source=
+phase=started
+core_request=
+core_helper=

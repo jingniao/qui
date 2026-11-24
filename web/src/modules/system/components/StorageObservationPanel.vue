@@ -7,7 +7,7 @@
   <div v-if="sample" class="text-xs space-y-3">
    <p>观察时间：{{ formatTime(sample.observedAt) }}</p>
    <p>中央主数据库已分配：{{ bytes(sample.mainDatabaseAllocatedBytes) }}；其中可复用页：{{ bytes(sample.mainDatabaseReusableBytes) }}。</p>
-   <p>空间回收方式：{{ reclaimModes[sample.mainDatabaseReclaimMode] || '尚未上报' }}。</p>
+   <p>空间回收方式：{{ reclaimModes[sample.mainDatabaseReclaimMode] || '尚未上报' }}。<span v-if="sample.mainDatabaseReclaimPending">仍有空闲页等待后台分批回收。</span></p>
    <p>容量告警：{{ warningLabels[sample.warningLevel] }}<span v-if="sample.warningBytes">（提示 {{ bytes(sample.warningBytes) }} / 严重 {{ bytes(sample.criticalBytes) }}，按主库已分配大小判断，不含 WAL 与磁盘剩余空间）</span>。</p>
    <div class="rounded-lg bg-gray-50 p-3 space-y-2">
     <p>最近维护记录：{{ maintenanceLabel(sample.maintenance) }}</p>
@@ -18,11 +18,11 @@
     <p v-if="sample.maintenance.errorCode" class="text-amber-700">空间维护或存储暂不可用，后台会重试；访问清理已提交进度保留。请核对数据库与磁盘，不删除收据或游标。</p>
    </div>
    <div class="rounded-lg bg-gray-50 p-3 space-y-2">
-    <p>流量整理：已合并 {{ sample.trafficStorage.compactedSamples.toLocaleString() }} 条核心明细，已淘汰 {{ sample.trafficStorage.retiredReceipts.toLocaleString() }} 张新协议收据。</p>
+    <p>流量整理：已合并 {{ sample.trafficStorage.compactedSamples.toLocaleString() }} 条流量明细，已淘汰 {{ sample.trafficStorage.retiredReceipts.toLocaleString() }} 张流量收据。</p>
     <p>最近成功：{{ sample.trafficStorage.lastSuccessAt ? formatTime(sample.trafficStorage.lastSuccessAt) : '尚无成功记录' }}。</p>
     <p v-if="sample.trafficStorage.errorCode" class="text-amber-700">流量整理失败，原始数据和已提交进度保留，请查看服务日志。</p>
     <p v-for="queue in sample.trafficQueues" :key="queue.nodeId">{{ queue.name }}：{{ queueLabels[queue.status] }}；完成 {{ queue.completed }}，节点确认 {{ queue.confirmed }}，已封存 {{ queue.retired }}。</p>
-    <p>核心详细记录保留 7 天，旧记录合并为小时用量；新收据双方确认至少 24 小时后淘汰，旧协议收据继续保留。</p>
+    <p>原始流量保留至少 24 小时后合并为分钟，核心分钟保留至少 7 天后合并为小时；编号收据双方确认至少 24 小时后淘汰。无编号收据接收超过 7 天、记账完成且无待处理批次时淘汰；超过窗口的重发可能重复计入。</p>
    </div>
    <table class="w-full text-left"><thead><tr><th class="py-2">数据</th><th>行数</th><th>保留边界</th></tr></thead><tbody><tr v-for="item in sample.tables" :key="item.kind"><td class="py-2">{{ names[item.kind] || '待核对数据' }}</td><td>{{ item.atLeast ? '至少 ' : '' }}{{ item.rows.toLocaleString() }}</td><td>{{ retentionNames[item.retention] }}</td></tr></tbody></table>
    <p class="text-gray-500">每类最多读取 {{ sample.countLimit.toLocaleString() }} 行，达到上限只显示下界，不能当作实际总量。主数据库页包含其他业务数据，不是访问模块单独占用；不含 WAL、共享内存、备份和磁盘剩余空间。</p>
@@ -53,10 +53,10 @@ import { formatTime } from '../../../app/auth';
 import ErrorState from '../../../components/ErrorState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 const sample=ref<StorageObservation|null>(null),loading=ref(false),error=ref('');let generation=0,stopped=false;
-const queueLabels:Record<string,string>={recovery_pending:'旧队列已封存，等待恢复节点',legacy:'旧协议，保留收据',gap:'有未完成编号，暂缓淘汰',confirmation_pending:'等待节点确认',ready:'已确认，按窗口整理'};
-const names:Record<string,string>={domain_minutes:'访问分钟记录',domain_hours:'访问记录小时流量',account_hours:'账户小时流量',account_samples:'账户采样明细',domain_days:'访问记录日流量',account_days:'账户日汇总',access_receipts:'访问批次原收据',account_receipts:'流量批次原收据',account_cursors:'账户累计游标',core_samples:'核心流量明细',core_hours:'核心历史小时用量'};
-const retentionNames={policy:'按保留策略清理',long_term:'长期保留',seven_days:'7 天详细记录',confirmed_window:'新协议确认后至少 24 小时；旧协议保留',replay_protection:'幂等与消费保护，保留'};
-const reclaimModes={none:'旧格式不支持在线增量回收，保留空闲页供复用',full:'数据库原生自动回收，实际文件缩小仍需观察',incremental:'支持有界增量回收，实际文件缩小仍需观察'};
+const queueLabels:Record<string,string>={recovery_pending:'旧队列已封存，等待恢复节点',legacy:'旧协议，按 7 天完成记账窗口整理收据',gap:'有未完成编号，暂缓淘汰',confirmation_pending:'等待节点确认',ready:'已确认，按窗口整理'};
+const names:Record<string,string>={domain_minutes:'访问分钟记录',domain_hours:'访问记录小时流量',account_hours:'账户小时流量',account_samples:'账户采样明细',domain_days:'访问记录日流量',account_days:'账户日汇总',access_receipts:'访问批次原收据',account_receipts:'流量批次原收据',account_cursors:'账户累计游标',core_samples:'核心流量明细',core_minutes:'核心分钟用量',account_minutes:'账户分钟用量',core_hours:'核心历史小时用量'};
+const retentionNames={policy:'按保留策略清理',long_term:'长期保留',one_day:'原始样本至少 24 小时，之后分批合并为分钟',seven_days:'分钟明细至少 7 天，之后分批合并为小时',confirmed_window:'编号确认后至少 24 小时；无编号已完成收据至少 7 天且无待处理批次',replay_protection:'幂等与消费保护，保留'};
+const reclaimModes={none:'旧格式不支持在线增量回收，保留空闲页供复用',full:'数据库原生自动回收，实际文件缩小仍需观察',incremental:'默认后台分批回收空闲页，独立于流量整理重试；实际文件缩小仍需观察'};
 const warningLabels={unknown:'未配置，不判断安全或超限',ok:'低于提示阈值',warning:'已达到提示阈值',critical:'已达到严重阈值'};
 const thresholds=ref<StorageThresholds|null>(null),thresholdError=ref(''),thresholdNotice=ref('');
 const warningMiB=ref<number|null>(null),criticalMiB=ref<number|null>(null);

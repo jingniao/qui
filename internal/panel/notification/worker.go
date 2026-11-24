@@ -168,9 +168,10 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 		return
 	}
 
-	var alertKind, message string
+	var alertKind, message, nodeID string
 	switch m := data.(type) {
 	case map[string]any:
+		nodeID, _ = m["nodeId"].(string)
 		if v, ok := m["alert"].(string); ok {
 			alertKind = v
 		}
@@ -180,6 +181,7 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 			message = v
 		}
 	case map[string]string:
+		nodeID = m["nodeId"]
 		alertKind = m["alert"]
 		if v, ok := m["message"]; ok {
 			message = v
@@ -196,8 +198,12 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 		title = "证书自动发布失败"
 	case "node_renewal":
 		title = "服务器续费提醒"
-	case "auto_quota_failed":
+	case "user_access_failed":
 		title = "自动额度发布失败"
+	case "user_access":
+		title = "用户访问状态变化"
+	case "device_limit":
+		title = "设备上限触发"
 	}
 
 	notif := Notification{
@@ -206,6 +212,7 @@ func (w *Worker) Alert(ctx context.Context, data any) {
 		Severity: "warning",
 		Title:    title,
 		Body:     message,
+		NodeID:   nodeID,
 	}
 
 	saved, err := w.Repository.Insert(ctx, notif)

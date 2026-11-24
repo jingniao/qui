@@ -3,6 +3,7 @@ package certificate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -298,17 +299,18 @@ func (s *Service) failed(ctx context.Context, item Certificate, keepValid bool, 
 	attempts := item.Attempts + 1
 	saved, cancel := persist(ctx)
 	defer cancel()
-	if recordErr := s.Repository.RecordFailure(saved, item.ID, code, attempts, NextAttempt(now, attempts), keepValid, now); recordErr != nil {
+	retry := nextAttemptAt(now, attempts)
+	if recordErr := s.Repository.RecordFailure(saved, item.ID, code, attempts, Stamp(retry), keepValid, now); recordErr != nil {
 		s.warn("certificate failure could not be recorded", recordErr)
 		return
 	}
-	s.alertIfExpiring(saved, item, now)
+	s.alertIfExpiring(saved, item, now, code, retry)
 }
 
 // alertIfExpiring publishes one system.alert and one audit row per certificate
 // per day once the failing renewal has less than a week left. The audit row is
 // what makes "once per day" survive a panel restart.
-func (s *Service) alertIfExpiring(ctx context.Context, item Certificate, now time.Time) {
+func (s *Service) alertIfExpiring(ctx context.Context, item Certificate, now time.Time, code string, retry time.Time) {
 	if !item.HasMaterial || s.Audit == nil {
 		return
 	}
@@ -322,6 +324,19 @@ func (s *Service) alertIfExpiring(ctx context.Context, item Certificate, now tim
 		return
 	}
 	if written && s.Publish != nil {
-		s.Publish("system.alert", map[string]string{"alert": "certificate_renewal", "certificateId": item.ID})
+		name := item.Domains[0]
+		if len(item.Domains) > 1 {
+			name += fmt.Sprintf("（另 %d 个域名）", len(item.Domains)-1)
+		}
+		format := "2006-01-02 15:04 UTC"
+		message := fmt.Sprintf("证书 %s 续期失败，", name)
+		if remaining := expires.Sub(now); remaining > 0 {
+			hours := int(remaining / time.Hour)
+			message += fmt.Sprintf("将于 %s 过期，还剩 %d 天 %d 小时。", expires.UTC().Format(format), hours/24, hours%24)
+		} else {
+			message += fmt.Sprintf("已于 %s 过期。", expires.UTC().Format(format))
+		}
+		message += fmt.Sprintf("失败代码：%s，下次重试：%s。", code, retry.UTC().Format(format))
+		s.Publish("system.alert", map[string]string{"alert": "certificate_renewal", "certificateId": item.ID, "message": message})
 	}
 }

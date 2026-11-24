@@ -10,6 +10,8 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
   const feed = new RuntimeFeed();
   const revision = ref(0), statusNow = ref(Date.now()), ready = ref(false), error = ref('');
   let active = false, read = 0;
+  let serverOffset = 0;
+  const displayNow = () => Date.now() + serverOffset;
   let pending: Promise<void> | undefined;
   let poll: ReturnType<typeof setInterval>, clock: ReturnType<typeof setInterval>;
 
@@ -31,7 +33,8 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
         const generation = feed.generation, inventory = feed.inventoryRevision;
         if (!feed.calibrate(snapshot)) { freeze(); return; }
         revision.value++;
-        statusNow.value = Date.now();
+        if (snapshot.evaluatedAt) serverOffset = Date.parse(snapshot.evaluatedAt) - Date.now();
+        statusNow.value = displayNow();
         ready.value = true;
         error.value = authState.sseStatus === 'connected' ? '' : '实时状态连接中断，当前显示最近一次校准状态';
         if (generation && (generation !== feed.generation || inventory !== feed.inventoryRevision)) options.onInventoryChanged?.();
@@ -58,7 +61,7 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
     }
     if (update) {
       revision.value++;
-      statusNow.value = Date.now();
+      statusNow.value = displayNow();
     }
     if (inventory !== feed.inventoryRevision) options.onInventoryChanged?.();
   }
@@ -82,7 +85,13 @@ export function useNodeRuntime(options: { onInventoryChanged?: () => void } = {}
     void calibrate();
     poll = setInterval(() => { void calibrate(); }, 30000);
     clock = setInterval(() => {
-      if (ready.value && !document.hidden && authState.sseStatus === 'connected') statusNow.value = Date.now();
+      if (ready.value && !document.hidden && authState.sseStatus === 'connected') {
+        statusNow.value = displayNow();
+        if (feed.hasExpiredEvidence(statusNow.value)) {
+          error.value = '面板存活状态未更新，等待校准';
+          void calibrate();
+        }
+      }
     }, 5000);
   });
   onUnmounted(() => {

@@ -15,11 +15,13 @@ import (
 )
 
 type Store struct {
+	Liveness *node.Liveness
 	Database *sql.DB
 	Vault    *vault.Vault
 }
 
 type Fact struct {
+	Liveness                        node.LivenessFact
 	ID, Name, Status, LastHeartbeat string
 	Maintenance                     bool
 	Disabled                        bool
@@ -46,7 +48,7 @@ func (v View) Evaluate(ids []string) ([]Exclusion, error) {
 			reason = "已禁用"
 		} else if n.Maintenance {
 			reason = "维护中"
-		} else if node.ConfirmedOffline(n.Status, n.LastHeartbeat, v.OfflineAfterSeconds, v.Now) {
+		} else if node.ConfirmedOfflineWithLiveness(n.Status, n.LastHeartbeat, v.OfflineAfterSeconds, v.Now, n.Liveness) {
 			reason = "确认离线"
 		}
 		if reason != "" {
@@ -85,6 +87,12 @@ func (s *Store) Filter(ctx context.Context, entries []proxy.Proxy) ([]proxy.Prox
 	v, err := readView(ctx, tx, time.Now().UTC())
 	if err != nil {
 		return nil, nil, err
+	}
+	v.Now = time.Now().UTC()
+	facts := s.Liveness.Snapshot(v.Now)
+	for id, fact := range v.Nodes {
+		fact.Liveness = facts[id]
+		v.Nodes[id] = fact
 	}
 	g, err := LoadGraph(ctx, tx, s.Vault)
 	if err != nil {

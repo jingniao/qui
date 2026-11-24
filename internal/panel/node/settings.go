@@ -133,5 +133,11 @@ func (r *Repository) UpdateSettings(ctx context.Context, id string, input Settin
 	if _, err := tx.ExecContext(ctx, "UPDATE nodes SET name=?,enabled=?,allow_subscription=?,maintenance=?,public_ip=?,public_ip_manual=?,public_ip_selected=?,connect_host=?,outbound_source_ip=?,outbound_interface=?,host_source_ipv4=?,host_source_ipv6=?,status=CASE WHEN ?=0 THEN 'disabled' WHEN enabled=0 THEN 'offline' ELSE status END WHERE id=?", input.Name, input.Enabled, allow, maintenance, publicIP, manual, selected, connectHost, network.OutboundSourceIP, network.OutboundInterface, network.HostSourceIPv4, network.HostSourceIPv6, input.Enabled, id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if !input.Enabled {
+		r.invalidateIdentity(id)
+	}
+	return nil
 }

@@ -10,6 +10,42 @@ import (
 	"proxycontrol/internal/testutil/dbtest"
 )
 
+func TestAvailabilityKeepsPendingTransportButRespectsDisabledAndMaintenance(t *testing.T) {
+	now := time.Now()
+	live := node.NewLiveness(nil)
+	session := live.Connect("n", "identity", now.Add(-time.Minute))
+	live.Establish(session)
+	live.Receive(session, now.Add(-time.Minute))
+	fact := Fact{ID: "n", Name: "node", Status: "offline", LastHeartbeat: now.Add(-time.Hour).Format(time.RFC3339Nano), Liveness: live.Snapshot(now)["n"]}
+	view := View{Now: now, OfflineAfterSeconds: 0, Nodes: map[string]Fact{"n": fact}}
+	excluded, err := view.Evaluate([]string{"n"})
+	if err != nil || len(excluded) != 0 {
+		t.Fatalf("pending transport excluded: %+v %v", excluded, err)
+	}
+	fact.Disabled = true
+	view.Nodes["n"] = fact
+	excluded, err = view.Evaluate([]string{"n"})
+	if err != nil || len(excluded) != 1 || excluded[0].Reason != "已禁用" {
+		t.Fatalf("disabled: %+v %v", excluded, err)
+	}
+	fact.Disabled = false
+	fact.Maintenance = true
+	view.Nodes["n"] = fact
+	excluded, err = view.Evaluate([]string{"n"})
+	if err != nil || len(excluded) != 1 || excluded[0].Reason != "维护中" {
+		t.Fatalf("maintenance: %+v %v", excluded, err)
+	}
+	live.Disconnect(session, now)
+	fact.Maintenance = false
+	fact.Status = "online"
+	fact.Liveness = live.Snapshot(now)["n"]
+	view.Nodes["n"] = fact
+	excluded, err = view.Evaluate([]string{"n"})
+	if err != nil || len(excluded) != 1 || excluded[0].Reason != "确认离线" {
+		t.Fatalf("disconnected: %+v %v", excluded, err)
+	}
+}
+
 func TestDisabledDependencyAndNotificationSwitch(t *testing.T) {
 	ctx := context.Background()
 	database, err := dbtest.Open(ctx, filepath.Join(t.TempDir(), "availability.db"))

@@ -267,7 +267,7 @@ if [[ $component == panel ]]; then other=agent; fi
 if ! $purge && [[ ! -e $registry/$other.manifest && ! -L $registry/$other.manifest ]]; then
   rm -f -- "$qui" /usr/local/lib/proxycontrol/uninstall.sh
   rm -f -- "$update"
-  rm -f -- "$library"
+  rm -f -- "$library" /usr/local/lib/proxycontrol/qui-update-db
   # The boot-time hook and its service definition have nothing to recover once
   # the updater that writes the journals is gone, so they go with it. A host
   # installed before the hook existed has neither, and disabling a service that

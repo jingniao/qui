@@ -23,6 +23,7 @@ type RuntimeSnapshot struct {
 }
 
 type RuntimeSnapshotList struct {
+	EvaluatedAt       time.Time     `json:"evaluatedAt"`
 	Generation        string        `json:"generation"`
 	Revision          uint64        `json:"revision"`
 	InventoryRevision uint64        `json:"inventoryRevision"`
@@ -30,6 +31,8 @@ type RuntimeSnapshotList struct {
 }
 
 type RuntimeNode struct {
+	PersistedStatus     string           `json:"persistedStatus"`
+	Liveness            LivenessFact     `json:"liveness"`
 	NodeID              string           `json:"nodeId"`
 	Revision            uint64           `json:"revision"`
 	Removed             bool             `json:"removed,omitempty"`
@@ -65,6 +68,7 @@ type RuntimeCoreHealth struct {
 // and SSE publication. A late callback re-reads current state under the lock,
 // so it cannot overwrite a newer heartbeat, disable, maintenance or deletion.
 type RuntimeSnapshots struct {
+	Liveness          *Liveness
 	queueMu           sync.Mutex
 	queued            map[string]struct{}
 	wake              chan struct{}
@@ -79,6 +83,8 @@ type RuntimeSnapshots struct {
 
 type runtimeSource struct {
 	id, status, deletedAt, lastHeartbeat string
+	persistedStatus                      string
+	liveness                             LivenessFact
 	enabled, maintenance                 bool
 	heartbeat, primaryCore, inventory    string
 	multiCore                            bool
@@ -120,6 +126,7 @@ func scanRuntime(row scanner, now time.Time) (runtimeSource, error) {
 	var source runtimeSource
 	err := row.Scan(&source.id, &source.status, &source.enabled, &source.maintenance, &source.deletedAt, &source.lastHeartbeat,
 		&source.heartbeat, &source.primaryCore, &source.multiCore, &source.inventory, &source.offlineAfterSeconds)
+	source.persistedStatus = source.status
 	if err == nil && (source.status == "online" || source.status == "degraded") {
 		when, parseErr := time.Parse(time.RFC3339Nano, source.lastHeartbeat)
 		if parseErr != nil || !freshHeartbeat(when, now) {
@@ -173,6 +180,9 @@ func runtimeMetrics(source runtimeSource) (RuntimeHeartbeat, error) {
 }
 
 func (s *RuntimeSnapshots) prepare(source runtimeSource) (runtimeEntry, error) {
+	if s.Liveness.forgetExpired(source.id, source.persistedStatus, source.lastHeartbeat, source.offlineAfterSeconds, time.Now()) {
+		source.liveness = LivenessFact{}
+	}
 	if previous, ok := s.items[source.id]; ok && previous.source == source {
 		return previous, nil
 	}
@@ -181,7 +191,7 @@ func (s *RuntimeSnapshots) prepare(source runtimeSource) (runtimeEntry, error) {
 		return runtimeEntry{}, err
 	}
 	return runtimeEntry{source: source, node: RuntimeNode{
-		NodeID: source.id, Status: source.status, Enabled: source.enabled, Maintenance: source.maintenance,
+		NodeID: source.id, Status: source.status, PersistedStatus: source.persistedStatus, Liveness: source.liveness, Enabled: source.enabled, Maintenance: source.maintenance,
 		DeletedAt: source.deletedAt, LastHeartbeat: source.lastHeartbeat, Heartbeat: metrics, OfflineAfterSeconds: source.offlineAfterSeconds,
 	}}, nil
 }
@@ -220,6 +230,7 @@ func (s *RuntimeSnapshots) Refresh(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	source.liveness = s.Liveness.Snapshot(time.Now())[source.id]
 	entry, err := s.prepare(source)
 	if err != nil {
 		return err
@@ -239,6 +250,7 @@ func (s *RuntimeSnapshots) List(ctx context.Context) (RuntimeSnapshotList, error
 	}
 	defer rows.Close()
 	now := time.Now()
+	facts := s.Liveness.Snapshot(now)
 	var entries []runtimeEntry
 	seen := make(map[string]bool)
 	for rows.Next() {
@@ -246,6 +258,7 @@ func (s *RuntimeSnapshots) List(ctx context.Context) (RuntimeSnapshotList, error
 		if err != nil {
 			return RuntimeSnapshotList{}, err
 		}
+		source.liveness = facts[source.id]
 		entry, err := s.prepare(source)
 		if err != nil {
 			return RuntimeSnapshotList{}, err
@@ -268,7 +281,7 @@ func (s *RuntimeSnapshots) List(ctx context.Context) (RuntimeSnapshotList, error
 			s.store(runtimeEntry{node: RuntimeNode{NodeID: id, Removed: true}}, publish)
 		}
 	}
-	return RuntimeSnapshotList{Generation: s.generation, Revision: s.revision, InventoryRevision: s.inventoryRevision, Items: items}, nil
+	return RuntimeSnapshotList{EvaluatedAt: now, Generation: s.generation, Revision: s.revision, InventoryRevision: s.inventoryRevision, Items: items}, nil
 }
 
 // afterCommit only records the changed node. A slow display read must not
@@ -325,3 +338,6 @@ func (h *Handler) runtimeSnapshots(w http.ResponseWriter, r *http.Request) {
 	}
 	httpapi.JSON(w, http.StatusOK, listing)
 }
+
+// Changed queues volatile display evidence without waiting for SQL.
+func (s *RuntimeSnapshots) Changed(id string) { s.afterCommit(id) }

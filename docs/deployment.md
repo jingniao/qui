@@ -60,7 +60,7 @@ VERSION=1.7.5 bash scripts/build-release.sh
 ```
 
 - `SKIP_NPM_CI=1` 复用已安装前端依赖；`OUTPUT_DIRECTORY=/abs/path` 指定输出目录（默认 `dist/`）。
-- 产物：双架构 `proxy-control-<version>-linux-<arch>.tar.gz`、`sing-box-1.14.4-qui.1-linux-<arch>.tar.gz`、`.provenance.txt` 及 `SHA256SUMS`。程序包内含 `VERSION`、`bin/proxy-panel`、`bin/proxy-agent`、`deploy/{linux,systemd,openrc,examples}`，单包同时适用 Debian/Ubuntu 与 Alpine。
+- 产物：双架构 `proxy-control-<version>-linux-<arch>.tar.gz`、`sing-box-1.14.4-qui.1-linux-<arch>.tar.gz`、`.provenance.txt` 及 `SHA256SUMS`。程序包内含 `VERSION`、`bin/proxy-panel`、`bin/proxy-agent`、`bin/qui-update-db`、`deploy/{linux,systemd,openrc,examples}`，单包同时适用 Debian/Ubuntu 与 Alpine。
 - 归档按提交时间可复现（支持 `SOURCE_DATE_EPOCH`），脚本不运行测试也不部署。
 
 **门禁**：日常改动跑增量检查 `bash scripts/quick-check.sh`（发布批次提交前用 `--release`）；完整 Linux 门禁与真实核套件在发布提交上运行并与 GitHub `check` 并行（纯前端补丁经 `scripts/gate-scope.sh` 自动走短门禁）：
@@ -221,6 +221,11 @@ systemctl enable --now proxy-agent.service
 
 ## 5. 升级
 
+数据库文件操作由独立 Go 工具 `/usr/local/lib/proxycontrol/qui-update-db` 的 `copy` / `compare` / `preflight` 执行，Bash 保留启停、锁、journal 和健康检查。面板与 Agent 安装均从同包 `bin/qui-update-db` 发布共享工具，缺失或协议不符在替换文件前拒绝；源码手工安装须先执行 `CGO_ENABLED=0 GOOS=linux GOARCH=<amd64|arm64> go build -o bin/qui-update-db ./cmd/qui-update-db`，与主程序放在同一发布目录。工具协议为 `qui-update-database-v1`，不加载面板配置，不改变目标 `proxy-panel --check-database` 的 0/3/4/5 合同。
+
+面板更新停服前将活动工具固定为 root 0500 副本，并随快照保存 `database-helper` 和 `database-helper.sha256`；prepared/started 恢复先校验副本、协议和摘要，再操作程序与数据库。恢复不依赖当前已安装工具或旧面板支持新命令；缺失/损坏时拒绝恢复并保留现场。旧快照仍执行自己的旧 updater；首次升级由原已安装脚本执行，Go 下沉从新脚本的后续运行生效。配置派生主库/WAL 仍经面板账号读取，仅明确授权冻结的 Owner 暂存库可由 root 读取；逐字节比较、文件 fsync、固定目标目录 fd 发布及目录 fsync 均保留。工具错误与目标检查结果分别传递，不将工具 126/127 解释为目标不支持。
+
+
 **标准方式：`qui-update`**（`/usr/local/bin/qui-update`，面板与节点主机均由 `install.sh` 安装；同时发布 `/usr/local/bin/qui` 与 `/usr/local/lib/proxycontrol/uninstall.sh`，均不进 manifest、随更新快照）：
 
 ```sh
@@ -317,7 +322,7 @@ Owner 在「系统管理 → 系统设置 → 系统信息 → 面板更新」�
 deploy/linux/uninstall.sh panel     # 或 agent
 ```
 
-普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载须先撤销全部交接授权，再停服并执行 `--finish-core-stop` 屏障确认核心退出；仅服务 inactive 不足以确认停核，屏障失败保留现场并中止卸载。旧 Agent 不支持协议时沿用其停核流程。Agent 卸载还须恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`service.sh`、本机卸载脚本与开机恢复单元。
+普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载须先撤销全部交接授权，再停服并执行 `--finish-core-stop` 屏障确认核心退出；仅服务 inactive 不足以确认停核，屏障失败保留现场并中止卸载。旧 Agent 不支持协议时沿用其停核流程。Agent 卸载还须恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`qui-update-db`、`service.sh`、本机卸载脚本与开机恢复单元。
 
 彻底清除使用 `qui`「卸载并清除全部数据」或 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可指定 `panel`/`agent`）：按记录先 Agent 后面板，须交互依次输入 `y`、`purge`（无免确认参数），删除配置、状态、备份与账号；不要先普通卸载再补 `--purge`。详见[运维手册](operations.md) §14。
 
@@ -325,6 +330,7 @@ deploy/linux/uninstall.sh panel     # 或 agent
 
 | 路径 | 属主 / 权限 | 内容 |
 | --- | --- | --- |
+| `/usr/local/lib/proxycontrol/qui-update-db` | root:root 0755 | 两端共享数据库更新工具，随最后一个组件卸载 |
 | `/usr/local/bin/proxy-panel`、`/usr/local/bin/proxy-agent` | root:root 0755 | 面板与 Agent 引导程序 |
 | `/usr/local/bin/qui`、`/usr/local/bin/qui-update` | root:root 0755 | 共用终端菜单与更新器（不进 manifest，更新时快照） |
 | `/usr/local/lib/proxycontrol/uninstall.sh` | root:root 0755 | 本机普通卸载／`--purge` 入口（不进 manifest，更新时快照） |

@@ -157,6 +157,9 @@ func (r *Repository) IssueRecovery(ctx context.Context, nodeID, owner string, tt
 	if err = tx.Commit(); err != nil {
 		return Node{}, "", expires, err
 	}
+	if revokeNow {
+		r.invalidateIdentity(nodeID)
+	}
 	return n, token, expires, nil
 }
 

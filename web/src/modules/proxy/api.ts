@@ -200,7 +200,7 @@ export const canvasAPI = {
 
 // Display data the canvas page has already loaded. Schemas stay loose so the
 // node list and the canvas can both pass what they hold.
-export type CanvasServerRef = Pick<NodeView, 'id' | 'name' | 'publicIp' | 'hostname' | 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds' | 'heartbeat' | 'capabilities'>;
+export type CanvasServerRef = Pick<NodeView, 'id' | 'name' | 'publicIp' | 'hostname' | 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds' | 'heartbeat' | 'capabilities' | 'persistedStatus' | 'liveness'>;
 export interface CanvasSchemeContext { servers: CanvasServerRef[]; inbounds: Inbound[]; imported: ProxyNodeItem[]; outbounds?: Outbound[]; statusNow?: number; }
 
 // A self-hosted node is identified as self-<nodeId>-<inboundId>. Base64url ids

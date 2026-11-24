@@ -79,6 +79,7 @@
             </div>
           </div>
 
+          <p v-if="processingNotice(node, clockNow)" class="text-xs text-ios-orange">{{ processingNotice(node, clockNow) }}</p>
           <!-- Row 2: Sub-info (Address · Running Time) -->
           <div class="text-xs text-neutral-400 font-mono tracking-normal flex items-center gap-1.5 flex-wrap" :class="{ grayscale: serverStatus(node, clockNow).key === 'offline' }">
             <span :class="connectAddress(node) ? 'text-neutral-500' : 'text-ios-orange font-sans'">{{ connectAddress(node) || '未设置连接地址' }}</span>
@@ -170,7 +171,7 @@
               v-if="['offline', 'reconnecting'].includes(serverStatus(node, clockNow).key)"
               class="absolute inset-0 flex items-center justify-center text-sm font-semibold leading-normal pointer-events-none"
               :class="serverStatus(node, clockNow).key === 'offline' ? 'text-ios-red' : 'text-ios-orange'"
-            >{{ serverStatus(node, clockNow).key === 'offline' ? '已离线' : '连接中断，等待恢复' }}</div>
+            >{{ serverStatus(node, clockNow).label }}</div>
             </div>
           </div>
 
@@ -259,7 +260,7 @@ import { connectAddress } from '../nodeAddress';
 import MachineTrafficUsage from './MachineTrafficUsage.vue';
 import { useServerCardValues } from './serverCardValues';
 import { useServerCardLatency } from './serverCardLatency';
-import { serverStatus } from './serverListModel';
+import { serverStatus, processingNotice } from './serverListModel';
 
 const props = defineProps<{ nodes: NodeView[]; clockNow: number; machineTraffic: Record<string, MachineTrafficSummary>; reorderable?: boolean }>();
 const emit = defineEmits<{ install: [node: NodeView]; edit: [node: NodeView]; delete: [node: NodeView]; reorder: [fromId: string, toId: string] }>();

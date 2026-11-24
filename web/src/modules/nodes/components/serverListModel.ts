@@ -8,19 +8,35 @@ export function serverStatus(node: NodeView, now: number) {
   if (!node.enabled || node.status === 'disabled') return { key: 'disabled', tone: 'disabled', label: '已禁用' };
   if (node.maintenance) return { key: 'maintenance', tone: 'maintenance', label: '维护中' };
   if (node.status === 'pending') return { key: 'pending', tone: 'disabled', label: '待登记' };
-  const age = now - Date.parse(node.lastHeartbeat);
+  const fact = node.liveness;
+  const valid = !!fact?.sessionId && now >= Date.parse(fact.evaluatedAt) - 5000 && now < Date.parse(fact.validUntil);
+  if (fact?.connected && fact.inFlightCount > 0 && !valid) return { key: 'reconnecting', tone: 'warning', label: '面板存活状态未更新' };
+  const received = valid ? Date.parse(fact!.lastReceivedAt) : NaN;
+  const durable = Date.parse(node.lastHeartbeat);
+  const age = now - (Number.isFinite(received) && (!Number.isFinite(durable) || received > durable) ? received : durable);
+  const disconnected = valid && Date.parse(fact!.disconnectedAt) > 0;
+  const transport = valid && fact!.connected && (fact!.inFlightCount > 0 || age >= -5000 && age < 45000);
+  const state = node.persistedStatus || node.status;
   const fresh = Number.isFinite(age) && age >= -5000 && age < 45000;
-  if (node.status === 'offline' || (!fresh && node.status !== 'error')) {
+  if (!transport && (state === 'offline' || (!fresh && state !== 'error') || disconnected)) {
     if (Number.isFinite(age) && age >= -5000 && age < node.offlineAfterSeconds * 1000) {
       return { key: 'reconnecting', tone: 'warning', label: '连接中断，等待恢复' };
     }
     return { key: 'offline', tone: 'offline', label: '离线' };
   }
-  if (fresh && (node.heartbeat?.core_healthy === false || unhealthyCores(node).length > 0)) return { key: 'core_error', tone: 'error', label: '核心异常' };
-  if (node.status === 'error') return { key: 'error', tone: 'error', label: '异常' };
+  if ((fresh || transport) && (node.heartbeat?.core_healthy === false || unhealthyCores(node).length > 0)) return { key: 'core_error', tone: 'error', label: '核心异常' };
+  if (state === 'error') return { key: 'error', tone: 'error', label: '异常' };
   const labels = { online: '在线', degraded: '降级', applying: '应用配置中', rollback: '回滚中' };
-  return { key: node.status, tone: node.status === 'degraded' ? 'warning' : node.status === 'rollback' ? 'applying' : node.status,
-    label: labels[node.status as keyof typeof labels] || '离线' };
+  const status = transport && state === 'offline' ? 'online' : state;
+  return { key: status, tone: status === 'degraded' ? 'warning' : status === 'rollback' ? 'applying' : status,
+    label: labels[status as keyof typeof labels] || '离线' };
+}
+export function processingNotice(node: NodeView, now: number): string {
+ const fact = node.liveness;
+ if (!fact?.sessionId || fact.inFlightCount === 0) return '';
+ if (now >= Date.parse(fact.validUntil)) return '面板存活状态未更新，等待校准';
+ const age = now - Date.parse(fact.oldestInFlightAt);
+ return age >= 10000 ? `面板处理延迟 ${Math.floor(age / 1000)} 秒（${fact.processingStage === 'sending_ack' ? '发送确认' : '等待数据库'}）` : '';
 }
 export function relativeHeartbeat(value: string, now: number) {
   const age = now - Date.parse(value);
@@ -33,7 +49,7 @@ export function relativeHeartbeat(value: string, now: number) {
   return `${Math.floor(seconds / 86400)} 天前`;
 }
 export interface ServerField { key: string; label: string; value: string; bytes?: number | null; warning?: boolean; }
-export interface ServerRow { node: NodeView; region: string; country: CountryInfo; status: ReturnType<typeof serverStatus>; fields: ServerField[]; }
+export interface ServerRow { node: NodeView; region: string; country: CountryInfo; status: ReturnType<typeof serverStatus>; processingNotice: string; fields: ServerField[]; }
 const percent = (value?: number) => typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)}%` : '—';
 const text = (value?: string | number) => value === undefined || value === null || value === '' ? '—' : String(value);
 export function serverRow(node: NodeView, now: number, today?: number, month?: number): ServerRow {
@@ -63,7 +79,7 @@ export function serverRow(node: NodeView, now: number, today?: number, month?: n
     { key: 'remark', label: '备注', value: text(meta.remark) }
   ];
   const country = resolveCountryInfo({ region: meta.region, countryCode: node.countryCode, name: node.name, hostname: node.hostname });
-  return { node, region: meta.region || '', country, status: serverStatus(node, now), fields };
+  return { node, region: meta.region || '', country, status: serverStatus(node, now), processingNotice: processingNotice(node, now), fields };
 }
 
 export interface ServerEditFormState {

@@ -100,6 +100,7 @@ cleanup_top() {
 trap cleanup_top EXIT
 
 mkdir -p -- "$TOP/harness"
+(cd -- "$repo_dir" && go build -o "$TOP/harness/qui-update-db" ./cmd/qui-update-db)
 
 
 # Write the fake init-system library. update.sh and the updater a snapshot carries both
@@ -325,6 +326,7 @@ install_everything() {
         "$root/etc/systemd/system/proxy-agent-host-network.path"
     fi
   fi
+  install -m 0755 "$(dirname -- "$0")/../../bin/qui-update-db" "$library_dir/qui-update-db"
   program_digest=$(sha256sum "$program")
   program_digest=${program_digest%% *}
   unit_digest=$(sha256sum "$unit")
@@ -413,6 +415,7 @@ case ${1:-} in
       newer) printf 'database: written by a newer panel\n' >&2; exit 3 ;;
       foreign) printf 'database: not a panel database\n' >&2; exit 4 ;;
       unsupported) printf 'flag provided but not defined: -check-database\n' >&2; exit 1 ;;
+      kill-helper) kill -KILL "$PPID"; sleep 1; exit 0 ;;
       term-updater)
         # preflight_database names the executable .check-panel.<updater PID>.
         kill -TERM "${0##*.}" || exit 4
@@ -463,6 +466,7 @@ new_scenario() {
   export FAKE_UPDATER_SOURCE=$WORK/qui-update
   export FAKE_SERVICE_SOURCE=$WORK/service.sh
   export TMPDIR=$dir/tmp
+  install -m 0755 -- "$TOP/harness/qui-update-db" "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
   install -m 0755 -- "$update_script" "$WORK/qui-update"
   install -m 0755 -- "$TOP/harness/service.sh" "$WORK/service.sh"
   : > "$FAKE_STATE/calls.log"
@@ -555,6 +559,7 @@ component_files_list() {
   else
     printf '%s\n' "$ROOT/etc/init.d/proxy-$component"
   fi
+  printf '%s\n' "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
   printf '%s\n' "$ROOT/usr/local/bin/qui-update" \
     "$ROOT/usr/local/lib/proxycontrol/service.sh"
   printf '%s\n' "$ROOT/usr/local/bin/qui" "$ROOT/usr/local/lib/proxycontrol/uninstall.sh"
@@ -624,6 +629,7 @@ make_bundle() {
   name=proxy-control-$version-linux-$arch
   rm -rf -- "$dir/bundle"
   mkdir -p -- "$base/bin" "$base/deploy/linux"
+  install -m 0755 -- "$TOP/harness/qui-update-db" "$base/bin/qui-update-db"
   write_program "$base/bin/proxy-panel" panel "$version"
   write_program "$base/bin/proxy-agent" agent "$version"
   install -m 0755 -- "$TOP/harness/install.sh" "$base/deploy/linux/install.sh"
@@ -693,12 +699,13 @@ scenario_36() {
   install_component panel 1.0.3
   create_database
   make_bundle 1.0.4
-  sync() {
-    printf '%s\n' "$*" >> "$FAKE_STATE/sync.log"
-    [[ ${@: -1} != *.partial ]] || return 73
-    command sync "$@"
-  }
-  export -f sync
+  mv -- "$ROOT/usr/local/lib/proxycontrol/qui-update-db" "$dir/real-db-tool"
+  cat > "$ROOT/usr/local/lib/proxycontrol/qui-update-db" <<'FAIL_TOOL'
+#!/bin/bash
+if [[ $1 == copy ]]; then printf 'injected database sync failure\n' >&2; exit 1; fi
+exec "$FAKE_STATE/../real-db-tool" "$@"
+FAIL_TOOL
+  chmod 0755 -- "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
   update_bundle 1.0.4
   expect_status '备份同步失败中止更新' 1 "$LAST_STATUS"
   expect_eq '同步失败恢复旧服务' active "$(service_state_file panel)"
@@ -725,7 +732,7 @@ scenario_37() {
   export -f sync
   update_bundle 1.0.4
   expect_status '原子发布只同步相关文件和目录' 0 "$LAST_STATUS"
-  expect_grep '备份目标目录同步' '-- /proc/self/fd/' "$FAKE_STATE/sync.log"
+  # Database fd/fsync observations are asserted in TestCopyPinnedDestinationAndSync.
   eval "$(sed -n '/^publish()/,/^}/p' "$repo_dir/deploy/linux/install.sh")"
   mkdir -p -- "$dir/new-parent/new-child"
   : > "$FAKE_STATE/sync.log"
@@ -1524,7 +1531,7 @@ scenario_19() {
       # Exclude the two shared files, but include the other program, unit,
       # manifest, panel menu or Agent host-network pair.
       snapshot_file_hashes "$other" "$dir/all-before.sha"
-      grep -vE '/(qui|qui-update|service.sh|uninstall.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
+      grep -vE '/(qui|qui-update|qui-update-db|service.sh|uninstall.sh)$' "$dir/all-before.sha" > "$dir/other-before.sha"
       cp -- "$FAKE_PANEL_DB" "$dir/db-before"
       export FAKE_INSTALL=$outcome
       update_bundle 1.1.0-rc.1 --component "$selected"
@@ -1544,7 +1551,7 @@ scenario_19() {
         expect_same_tree 'selected files restored' "$dir/selected-before.sha" "$dir/selected-after.sha"
       fi
       snapshot_file_hashes "$other" "$dir/all-after.sha"
-      grep -vE '/(qui|qui-update|service.sh|uninstall.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
+      grep -vE '/(qui|qui-update|qui-update-db|service.sh|uninstall.sh)$' "$dir/all-after.sha" > "$dir/other-after.sha"
       expect_same_tree 'other component untouched' "$dir/other-before.sha" "$dir/other-after.sha"
       expect_eq 'other version unchanged' 1.0.9 "$(program_version "$other")"
       if grep -E "^(start|stop|restart) proxy-$other$" "$FAKE_STATE/calls.log"; then
@@ -1783,38 +1790,9 @@ scenario_27() {
 }
 
 scenario_28() {
-  new_scenario scenario-28
-  fake_reset
-  mkdir -p "$BACKUPS" "$dir/private"
-  chmod 0755 "$TOP" "$dir" "$ROOT" "$ROOT/var" "$ROOT/var/lib"
-  chown daemon:daemon "$ROOT/var/lib/proxy-panel" "$BACKUPS"
-  create_database
-  chown daemon:daemon "$FAKE_PANEL_DB"
-  printf 'ROOT-PRIVATE-TARGET\n' > "$dir/private/copy.db.partial"
-  local status=0
-  (
-    export QUI_UPDATE_TEST_ACCOUNT=daemon
-    . "$update_script"
-    attack_directory() {
-      [[ ! -f $dir/attacked ]] || return 0
-      runuser -u daemon -- sh -c 'mv -- "$1" "$1.saved" && ln -s -- "$2" "$1"' sh "$BACKUPS" "$dir/private"
-      touch "$dir/attacked"
-    }
-    mktemp() {
-      local created
-      created=$(command mktemp "$@") || return
-      [[ $created != *.partial ]] || attack_directory
-      printf '%s\n' "$created"
-    }
-    install() { attack_directory; command install "$@"; }
-    copy_database_atomic "$FAKE_PANEL_DB" "$BACKUPS/copy.db"
-  ) > "$dir/copy.out" 2>&1 || status=$?
-  expect_status '备份目录竞争后复制成功' 0 "$status"
-  expect_exists '目录竞争钩子执行' "$dir/attacked"
-  expect_eq '不覆盖私有目标' ROOT-PRIVATE-TARGET "$(cat "$dir/private/copy.db.partial")"
-  expect_eq '不改变私有目标属主' 0 "$(stat -c '%u' "$dir/private/copy.db.partial")"
-  expect_absent '不在替换目录发布备份' "$dir/private/copy.db"
-  expect_same '备份留在已固定目录' "$FAKE_PANEL_DB" "$BACKUPS.saved/copy.db"
+  # The exact post-open race now belongs to the Go fd test, where the
+  # directory is replaced after Fstat and before Renameat.
+  (cd -- "$repo_dir" && go test ./internal/platform/hostupdatedb -run '^TestCopyPinnedDestinationAndSync$' -count=1)
 }
 
 scenario_29() {
@@ -1943,6 +1921,119 @@ scenario_33() {
   expect_eq 'agent 仍为 1.0.4' 1.0.4 "$(program_version agent)"
 }
 
+
+# The durable helper is independent of the installed shared executable.
+scenario_42() {
+  local phase damage pending
+  for phase in prepared started; do
+    for damage in missing replaced; do
+      new_scenario "scenario-42-$phase-$damage"
+      fake_reset
+      install_component panel 1.7.5
+      create_database
+      make_bundle 1.10.3
+      if [[ $phase == prepared ]]; then export FAKE_INSTALL=kill-parent
+      else export FAKE_START_WRITES=1 FAKE_START_KILL=1 FAKE_TARGET=1.10.3; fi
+      update_bundle 1.10.3
+      expect_status '中断保留恢复材料' 137 "$LAST_STATUS"
+      expect_glob_exists '存在恢复快照' "$REGISTRY" 'rollback.*'
+      pending=$FOUND_GLOB
+      expect_exists '快照固定数据库工具' "$pending/database-helper"
+      expect_exists '快照工具摘要' "$pending/database-helper.sha256"
+      if [[ $damage == missing ]]; then rm -- "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
+      else printf '#!/bin/sh\nexit 99\n' > "$ROOT/usr/local/lib/proxycontrol/qui-update-db"; fi
+      printf 'changed after interruption\n' >> "$FAKE_PANEL_DB"
+      fake_reset
+      run_snapshot_recovery "$pending"
+      expect_status '使用快照工具恢复' 0 "$LAST_STATUS"
+      expect_eq '旧面板恢复' 1.7.5 "$(program_version panel)"
+      expect_same '数据库恢复' "$dir/original.db" "$FAKE_PANEL_DB"
+      expect_no_glob '恢复清理快照' "$REGISTRY" 'rollback.*'
+    done
+  done
+}
+
+scenario_43() {
+  local phase damage pending
+  for phase in prepared started; do
+    for damage in missing digest; do
+      new_scenario "scenario-43-$phase-$damage"
+      fake_reset; install_component panel 1.7.5; create_database; make_bundle 1.10.3
+      if [[ $phase == prepared ]]; then export FAKE_INSTALL=kill-parent
+      else export FAKE_START_WRITES=1 FAKE_START_KILL=1 FAKE_TARGET=1.10.3; fi
+      update_bundle 1.10.3
+      expect_glob_exists '中断快照存在' "$REGISTRY" 'rollback.*'; pending=$FOUND_GLOB
+      if [[ $damage == missing ]]; then rm -- "$pending/database-helper"
+      else printf '%064d\n' 0 > "$pending/database-helper.sha256"; fi
+      cp -- "$FAKE_PANEL_DB" "$dir/interrupted.db"
+      : > "$FAKE_STATE/calls.log"
+      fake_reset; run_snapshot_recovery "$pending"
+      expect_status '工具缺失或损坏拒绝恢复' 1 "$LAST_STATUS"
+      expect_exists '拒绝后保留 journal' "$pending/journal"
+      expect_eq '拒绝后程序不变' 1.10.3 "$(program_version panel)"
+      expect_same '拒绝后数据库不变' "$dir/interrupted.db" "$FAKE_PANEL_DB"
+      expect_eq '拒绝后不启动服务' '' "$(grep '^start ' "$FAKE_STATE/calls.log" || true)"
+    done
+  done
+}
+
+scenario_44() {
+  local mode
+  for mode in failure malformed; do
+    new_scenario "scenario-44-$mode"
+    fake_reset; install_component panel 1.7.5; create_database; make_bundle 1.10.3
+    export DATABASE_TOOL_TEST_MODE=$mode DATABASE_TOOL_TEST_REAL=$TOP/harness/qui-update-db
+    cat > "$ROOT/usr/local/lib/proxycontrol/qui-update-db" <<'TOOL_ERROR'
+#!/bin/bash
+if [[ $1 == preflight ]]; then
+  if [[ $DATABASE_TOOL_TEST_MODE == failure ]]; then printf 'tool startup failure\n' >&2; exit 127; fi
+  printf 'checker-exit: 256\n'; exit 0
+fi
+exec "$DATABASE_TOOL_TEST_REAL" "$@"
+TOOL_ERROR
+    chmod 0755 "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
+    update_bundle 1.10.3
+    expect_status '工具错误不能成为旧目标兼容成功' 1 "$LAST_STATUS"
+    expect_eq '旧程序保留' 1.7.5 "$(program_version panel)"
+    expect_eq '旧服务恢复' active "$(service_state_file panel)"
+    expect_no_glob '清理检查目录' "$REGISTRY" 'check.*'
+  done
+}
+
+scenario_45() {
+  new_scenario scenario-45
+  fake_reset; install_component panel 1.7.5; create_database; make_bundle 1.10.3
+  export FAKE_CHECK=kill-helper
+  update_bundle 1.10.3
+  expect_status '工具预检时被杀拒绝更新' 1 "$LAST_STATUS"
+  expect_eq '旧程序保留' 1.7.5 "$(program_version panel)"
+  expect_eq '旧服务恢复' active "$(service_state_file panel)"
+  expect_no_glob '清理检查目录' "$REGISTRY" 'check.*'
+  expect_same '保留原库' "$dir/original.db" "$FAKE_PANEL_DB"
+}
+
+scenario_46() {
+  new_scenario scenario-46
+  fake_reset; install_component panel 1.7.5; install_component agent 1.7.5;create_database;make_bundle 1.10.3
+  update_bundle 1.10.3 --component agent
+  expect_status '仅更新 Agent 和共享工具' 0 "$LAST_STATUS"
+  expect_eq '面板仍是旧版' 1.7.5 "$(program_version panel)"
+  make_bundle 1.10.4
+  update_bundle 1.10.4 --component panel
+  expect_status '旧面板可使用新共享工具更新' 0 "$LAST_STATUS"
+  expect_eq '面板更新成功' 1.10.4 "$(program_version panel)"
+}
+
+scenario_47() {
+  new_scenario scenario-47
+  fake_reset;install_component panel 1.7.5;create_database;make_bundle 1.10.3
+  rm -- "$ROOT/usr/local/lib/proxycontrol/qui-update-db"
+  update_bundle 1.10.3
+  expect_status '缺工具拒绝更新' 1 "$LAST_STATUS"
+  expect_eq '工具缺失不得停止面板' '' "$(grep '^stop proxy-panel' "$FAKE_STATE/calls.log" || true)"
+  expect_eq '面板仍运行' active "$(service_state_file panel)"
+}
+
 run_scenario() {
   local name=$1 body=$2 status=0 reasons=''
   : > "$failure_file"
@@ -1971,6 +2062,12 @@ write_fake_install "$TOP/harness/install.sh"
 printf 'update-test: root %s, arch %s, update.sh %s\n' \
   "$TOP" "$arch" "$update_script"
 
+run_scenario '42 recovery uses durable helper' scenario_42
+run_scenario '43 damaged helper refuses recovery' scenario_43
+run_scenario '44 tool failure and malformed status' scenario_44
+run_scenario '45 killed preflight helper' scenario_45
+run_scenario '46 shared tool with old panel' scenario_46
+run_scenario '47 missing helper keeps panel running' scenario_47
 run_scenario '22 multi-core rollback and boot recovery' scenario_22
 run_scenario '23 v1 single core to v2 migration' scenario_23
 run_scenario '24 panel web-UI update bridge in the file list' scenario_24

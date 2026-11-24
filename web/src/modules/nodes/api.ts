@@ -18,7 +18,14 @@ export interface NodeNetworkSettings {
 export interface NodeSettingsInput extends Partial<NodeNetworkSettings> {
   id: string; name: string; enabled: boolean; publicIp?: string; publicIpSelected?: string; connectHost?: string; allowSubscription: boolean; maintenance: boolean;
 }
+export interface NodeLiveness {
+ evaluatedAt: string; validUntil: string; sessionId: number; connected: boolean;
+ lastReceivedAt: string; inFlightCount: number; oldestInFlightAt: string;
+ processingStage: string; processingDelayed: boolean; disconnectedAt: string;
+}
 export interface NodeView extends NodeNetworkSettings {
+ liveness?: NodeLiveness;
+ persistedStatus?: NodeView['status'];
   // Display grace period from the node_offline rule, independent of notification enablement.
   offlineAfterSeconds: number;
   id: string; name: string; status: 'pending' | 'online' | 'degraded' | 'offline' | 'applying' | 'rollback' | 'disabled' | 'error';

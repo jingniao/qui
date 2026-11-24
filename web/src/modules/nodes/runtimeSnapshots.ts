@@ -7,14 +7,14 @@ type RuntimeHeartbeat = Pick<NodeView['heartbeat'], 'cpu_percent' | 'memory_perc
 };
 
 type RuntimeNode = { nodeId: string; revision: number } & (
-  { removed: true } | (Pick<NodeView, 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds'> & {
+  { removed: true } | (Pick<NodeView, 'status' | 'enabled' | 'maintenance' | 'deletedAt' | 'lastHeartbeat' | 'offlineAfterSeconds' | 'persistedStatus' | 'liveness'> & {
     removed?: false;
     heartbeat: RuntimeHeartbeat;
   })
 );
 
 export interface RuntimeSnapshot { generation: string; inventoryRevision: number; node: RuntimeNode; }
-export interface RuntimeSnapshotList { generation: string; inventoryRevision: number; revision: number; items: RuntimeNode[]; }
+export interface RuntimeSnapshotList { evaluatedAt?: string; generation: string; inventoryRevision: number; revision: number; items: RuntimeNode[]; }
 
 export class RuntimeFeed {
   generation = '';
@@ -38,6 +38,10 @@ export class RuntimeFeed {
       if (node.removed !== true && Boolean(node.deletedAt) === deleted) expected.add(node.nodeId);
     }
     return ids.length === expected.size && ids.every(id => expected.has(id));
+  }
+
+  hasExpiredEvidence(now: number): boolean {
+    return [...this.items.values()].some(node => node.removed !== true && node.liveness?.connected && node.liveness.inFlightCount > 0 && now >= Date.parse(node.liveness.validUntil));
   }
 
   resetStream() {
@@ -95,6 +99,6 @@ export class RuntimeFeed {
 export function applyRuntimeSnapshot(base: NodeView, node?: RuntimeNode): NodeView | null {
   if (!node) return base;
   if (node.removed === true) return null;
-  return { ...base, status: node.status, enabled: node.enabled, maintenance: node.maintenance,
+  return { ...base, persistedStatus: node.persistedStatus, liveness: node.liveness, status: node.status, enabled: node.enabled, maintenance: node.maintenance,
     deletedAt: node.deletedAt, lastHeartbeat: node.lastHeartbeat, heartbeat: node.heartbeat, offlineAfterSeconds: node.offlineAfterSeconds };
 }

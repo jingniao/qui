@@ -176,13 +176,18 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	if err != nil {
 		return nil, fmt.Errorf("initialize runtime snapshots: %w", err)
 	}
+	liveness := node.NewLiveness(runtimeSnapshots.Changed)
+	runtimeSnapshots.Liveness = liveness
+	nodeRepository.Liveness = liveness
+	displayNodes.Liveness = liveness
 	s.runtimeSnapshots = runtimeSnapshots
 	notify := func(id string) { eventBus.Publish("node_status", map[string]string{"nodeId": id}) }
-	control := &node.Control{Repository: nodeRepository, Authority: authority, Notify: notify, Runtime: runtimeSnapshots,
+	control := &node.Control{Liveness: liveness, Repository: nodeRepository, Authority: authority, Notify: notify, Runtime: runtimeSnapshots,
 		HeartbeatNotify: func(id string) {
 			eventBus.Publish("node_status", map[string]any{"nodeId": id, "inventoryChanged": false})
 		},
 		Logger: s.Logger, Deployment: deployments, DeploymentNotify: func(revision int64) { eventBus.Publish("deployment_status", map[string]int64{"revision": revision}) }}
+	nodeRepository.IdentityInvalidated = control.Disconnect
 	s.relayCleanup = deployment.NewRelayCleanupDeployer(deployments, nodeRepository, logger)
 	control.Deployment = &relayCleanupControl{Repository: deployments, cleanup: s.relayCleanup}
 	control.RecoveryRedeploy = func(ctx context.Context, id string) error {
@@ -367,7 +372,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	}
 	proxyService.Policies = policyService
 	s.statistics = statistics.New(s.readPool, displayNodes)
-	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository, Statistics: s.statistics}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
+	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Liveness: liveness, Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository, Statistics: s.statistics}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
 	control.HealthRecorder = proxyService.Repository
 	s.sourceRefresher = &policy.SourceRefresher{Repository: policyService.Repository, Fetcher: importer.Fetcher{Timeout: 15 * time.Second}, Vault: configurationVault}
 	(&policy.Handler{Service: policyService, Refresher: s.sourceRefresher, Auth: authHandler, Audit: systemRepository}).Register(mux)
@@ -438,7 +443,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	subscriptionPublished.Database = subscriptionReads
 	subscriptionService := &subscription.Service{
 		Repository:     &subscription.Repository{Database: database, Reader: s.readPool, Vault: configurationVault},
-		Availability:   &availability.Store{Database: subscriptionReads, Vault: configurationVault},
+		Availability:   &availability.Store{Liveness: liveness, Database: subscriptionReads, Vault: configurationVault},
 		Users:          &subscriptionUsers,
 		CandidateUsers: &subscriptionUsers,
 		Sources:        source.NewRegistry(&published.Source{Users: &subscriptionUsers, Nodes: &subscriptionNodes, Published: &subscriptionPublished, Relays: &published.RelayStore{Database: subscriptionReads}, CanvasEntries: &proxy.Repository{Database: subscriptionReads}}),
@@ -456,7 +461,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	(&importer.Handler{Store: s.importStore, Auth: authHandler, Audit: systemRepository}).Register(mux)
 	portalRepository := &portal.Repository{Database: database}
 	(&portal.Handler{Repository: portalRepository, Auth: authHandler, Audit: systemRepository,
-		Service: &portal.Service{Repository: portalRepository, Auth: authService, Users: users, Nodes: nodeRepository, Traffic: s.accessRepository, Subscriptions: subscriptionService, Devices: devices},
+		Service: &portal.Service{Repository: portalRepository, Auth: authService, Users: users, Nodes: displayNodes, Traffic: s.accessRepository, Subscriptions: subscriptionService, Devices: devices},
 	}).Register(mux)
 	// The client rule template is written through the writer connection and
 	// checked against the node and policy modules, which own what it refers to.
@@ -499,7 +504,7 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
 	s.notificationWorker = &notification.Worker{
 		Repository: notificationRepo,
-		Sources:    &nodeNotificationSources{nodes: nodeRepository},
+		Sources:    &nodeNotificationSources{nodes: displayNodes},
 		Sender:     notification.Sender{},
 		Publish:    eventBus.Publish,
 		Logger:     logger,
@@ -654,8 +659,9 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	}
 	background, stopBackground := context.WithCancel(ctx)
 	var jobs sync.WaitGroup
-	jobs.Add(15)
+	jobs.Add(16)
 	defer func() { stopBackground(); jobs.Wait() }()
+	go func() { defer jobs.Done(); s.nodeRepository.Liveness.Run(background, s.Logger) }()
 	go func() { defer jobs.Done(); s.runtimeSnapshots.Run(background, s.Logger) }()
 	go func() { defer jobs.Done(); s.statistics.Run(background) }()
 	go func() { defer jobs.Done(); s.runRelayCleanup(background) }()
@@ -934,6 +940,7 @@ func (s *nodeNotificationSources) Nodes(ctx context.Context) ([]notification.Nod
 		return nil, err
 	}
 	res := make([]notification.NodeSnapshot, 0, len(nodes))
+	facts := s.nodes.Liveness.Snapshot(time.Now())
 	for _, n := range nodes {
 		if !n.Enabled {
 			n.Status = "disabled"
@@ -950,6 +957,7 @@ func (s *nodeNotificationSources) Nodes(ctx context.Context) ([]notification.Nod
 			ID:               n.ID,
 			Name:             n.Name,
 			Status:           n.Status,
+			Liveness:         facts[n.ID],
 			LastHeartbeat:    lastHeartbeat,
 			LastHeartbeatRaw: n.LastHeartbeat,
 			Maintenance:      n.Maintenance,

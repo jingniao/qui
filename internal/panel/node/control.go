@@ -38,6 +38,7 @@ const HeartbeatInterval = 15 * time.Second
 
 type Control struct {
 	pb.UnimplementedAgentControlServer
+	Liveness    *Liveness
 	Repository  *Repository
 	CoreUpdates interface {
 		PendingCoreUpdate(context.Context, string) (*pb.CoreUpdateCommand, error)
@@ -102,6 +103,7 @@ type liveStream struct {
 }
 
 func (c *Control) Disconnect(nodeID string) {
+	c.Liveness.Invalidate(nodeID)
 	c.mu.Lock()
 	s := c.connected[nodeID]
 	c.mu.Unlock()
@@ -199,17 +201,20 @@ func (c *Control) Enroll(ctx context.Context, request *pb.EnrollRequest) (*pb.En
 	}
 	c.Runtime.afterCommit(id)
 	if purpose == "recover" {
+		c.Liveness.Invalidate(id)
 		c.mu.Lock()
-		if live := c.connected[id]; live != nil && live.fingerprint != pki.Fingerprint(cert) {
+		live := c.connected[id]
+		c.mu.Unlock()
+		if live != nil && live.fingerprint != pki.Fingerprint(cert) {
 			live.cancel()
 		}
-		c.mu.Unlock()
 	}
 	return &pb.EnrollResponse{NodeId: id, CertificatePem: encoded, CaPem: c.Authority.PEM, ExpiresAt: timestamppb.New(cert.NotAfter)}, nil
 }
 
-func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.ServerMessage]) error {
-	ctx, cancel := context.WithCancel(stream.Context())
+func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.ServerMessage]) (result error) {
+	ctx, cancelCause := context.WithCancelCause(stream.Context())
+	cancel := func() { cancelCause(context.Canceled) }
 	defer cancel()
 	info, err := certificate(ctx)
 	if err != nil {
@@ -231,6 +236,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.Logger.Warn("node certificate refused", append(attributes, "error", err)...)
 		}
 		return status.Error(codes.Unauthenticated, "node certificate revoked or unknown")
+	}
+	var processingSequence uint64
+	failure := func(code codes.Code, message string, cause error) error {
+		if c.Logger != nil {
+			c.Logger.ErrorContext(ctx, "node message operation failed", "node", id, "sequence", processingSequence, "stage", "waiting_db", "error", cause)
+		}
+		return status.Error(code, message)
 	}
 	first, err := stream.Recv()
 	if err != nil {
@@ -254,18 +266,69 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	c.connected[id] = entry
 	c.mu.Unlock()
 	defer func() {
+		if result != nil && c.Logger != nil {
+			c.Logger.Error("node stream failed", "node", id, "error", result)
+		}
+	}()
+	defer func() {
 		c.mu.Lock()
 		if current := c.connected[id]; current == entry {
 			delete(c.connected, id)
 		}
 		c.mu.Unlock()
 	}()
+
+	draining := len(metadata.ValueFromIncomingContext(ctx, pb.ReplacementDrain)) != 0
+	var session liveSession
+	var helloReceipt uint64
+	if !draining {
+		session = c.Liveness.Connect(id, fingerprint, time.Now())
+		helloReceipt = c.Liveness.Receive(session, time.Now())
+	}
+	defer func() { c.Liveness.Disconnect(session, time.Now()) }()
+	go func() { <-ctx.Done(); c.Liveness.Disconnect(session, time.Now()) }()
+	type gatePacket struct {
+		message *pb.AgentMessage
+		err     error
+		receipt uint64
+	}
+	incoming := make(chan gatePacket, 1)
+	go func() {
+		for {
+			message, err := stream.Recv()
+			if err == nil {
+				if validation := validateMessage(id, message); validation != nil {
+					err = status.Error(codes.InvalidArgument, validation.Error())
+				}
+			}
+			var receipt uint64
+			if err == nil && !draining {
+				receipt = c.Liveness.Receive(session, time.Now())
+			}
+			if err != nil && !draining {
+				c.Liveness.Disconnect(session, time.Now())
+				// EOF may be a half-close after final valid messages. Revoke
+				// display evidence immediately and finish their durable receipts.
+				if !errors.Is(err, io.EOF) {
+					cancelCause(err)
+				}
+			}
+			select {
+			case incoming <- gatePacket{message, err, receipt}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	// A recovery may have committed while this peer waited to send Hello.
 	if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
-		return status.Error(codes.Unauthenticated, "node certificate revoked or unknown")
+		return failure(codes.Unauthenticated, "node certificate revoked or unknown", err)
 	}
 	drainValues := metadata.ValueFromIncomingContext(ctx, pb.ReplacementDrain)
-	draining := len(drainValues) != 0
 	validateDrain := func() error {
 		if len(drainValues) != 1 || len(drainValues[0]) != 64 {
 			return status.Error(codes.InvalidArgument, "invalid recovery token digest")
@@ -288,6 +351,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.Connections.SetGateSupport(id, first.GetHello().DeviceGateSupported && c.DeviceGates != nil)
 		}
 		defer func() {
+			c.Liveness.Disconnect(session, time.Now())
+			cancel()
 			if c.Connections != nil {
 				c.Connections.SetGateSupport(id, false)
 			}
@@ -298,17 +363,19 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			} else if c.Logger != nil {
 				c.Logger.Error("persist offline node status", "node", id, "error", err)
 			}
-			c.Repository.unconfirmTuning(cleanup, id)
+			if err := c.Repository.unconfirmTuning(cleanup, id); err != nil && c.Logger != nil {
+				c.Logger.Error("persist disconnected tuning state", "node", id, "error", err)
+			}
 			c.notifyHeartbeat(id)
 		}()
 		if err := c.Repository.unconfirmTuning(ctx, id); err != nil {
-			return status.Error(codes.Internal, "tuning recovery failed")
+			return failure(codes.Internal, "tuning recovery failed", err)
 		}
 	}
 	sentTuningID := ""
 	last, err := c.Repository.HandshakeSequence(ctx, id, first.GetHello().LastAckedSequence)
 	if err != nil {
-		return status.Error(codes.FailedPrecondition, "original node sequence or accepted message unavailable")
+		return failure(codes.FailedPrecondition, "original node sequence or accepted message unavailable", err)
 	}
 	if first.GetHello().LastAckedSequence > last {
 		return status.Error(codes.FailedPrecondition, "central sequence older than node state")
@@ -317,14 +384,14 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	healthCheckSupported := first.GetHello().HealthCheckSupported
 	if !draining {
 		if err := c.Repository.AgentVersion(ctx, id, first.GetHello().AgentVersion); err != nil {
-			return status.Error(codes.Internal, "node version persistence failed")
+			return failure(codes.Internal, "node version persistence failed", err)
 		}
 		c.Runtime.afterCommit(id)
 		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET core_restart_supported=? WHERE id=?", restartSupported, id); err != nil {
-			return status.Error(codes.Internal, "restart capability persistence failed")
+			return failure(codes.Internal, "restart capability persistence failed", err)
 		}
 		if err := c.Repository.healthCapability(ctx, id, healthCheckSupported); err != nil {
-			return status.Error(codes.Internal, "health capability persistence failed")
+			return failure(codes.Internal, "health capability persistence failed", err)
 		}
 	}
 	retirementRecorder, retirementOK := c.AccessRecorder.(interface {
@@ -356,16 +423,16 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if !draining {
 		gostSupported := first.GetHello().GostCoreSupported
 		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET multi_core_supported=?,node_traffic_supported=?,gost_core_supported=? WHERE id=?", multiSupported, nodeTrafficSupported, gostSupported, id); err != nil {
-			return status.Error(codes.Internal, "multi-core negotiation persistence failed")
+			return failure(codes.Internal, "multi-core negotiation persistence failed", err)
 		}
 		if err := c.Repository.AgentSystemUpdateSupport(ctx, id, systemSupported, first.GetHello().AgentSystemUpdateError, first.GetHello().AgentBootstrapVersion); err != nil {
 			return status.Error(codes.Internal, err.Error())
 		}
 		if err := c.Repository.AgentUpdateSupport(ctx, id, agentUpdateSupported, agentRecoverySupported); err != nil {
-			return status.Error(codes.Internal, "Agent update capability persistence failed")
+			return failure(codes.Internal, "Agent update capability persistence failed", err)
 		}
 		if err := c.Repository.CoreUpdateSupport(ctx, id, updateSupported); err != nil {
-			return status.Error(codes.Internal, "core update capability persistence failed")
+			return failure(codes.Internal, "core update capability persistence failed", err)
 		}
 		// Closing a stale update waits until this connection stored fresh
 		// capabilities; see coreUpdateCapabilitiesStored.
@@ -374,7 +441,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	settingsSession := &settingsContractSession{}
 	if !draining {
 		if _, err := c.Repository.Database.ExecContext(ctx, "UPDATE nodes SET tcp_probe_supported=? WHERE id=?", first.GetHello().TcpProbeSupported, id); err != nil {
-			return status.Error(codes.Internal, "probe capability persistence failed")
+			return failure(codes.Internal, "probe capability persistence failed", err)
 		}
 	}
 	serverSequence := uint64(0)
@@ -413,6 +480,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		return stream.Send(message)
 	}
+	c.Liveness.SendingAck(session, helloReceipt)
 	cataloguePort := uint32(0)
 	if c.CataloguePort != nil {
 		cataloguePort = c.CataloguePort(ctx)
@@ -420,24 +488,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 	if err := send(&pb.Welcome{TrafficRetirementSupported: trafficRetirementSupported, MultiCoreSupported: multiSupported, NodeTrafficSupported: nodeTrafficSupported, LastAcceptedSequence: last, HeartbeatIntervalSeconds: uint32(HeartbeatInterval / time.Second), CoreUpdateSupported: updateSupported, AgentSystemUpdateSupported: systemSupported, AgentUpdateSupported: agentUpdateSupported, AgentRecoverySupported: agentRecoverySupported, HealthCheckSupported: healthCheckSupported, CoreRestartSupported: restartSupported, DeviceGateSupported: first.GetHello().DeviceGateSupported && c.DeviceGates != nil, NodeCaMigrationPlanDigest: "", NodeCaReconfirmationPlanDigest: "", AgentCataloguePort: cataloguePort}); err != nil {
 		return err
 	}
-	type gatePacket struct {
-		message *pb.AgentMessage
-		err     error
+	if !draining {
+		c.Liveness.Establish(session)
+		c.Liveness.Complete(session, helloReceipt)
 	}
-	incoming := make(chan gatePacket, 1)
-	go func() {
-		for {
-			message, err := stream.Recv()
-			select {
-			case incoming <- gatePacket{message, err}:
-			case <-ctx.Done():
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
 	var changes <-chan struct{}
 	if !draining && c.GateChanges != nil {
 		var cancel func()
@@ -451,8 +505,8 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if draining || !first.GetHello().DeviceGateSupported || c.DeviceGates == nil {
 			return nil
 		}
-		if c.Repository.ValidateIdentity(ctx, id, fingerprint) != nil {
-			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
+		if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
+			return failure(codes.Unauthenticated, "node certificate revoked or disabled", err)
 		}
 		current, e := c.Repository.GetForCoreSelection(ctx, id)
 		if e != nil || !AnyGateSupported(current.Capabilities) {
@@ -468,7 +522,10 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		var packet gatePacket
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if errors.Is(context.Cause(ctx), io.EOF) {
+				return nil
+			}
+			return context.Cause(ctx)
 		case <-changes:
 			if err := sendGates(); err != nil {
 				return err
@@ -482,6 +539,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		case packet = <-incoming:
 		}
 		message, err := packet.message, packet.err
+		if message != nil {
+			processingSequence = message.Sequence
+		}
 		if errors.Is(err, io.EOF) {
 			if draining {
 				if err := validateDrain(); err != nil {
@@ -495,7 +555,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			return err
 		}
 		if err := c.Repository.ValidateIdentity(ctx, id, fingerprint); err != nil {
-			return status.Error(codes.Unauthenticated, "node certificate revoked or disabled")
+			return failure(codes.Unauthenticated, "node certificate revoked or disabled", err)
 		}
 		if draining && message.GetTrafficConfirmation() == nil && message.GetTrafficBatch() == nil && message.GetAccessBatch() == nil {
 			return status.Error(codes.InvalidArgument, "only final telemetry is accepted during replacement")
@@ -505,13 +565,13 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		}
 		lastSequence, err := c.Repository.LastSequence(ctx, id)
 		if err != nil {
-			return status.Error(codes.Internal, "node sequence unavailable")
+			return failure(codes.Internal, "node sequence unavailable", err)
 		}
 		if message.Sequence > lastSequence+1 {
 			return status.Error(codes.FailedPrecondition, "agent sequence gap")
 		}
 		if err := c.Repository.CheckAcceptedMessage(ctx, id, message); err != nil {
-			return status.Error(codes.FailedPrecondition, "original accepted message conflicts or is unavailable")
+			return failure(codes.FailedPrecondition, "original accepted message conflicts or is unavailable", err)
 		}
 		accessBatchID := ""
 		trafficBatchID := ""
@@ -679,6 +739,9 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			wasEmptyCaps = (prev == "" || prev == "{}")
 		}
 		accepted, err := c.Repository.record(ctx, id, fingerprint, message)
+		if err != nil && c.Logger != nil {
+			c.Logger.ErrorContext(ctx, "persist node message", "node", id, "sequence", message.Sequence, "stage", "waiting_db", "error", err)
+		}
 		if errors.Is(err, ErrIdentity) {
 			return status.Error(codes.Unauthenticated, "node certificate retired during message processing")
 		}
@@ -705,7 +768,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		settingsSession.record(message, message.Sequence > lastSequence)
 		if updateSupported {
 			if err := c.coreUpdateCapabilitiesStored(ctx, id, message, coreUpdates); err != nil {
-				return status.Error(codes.Internal, "stale core update closure failed")
+				return failure(codes.Internal, "stale core update closure failed", err)
 			}
 		}
 		if message.GetHeartbeat() != nil {
@@ -724,9 +787,11 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 			c.DashboardNotify()
 		}
 
+		c.Liveness.SendingAck(session, packet.receipt)
 		if err := send(&pb.Ack{AgentSequence: accepted, AgentSystemUpdateAckJson: systemAck, AccessBatchId: accessBatchID, TrafficBatchId: trafficBatchID, TrafficQueueId: message.GetTrafficBatch().GetQueueId(), TrafficDeliverySeq: message.GetTrafficBatch().GetDeliverySeq()}); err != nil {
 			return err
 		}
+		c.Liveness.Complete(session, packet.receipt)
 		if draining {
 			continue
 		}

@@ -17,6 +17,8 @@
 
 日常巡检关注：总览（在线数/今日流量/阻断/异常节点）、节点页（状态/版本/出站网络/心跳）、访问记录、系统 → 配置版本与备份、面板日志（`journalctl -u proxy-panel`）与 Agent 运行日志（`/var/lib/proxy-agent/logs/agent.log`）。面板通过单条 SSE（`GET /api/v1/events`）按角色推送状态与告警（Viewer 仅收监控类通知，每 15 秒重验角色）。
 
+**在线但处理延迟**：节点的数据库心跳可因面板写库等待而变旧，已认证连接上的在途消息仍提供存活证据。页面在 10 秒后持续提示「面板处理延迟」，服务日志 `node message processing delayed` 带节点、会话、阶段、年龄及在途数量，每 60 秒重复。先排查面板数据库写入等待与存储状态；最后心跳和指标仍显示实际持久化时间。`sending_ack` 表示正在发确认，不能据此推断 Agent 已收到。页面提示「面板存活状态未更新，等待校准」时检查面板连接与只读接口，不将旧 connected 继续当作在线证据。断开 SSE 时仍冻结最后确认状态；不增加 Telegram/Webhook 的独立发送路径。
+
 **节点服务管理（systemd 与 OpenRC 对照）**（部署见[部署与升级 §4.1](deployment.md#41-alpine--openrc-节点)）：
 
 | 操作 | systemd | OpenRC |
@@ -34,6 +36,8 @@ OpenRC 由 `supervise-daemon` 监管：退出 5 秒重启；`stop` 先发 TERM�
 **Agent 日志容量（100 MiB 上限）**：运行日志位于 `<DataDirectory>/logs/`（默认 `/var/lib/proxy-agent/logs/`），含 `agent.log` 及 `.1`–`.9`，单文件 10 MiB、总计上限 **100 MiB**，最旧自动轮换删除（受管模式由主进程统一收集自身和子 Agent stderr）。此上限不含本地 spool、核心、安装/回滚文件或网页完整升级日志，不清理历史 journald/syslog。写入/轮转失败向服务日志报错并停写文件，父进程继续丢弃子进程输出防止代理退出，修好后重启恢复；已有受管节点须经终端 `qui-update --component agent` 更新引导并重启后核对 `logs/agent.log` 写入才算生效。
 
 ## 2. 备份与恢复
+
+主机更新器的 Go 数据库工具安装在 `/usr/local/lib/proxycontrol/qui-update-db`。仍有任一组件时保留，最后卸载时清除。不要单独替换不同发布包的脚本和工具。中断快照使用自己的 `database-helper` 与摘要恢复；若缺失、不可执行或摘要不符，恢复明确失败且保留现场，不用当前安装工具代替、不手工删除 journal。先检查 `update-recovery.log` 与快照文件，并按原更新材料处理；详见[部署与升级 §5](deployment.md#5-升级)。
 
 - **内容与计划**：加密备份（`.pcb`，默认 `<database 目录>/backups`，示例 `/var/lib/proxy-panel/backups`）含 SQLite 一致性快照、系统配置、中央证书/ACME/Cloudflare 凭据、规则集与密钥。默认每日 `03:00` 自动备份，保留 **7 每日 / 4 每周 / 3 每月**（口令加密存库）。面板支持手工备份、校验、预览、导入/导出及在线恢复（`POST /api/v1/backups/{id}/restore`，重启切换，记录见 `GET /api/v1/restore-records`）。
 - **离线命令行恢复**（面板已停，恢复后直接继续提供服务；`--restore-backup` 与 `--restore-password-file` 须成对并显式给 `--config`，口令文件 ≤514 字节且仅属主可读，当前库空/缺失或校验失败拒绝替换）：

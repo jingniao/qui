@@ -17,17 +17,25 @@ func DisplayStatus(n Node, now time.Time) string {
 	if n.Status == "pending" {
 		return "pending"
 	}
-	heartbeat, err := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
+	if n.PersistedStatus != "" {
+		n.Status = n.PersistedStatus
+	}
+	transportAlive := n.Liveness.Connected && ConnectionAlive(n.Status, n.LastHeartbeat, now, n.Liveness)
+	effectiveHeartbeat := livenessHeartbeat(n.LastHeartbeat, n.Liveness, now)
+	heartbeat, err := time.Parse(time.RFC3339Nano, effectiveHeartbeat)
 	age := now.Sub(heartbeat)
 	fresh := err == nil && age >= -5*time.Second && age < HeartbeatFreshness
-	if n.Status == "offline" || !fresh && n.Status != "error" {
-		if ConfirmedOffline(n.Status, n.LastHeartbeat, n.OfflineAfterSeconds, now) {
+	if !transportAlive && (n.Status == "offline" || !fresh && n.Status != "error" || n.Liveness.valid(now) && !n.Liveness.DisconnectedAt.IsZero()) {
+		if ConfirmedOfflineWithLiveness(n.Status, n.LastHeartbeat, n.OfflineAfterSeconds, now, n.Liveness) {
 			return "offline"
 		}
 		return "reconnecting"
 	}
-	if fresh && displayCoreUnhealthy(n) {
+	if (fresh || transportAlive) && displayCoreUnhealthy(n) {
 		return "core_error"
+	}
+	if transportAlive && n.Status == "offline" {
+		return "online"
 	}
 	return n.Status
 }

@@ -3,6 +3,7 @@
     <!-- Top 4 Financial KPI Cards (Full Width 4 Columns) -->
     <ServerFinancialCards :node="node" :meta="meta" />
 
+    <p v-if="statusNode && processingNotice(statusNode, props.statusNow ?? props.now)" class="text-xs text-ios-orange">{{ processingNotice(statusNode, props.statusNow ?? props.now) }}</p>
     <!-- 基础信息与系统信息合并卡片 (Full Width 4 Columns) -->
     <section class="panel-card p-3.5 sm:p-4 bg-white space-y-3">
       <!-- Header: Title, Status Badge, Heartbeat & Subscriptions -->
@@ -241,7 +242,7 @@ import type { Revision } from '../../../system/deploymentApi';
 import { type NodeMeta, resolveCountryInfo, countrySourceLabel, cleanRemark, formatPortRange } from '../../nodeMeta';
 import { hostMetrics, uptime } from '../../metrics';
 import { formatTime } from '../../../../app/auth';
-import { serverStatus, relativeHeartbeat } from '../serverListModel';
+import { serverStatus, relativeHeartbeat, processingNotice } from '../serverListModel';
 import { revisionEventText } from './serverDetailModel';
 import { nodeCores, nodeHasUserCore, coreSummaryLabel } from '../../coreSummary';
 import type { NodeGroup } from '../../groupsApi';

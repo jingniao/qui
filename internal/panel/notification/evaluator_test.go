@@ -1,9 +1,41 @@
 package notification
 
 import (
+	nodeavailability "proxycontrol/internal/panel/node"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestOfflineEvaluationUsesTransportAndResolvesDelayedRecovery(t *testing.T) {
+	now := time.Now()
+	live := nodeavailability.NewLiveness(nil)
+	session := live.Connect("n", "identity", now.Add(-time.Minute))
+	live.Establish(session)
+	live.Receive(session, now.Add(-time.Minute))
+	snapshot := Snapshot{Now: now, Nodes: []NodeSnapshot{{ID: "n", Name: "node", Status: "offline", LastHeartbeatRaw: now.Add(-time.Hour).Format(time.RFC3339Nano), Liveness: live.Snapshot(now)["n"]}}}
+	rules := []Rule{{Kind: "node_offline", Enabled: true, DurationMinutes: 0}}
+	events, _ := Evaluate(rules, snapshot, map[string]State{})
+	if len(events) != 0 {
+		t.Fatalf("pending transport triggered offline: %+v", events)
+	}
+	events, states := Evaluate(rules, snapshot, map[string]State{"node_offline:n": {Active: true}})
+	if len(events) != 1 || !events[0].Resolved || !strings.Contains(events[0].Body, "处理仍有延迟") || len(states) != 0 {
+		t.Fatalf("recovery: %+v %+v", events, states)
+	}
+	live.Disconnect(session, now)
+	snapshot.Nodes[0].Liveness = live.Snapshot(now)["n"]
+	snapshot.Nodes[0].Status = "online"
+	events, _ = Evaluate(rules, snapshot, map[string]State{})
+	if len(events) != 1 || events[0].Resolved {
+		t.Fatalf("disconnect hidden by old database online: %+v", events)
+	}
+	snapshot.Nodes[0].Maintenance = true
+	events, states = Evaluate(rules, snapshot, map[string]State{"node_offline:n": {Active: true}})
+	if len(events) != 0 || !states["node_offline:n"].Active {
+		t.Fatal("maintenance changed episode")
+	}
+}
 
 func floatPtr(v float64) *float64 { return &v }
 func uint64Ptr(v uint64) *uint64  { return &v }

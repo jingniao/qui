@@ -10,6 +10,7 @@ import (
 )
 
 type NodeSnapshot struct {
+	Liveness         nodeavailability.LivenessFact
 	ID, Name, Status string
 	LastHeartbeat    time.Time
 	LastHeartbeatRaw string
@@ -60,7 +61,7 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 			st := next[key]
 			r, ok := ruleMap["node_offline"]
 
-			if ok && nodeavailability.ConfirmedOffline(node.Status, node.LastHeartbeatRaw, r.DurationMinutes*60, snap.Now) {
+			if ok && nodeavailability.ConfirmedOfflineWithLiveness(node.Status, node.LastHeartbeatRaw, r.DurationMinutes*60, snap.Now, node.Liveness) {
 				// An offline episode fires once, regardless of the cooldown.
 				// Its persisted active state is cleared only on recovery.
 				if !st.Active && !snap.Now.Before(snap.OfflineAlertNotBefore) {
@@ -84,7 +85,7 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 					st.LastNotified = snap.Now
 					next[key] = st
 				}
-			} else if node.Status == "online" || node.Status == "degraded" {
+			} else if nodeavailability.ConnectionAlive(node.Status, node.LastHeartbeatRaw, snap.Now, node.Liveness) {
 				if st.Active {
 					if ok {
 						events = append(events, Event{
@@ -92,7 +93,7 @@ func Evaluate(rules []Rule, snap Snapshot, states map[string]State) (events []Ev
 							Severity:  "resolved",
 							NodeID:    node.ID,
 							Title:     fmt.Sprintf("节点「%s」离线恢复", node.Name),
-							Body:      "心跳已恢复正常",
+							Body:      nodeavailability.ConnectionRecoveryText(node.Liveness),
 							DedupeKey: key,
 							Resolved:  true,
 						})

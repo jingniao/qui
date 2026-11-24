@@ -14,7 +14,7 @@ let now = Date.parse('2026-11-21T10:00:00Z');
 const useNodeRuntime = new Function('onMounted', 'onUnmounted', 'ref', 'request', 'RuntimeFeed', 'window', 'document', 'authState', 'setInterval', 'clearInterval', 'Date', compile(hook).replace('export function', 'function') + '\nreturn useNodeRuntime;')(
   fn => mount.push(fn), fn => unmount.push(fn), ref,
   () => new Promise((resolve, reject) => { resolve.reject = reject; reads.push(resolve); }), RuntimeFeed, window, document, authState,
-  fn => { timers.push(fn); return timers.length; }, () => {}, { now: () => now }
+  fn => { timers.push(fn); return timers.length; }, () => {}, { now: () => now, parse: Date.parse }
 );
 const runtime = useNodeRuntime();
 const base = { id: 'alpha', lastHeartbeat: '' };
@@ -148,5 +148,16 @@ timers[1]();
 assert.equal(display.offlineNodesCount.value, 1);
 send('third', 70);
 assert.equal(display.offlineNodesCount.value, 0);
+// Server evidence uses the server clock even when the browser clock differs.
+timers[0]();
+const serverTime = now + 10 * 60000;
+reads.shift()({ generation: 'third', inventoryRevision: 1, revision: 71, evaluatedAt: new Date(serverTime).toISOString(), items: [{ ...node(71), lastHeartbeat: new Date(serverTime).toISOString(), liveness: { sessionId: 1, connected: true, inFlightCount: 1, evaluatedAt: new Date(serverTime).toISOString(), validUntil: new Date(serverTime + 45000).toISOString(), lastReceivedAt: new Date(serverTime).toISOString() } }] });
+await settle();
+assert.equal(runtime.statusNow.value, serverTime);
+now += 50000;
+timers[1]();
+assert.equal(runtime.statusNow.value, serverTime + 50000);
+assert.match(runtime.error.value, /面板存活状态未更新/);
+assert.equal(reads.length, 1, 'expired volatile evidence requests calibration');
 unmount.forEach(fn => fn());
 console.log('PASS dashboard runtime: generation transition, 30 minutes of lost SSE, late inventory, background recovery, reconnect, HTTP failure and real offline/recovery');

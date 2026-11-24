@@ -217,6 +217,9 @@ fi
 step 'build the panel'
 go build -o bin/proxy-panel ./cmd/panel
 
+step 'build the database update tool'
+go build -o bin/qui-update-db ./cmd/qui-update-db
+
 step 'build the agent'
 go build -o bin/proxy-agent ./cmd/agent
 

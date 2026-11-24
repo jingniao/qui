@@ -240,6 +240,7 @@ func (r *Repository) DeleteWithResult(ctx context.Context, id string, tasks Task
 	if err := tx.Commit(); err != nil {
 		return result, err
 	}
+	r.invalidateIdentity(id)
 	if cascade.AfterCommit != nil {
 		pending, err := cascade.AfterCommit(ctx)
 		if err != nil {
@@ -257,7 +258,7 @@ func (r *Repository) Preview(ctx context.Context, id string) (DeletionPreview, e
 	if err != nil {
 		return DeletionPreview{}, err
 	}
-	preview := DeletionPreview{DeletionImpact: emptyDeletionImpact(), Mode: "delete", Groups: []string{}, LastHeartbeat: n.LastHeartbeat, Online: n.Status == "online" || n.Status == "degraded"}
+	preview := DeletionPreview{DeletionImpact: emptyDeletionImpact(), Mode: "delete", Groups: []string{}, LastHeartbeat: n.LastHeartbeat, Online: ConnectionAlive(n.Status, n.LastHeartbeat, time.Now(), n.Liveness)}
 	if n.DeletedAt != "" {
 		preview.Mode = "deleted"
 		return preview, nil

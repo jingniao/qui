@@ -55,6 +55,8 @@ for architecture in "${architectures[@]}"; do
       -ldflags "-s -w -X main.version=$version" \
       -o "$stage/bin/proxy-$component" "./cmd/$component"
   done
+  CGO_ENABLED=0 GOOS=linux GOARCH="$architecture" go build -p 1 -trimpath \
+    -ldflags "-s -w -X main.version=$version" -o "$stage/bin/qui-update-db" ./cmd/qui-update-db
   for directory in linux systemd openrc examples; do
     cp -R -- "deploy/$directory" "$stage/deploy/$directory"
   done

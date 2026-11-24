@@ -88,6 +88,8 @@ SQLite，路径来自配置 `database`（示例 `/var/lib/proxy-panel/panel.db`�
 
 ## 6. 关键流程
 
+**节点存活与处理延迟**：进程内唯一 `node.Liveness` 按身份与会话 token 记录真实接收和待确认消息；接收端与 context 观察器独立撤销断流证据，不等待主循环 SQL。短锁内只改内存，回调仅登记既有 RuntimeSnapshots 队列，由只读池装配 SSE。展示保留原始数据库状态/心跳，并携带 45 秒存活证据；处理阶段为 `waiting_db` / `sending_ack`，10 秒提示、60 秒重复日志。读池注入总览、门户、订阅和通知，数据库控制准入与指标时效保持原规则；不提前 Ack，不增加外部通知旁路。详见[项目说明书](project-spec.md) §27.11。
+
 **节点接入**：面板创建节点并生成一次性注册码 → Agent 本地生成私钥并提交 CSR → 面板用节点 CA 签发证书（`internal/platform/pki`）→ Agent 以 mTLS 建立长连接。注册码只能使用一次，且要求节点记录为启用状态（`internal/panel/node/repository.go:106`、`control.go:136`）。
 
 **配置发布与回滚**：Owner 保存业务配置 → 生成 Revision（`POST /api/v1/revisions`）→ 部署（`POST /api/v1/revisions/{id}/deploy`）→ Agent 渲染并校验核心原生配置 → 切换核心 → 健康检查 → 失败自动回滚到上一成功版本。代理链按“先出口、后中转、最后入口”发布，回滚反向（`internal/panel/deployment/relay_batches.go`）。
@@ -132,7 +134,7 @@ Linux Agent 更新时，仅有效本机更新授权允许 prepared→detached �
 | 节点 | `/usr/local/bin/proxy-agent`、`/usr/local/lib/proxy-agent/<core>` | Agent 引导镜像与安装器放置的代理核心 |
 | 节点 | `/etc/proxy-agent/` | `config.yaml` 与 `tls/ca.crt`（受信中央 CA） |
 | 节点 | `/var/lib/proxy-agent/` | `identity/`、`revisions/`、`spool/`、`runtime/`、`releases/`、`host-network/` |
-| 两端 | `/usr/local/bin/qui-update`、`/var/lib/proxycontrol-install/` | 原地升级脚本、安装记录与操作锁 |
+| 两端 | `/usr/local/bin/qui-update`、`/usr/local/lib/proxycontrol/qui-update-db`、`/var/lib/proxycontrol-install/` | 升级状态机、Go 数据库工具、安装记录与操作锁 |
 
 完整路径、属主与权限见[部署与升级 §7](deployment.md#7-目录与权限)。日志由两个程序直接写 stdout，systemd 收集至 journald（`internal/platform/logging`），OpenRC 经 `logger` 写 syslog，不写 `/var/log` 下的独立文件。
 

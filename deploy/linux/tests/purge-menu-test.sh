@@ -10,6 +10,7 @@ fi
 repo=$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)
 T=$(mktemp -d)
 chmod 0755 "$T"
+(cd -- "$repo" && go build -o "$T/qui-update-db" ./cmd/qui-update-db)
 trap 'rm -rf -- "$T"' EXIT
 check() { local label=$1; shift; "$@" || { printf 'FAIL - %s\n' "$label"; exit 1; }; printf 'ok - %s\n' "$label"; }
 # Prefix every installation path, including paths embedded in quoted strings.
@@ -49,6 +50,7 @@ FAKES
   rebase "$repo/deploy/linux/uninstall.sh" > "$R/uninstall.sh"
   for f in qui qui-update; do touch "$R/usr/local/bin/$f"; done
   touch "$R/usr/local/lib/proxycontrol/uninstall.sh"
+  install -m 0755 "$T/qui-update-db" "$R/usr/local/lib/proxycontrol/qui-update-db"
   for c in "$@"; do
     mkdir -p "$R/etc/proxy-$c" "$R/var/lib/proxy-$c/tuning"
     printf 'http_address: :22550\ngrpc_address: :18880\n' > "$R/etc/proxy-$c/config.yaml"
@@ -77,7 +79,12 @@ terminal() {
 # operations faked. Real ELF validation, staging, publication and records run.
 install_panel() {
   local package=$R/package/deploy f binary_digest
-  mkdir -p "$package/linux" "$package/systemd" "$package/examples"
+  mkdir -p "$package/linux" "$package/systemd" "$package/examples" "$package/../bin"
+  install -m 0755 "$T/qui-update-db" "$package/../bin/qui-update-db"
+  case ${1:-valid} in
+    missing) rm -- "$package/../bin/qui-update-db";;
+    protocol) printf '#!/bin/sh\nprintf "unsupported-protocol\\n"\n' > "$package/../bin/qui-update-db";;
+  esac
   for f in install.sh qui.sh update.sh update-recovery.sh uninstall.sh panel-update-request.sh; do
     rebase "$repo/deploy/linux/$f" > "$package/linux/$f"
   done
@@ -139,6 +146,7 @@ for INIT in systemd openrc; do
   setup agent
   run agent
   check "$INIT ordinary uninstall" test "$status" = 0
+  check 'last uninstall removes database tool' test ! -e "$R/usr/local/lib/proxycontrol/qui-update-db"
   check 'source table removed' test ! -e "$R/proxy_agent_source"
   check 'hop table removed' test ! -e "$R/proxy_agent_hop"
   setup agent
@@ -199,6 +207,14 @@ for INIT in systemd openrc; do
     printf 'EXISTING-DATABASE\n' > "$R/var/lib/proxy-panel/panel.db"
     install_panel
     check 'reinstall preserves database content' grep -qx 'EXISTING-DATABASE' "$R/var/lib/proxy-panel/panel.db"
+    local_digest=$(sha256sum "$R/usr/local/bin/proxy-panel")
+    for mode in missing protocol; do
+      install_panel "$mode"
+      check "$mode tool refuses installation" test "$status" != 0
+      check "$mode tool keeps existing program" test "$(sha256sum "$R/usr/local/bin/proxy-panel")" = "$local_digest"
+      remaining_stages=$(find "$R/var/lib/proxycontrol-install" -maxdepth 1 -name 'staging.*' -print)
+      check "$mode tool cleans staging directory" test -z "$remaining_stages"
+    done
   fi
   for answer in 'n\n' 'y\nno\n'; do
     setup agent
@@ -211,6 +227,7 @@ for INIT in systemd openrc; do
   setup panel agent
   terminal 'y\npurge\n' agent
   check 'single component purge succeeds' test "$status" = 0
+  check 'shared database tool retained' test -x "$R/usr/local/lib/proxycontrol/qui-update-db"
   check 'shared menu retained' test -f "$R/usr/local/bin/qui"
   check 'other manifest retained' test -f "$R/var/lib/proxycontrol-install/panel.manifest"
   setup agent

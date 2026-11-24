@@ -18,6 +18,7 @@ import (
 // Repository reads dashboard aggregates. Connections is the panel's in-memory
 // live connection view; when nil, the measured numbers read as unknown.
 type Repository struct {
+	Liveness    *node.Liveness
 	Database    *sql.DB
 	Connections *connections.Store
 }
@@ -95,12 +96,14 @@ func (r *Repository) Counts(ctx context.Context, from, to, now time.Time) (BaseC
 		return result, err
 	}
 	defer rows.Close()
+	facts := r.Liveness.Snapshot(now)
 	for rows.Next() {
 		n := node.Node{OfflineAfterSeconds: offlineAfterSeconds, Heartbeat: &pb.Heartbeat{}, Capabilities: &pb.Capabilities{}}
 		var heartbeat, capabilities string
 		if err := rows.Scan(&n.ID, &n.Status, &n.Enabled, &n.Maintenance, &n.LastHeartbeat, &heartbeat, &capabilities); err != nil {
 			return result, err
 		}
+		n.Liveness = facts[n.ID]
 		decode := protojson.UnmarshalOptions{DiscardUnknown: true}
 		if err := decode.Unmarshal([]byte(heartbeat), n.Heartbeat); err != nil {
 			return result, fmt.Errorf("dashboard node %s heartbeat: %w", n.ID, err)

@@ -36,11 +36,13 @@ const (
 )
 
 type Repository struct {
-	GroupsChanged    func()
-	RelayDeletion    RelayDeletion
-	Database         *sql.DB
-	Vault            *vault.Vault
-	CertificateAudit interface {
+	IdentityInvalidated func(string)
+	Liveness            *Liveness
+	GroupsChanged       func()
+	RelayDeletion       RelayDeletion
+	Database            *sql.DB
+	Vault               *vault.Vault
+	CertificateAudit    interface {
 		RecordNodeCertificate(context.Context, *sql.Tx, string, string) error
 	}
 	// Timezone reads the explicit panel zone inside a caller's transaction. It
@@ -49,6 +51,8 @@ type Repository struct {
 	AdviceSources AdviceSources
 }
 type Node struct {
+	PersistedStatus          string          `json:"persistedStatus"`
+	Liveness                 LivenessFact    `json:"liveness"`
 	RelayCleanupPending      bool            `json:"relayCleanupPending"`
 	RelayCleanupCode         string          `json:"relayCleanupCode"`
 	CoreSelectionBlocked     []string        `json:"coreSelectionBlocked"`
@@ -406,6 +410,12 @@ func (r *Repository) Offline(ctx context.Context, id string) error {
 func (r *Repository) Update(ctx context.Context, id, name string, enabled bool) error {
 	return r.UpdateSettings(ctx, id, SettingsInput{Name: name, Enabled: enabled})
 }
+func (r *Repository) invalidateIdentity(id string) {
+	r.Liveness.Invalidate(id)
+	if r.IdentityInvalidated != nil {
+		r.IdentityInvalidated(id)
+	}
+}
 func (r *Repository) Revoke(ctx context.Context, id string) error {
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
@@ -418,7 +428,11 @@ func (r *Repository) Revoke(ctx context.Context, id string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM node_certificate_renewals WHERE node_id=?", id); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.invalidateIdentity(id)
+	return nil
 }
 
 const columns = "id,name,status,enabled,hostname,operating_system,agent_version,public_ip,outbound_source_ip,outbound_interface,host_source_ipv4,host_source_ipv6,last_heartbeat,last_sequence,capabilities_json,heartbeat_json,created_at,allow_subscription,maintenance,coalesce(deleted_at,''),public_ip_manual,connect_host,public_addresses_json,public_ip_selected,coalesce((SELECT agent_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT tags_json FROM node_meta WHERE node_id=nodes.id),'[]'),gost_core_supported,EXISTS(SELECT 1 FROM relay_cleanup_nodes WHERE node_id=nodes.id),coalesce((SELECT last_code FROM relay_cleanup_nodes WHERE node_id=nodes.id),''),(SELECT duration_minutes*60 FROM notification_rules WHERE kind='node_offline'),coalesce((SELECT agent_system_supported FROM node_update_capabilities WHERE node_id=nodes.id),0),coalesce((SELECT agent_system_error FROM node_update_capabilities WHERE node_id=nodes.id),''),coalesce((SELECT agent_bootstrap_version FROM node_update_capabilities WHERE node_id=nodes.id),'')"
@@ -471,6 +485,7 @@ func scan(row scanner) (Node, error) {
 			n.Heartbeat.Cores = []*pb.CoreStatus{{Name: n.Capabilities.CoreName, Healthy: n.Heartbeat.GetCoreHealthy(), Error: n.Heartbeat.CoreError, StartedAt: n.Heartbeat.CoreStartedAt, TrafficSourceStatus: n.Heartbeat.TrafficSourceStatus}}
 		}
 	}
+	n.PersistedStatus = n.Status
 	if n.Status == "online" || n.Status == "degraded" {
 		when, err := time.Parse(time.RFC3339Nano, n.LastHeartbeat)
 		if err != nil || !freshHeartbeat(when, time.Now()) {
@@ -496,6 +511,10 @@ func (r *Repository) GetForCoreSelection(ctx context.Context, id string) (Node, 
 		err = ErrNotFound
 	}
 	if err == nil {
+		n.Liveness = r.Liveness.Snapshot(time.Now())[n.ID]
+		if r.Liveness.forgetExpired(n.ID, n.PersistedStatus, n.LastHeartbeat, n.OfflineAfterSeconds, time.Now()) {
+			n.Liveness = LivenessFact{}
+		}
 		items := []Node{n}
 		err = r.decorateCoreSelection(ctx, items)
 		n = items[0]
@@ -536,10 +555,15 @@ func (r *Repository) list(ctx context.Context, keyword string, page, size int, d
 	}
 	defer rows.Close()
 	items := []Node{}
+	facts := r.Liveness.Snapshot(time.Now())
 	for rows.Next() {
 		n, err := scan(rows)
 		if err != nil {
 			return nil, 0, err
+		}
+		n.Liveness = facts[n.ID]
+		if r.Liveness.forgetExpired(n.ID, n.PersistedStatus, n.LastHeartbeat, n.OfflineAfterSeconds, time.Now()) {
+			n.Liveness = LivenessFact{}
 		}
 		items = append(items, n)
 	}

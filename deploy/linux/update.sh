@@ -129,6 +129,8 @@ source_dir=''
 snapshot=''
 # Private backup hardlinks used by preflight_backup; retained for signal cleanup.
 check_directory=''
+database_helper=''
+database_helper_temporary=''
 core_handover=false
 core_request=''
 core_target=''
@@ -513,6 +515,31 @@ sums_digest() {
   return 1
 }
 
+
+# One executable is pinned before installation replaces shared tools. Recovery
+# uses its own durable copy, independently of the program files being restored.
+database_cli() {
+  local helper=${database_helper:-$root/usr/local/lib/proxycontrol/qui-update-db}
+  "$helper" "$@"
+}
+validate_database_helper() {
+  local helper=$1 protocol=''
+  [[ -f $helper && ! -L $helper && $(stat -c '%u' -- "$helper") == 0 ]] || return 1
+  [[ $(stat -c '%a' -- "$helper") == 500 || $(stat -c '%a' -- "$helper") == 755 ]] || return 1
+  protocol=$("$helper" --protocol) || return 1
+  [[ $protocol == qui-update-database-v1 ]]
+}
+prepare_database_helper() {
+  local source=$root/usr/local/lib/proxycontrol/qui-update-db packaged=''
+  packaged=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)/bin/qui-update-db
+  if [[ -f $(dirname -- "${BASH_SOURCE[0]}")/install.sh ]]; then source=$packaged; fi
+  validate_database_helper "$source" || fail "缺少可用的数据库工具：$source"
+  database_helper_temporary=$(mktemp "$registry/.database-helper.XXXXXXXX") || return 1
+  install -o root -g root -m 0500 -- "$source" "$database_helper_temporary" || return 1
+  database_helper=$database_helper_temporary
+  validate_database_helper "$database_helper" || return 1
+}
+
 # --no-insecure overrides a -k that a curl wrapper or alias may add in front of
 # the arguments, so nothing is fetched without a verified certificate.
 download() {
@@ -580,64 +607,15 @@ ensure_database_record() {
 }
 
 # Only the explicitly authorized CLI backup is read from root's private staging.
-read_database_source() {
-  if [[ -n $staged_database && ( $1 == "$staged_database" || $1 == "$staged_database-wal" ) ]]; then
-    cat -- "$1"
-  else
-    runuser -u "$panel_account" -- cat -- "$1"
-  fi
-}
 
 # Config-derived source reads run as the panel account. Stage and compare in root's private
 # registry, then rename into a pinned panel-owned directory on the same filesystem.
 copy_database_atomic() {
-  local source=$1 destination=$2 wal=$1-wal mode=${3:-backup}
-  local partial='' wal_partial='' destination_fd='' directory_path=${2%/*} name=${2##*/}
-  exec {destination_fd}< "$directory_path" || return 1
-  [[ -d /proc/self/fd/$destination_fd && $(stat -L -c '%u' "/proc/self/fd/$destination_fd") == "$(id -u "$panel_account")" ]] || {
-    printf '数据库目标目录不属于面板账号：%s\n' "$directory_path" >&2
-    exec {destination_fd}<&-
-    return 1
-  }
-  [[ $(stat -c '%d' "$registry") == $(stat -L -c '%d' "/proc/self/fd/$destination_fd") ]] || {
-    printf '数据库目标与安装记录目录不在同一文件系统：%s\n' "$directory_path" >&2
-    exec {destination_fd}<&-
-    return 1
-  }
-  partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
-  partial_files+=("$partial")
-  if ! read_database_source "$source" > "$partial" \
-    || ! read_database_source "$source" | cmp -s -- - "$partial" \
-    || ! chown -h "$panel_account:$panel_account" "$partial" || ! chmod 0600 "$partial" \
-    || ! sync -- "$partial"; then
-    rm -f -- "$partial"
-    exec {destination_fd}<&-
-    printf '无法复制数据库：%s\n' "$source" >&2
-    return 1
-  fi
-  if [[ -f $wal && ! -L $wal ]]; then
-    wal_partial=$(mktemp "$registry/database.XXXXXXXX.partial") || return 1
-    partial_files+=("$wal_partial")
-    if ! read_database_source "$wal" > "$wal_partial" \
-      || ! read_database_source "$wal" | cmp -s -- - "$wal_partial" \
-      || ! chown -h "$panel_account:$panel_account" "$wal_partial" || ! chmod 0600 "$wal_partial" \
-      || ! sync -- "$wal_partial"; then
-      rm -f -- "$partial" "$wal_partial"
-      exec {destination_fd}<&-
-      printf '无法复制数据库日志：%s\n' "$wal" >&2
-      return 1
-    fi
-  fi
-  if [[ $mode == restore ]]; then
-    rm -f -- "/proc/self/fd/$destination_fd/$name-wal" "/proc/self/fd/$destination_fd/$name-shm" || return 1
-  fi
-  if [[ -n $wal_partial ]]; then
-    mv -T -- "$wal_partial" "/proc/self/fd/$destination_fd/$name-wal" || return 1
-  fi
-  mv -T -- "$partial" "/proc/self/fd/$destination_fd/$name" || return 1
-  partial_files=()
-  sync -- "/proc/self/fd/$destination_fd" || return 1
-  exec {destination_fd}<&-
+  local source=$1 destination=$2 mode=${3:-backup}
+  local -a options=()
+  [[ $mode != restore ]] || options+=(--restore)
+  [[ -z $staged_database || $source != "$staged_database" ]] || options+=(--owner-staged)
+  database_cli copy --registry "$registry" --account "$panel_account" --source "$source" --destination "$destination" "${options[@]}"
 }
 
 # Copy the panel database while the panel is stopped and print the copy's path.
@@ -696,17 +674,7 @@ database_differs() {
 
 # cmp: 0 equal, 1 different, 2 error. Source SIGPIPE is allowed only when cmp reports different.
 compare_database_source() {
-  local -a statuses
-  if runuser -u "$panel_account" -- cat -- "$1" | cmp -s -- - "$2"; then
-    statuses=("${PIPESTATUS[@]}")
-  else
-    statuses=("${PIPESTATUS[@]}")
-  fi
-  case ${statuses[1]} in
-    0) (( statuses[0] == 0 )) || return 2; return 0;;
-    1) (( statuses[0] == 0 || statuses[0] == 141 )) || return 2; return 1;;
-    *) return 2;;
-  esac
+  database_cli compare --account "$panel_account" --source "$1" --backup "$2"
 }
 
 # Put the database copy back after a failed panel update. The new panel may already
@@ -783,6 +751,7 @@ component_files() {
   else
     printf '%s\n' "$root/etc/init.d/proxy-$component"
   fi
+  printf '%s\n' "$root/usr/local/lib/proxycontrol/qui-update-db"
   printf '%s\n' "$program_directory/qui-update" "$root/usr/local/lib/proxycontrol/service.sh"
   printf '%s\n' "$program_directory/qui" "$root/usr/local/lib/proxycontrol/uninstall.sh"
   if [[ $component == panel ]]; then
@@ -841,6 +810,12 @@ take_snapshot() {
     mkdir -p -- "${target%/*}" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
     cp -a -- "$path" "$target" || { rm -rf -- "$snapshot"; snapshot=''; return 1; }
   done < <(component_files "$component")
+  if [[ $component == panel ]]; then
+    install -o root -g root -m 0500 -- "$database_helper" "$snapshot/database-helper" || return 1
+    local database_digest=''
+    database_digest=$(sha256sum -- "$snapshot/database-helper") || return 1
+    printf '%s\n' "${database_digest%% *}" > "$snapshot/database-helper.sha256" || return 1
+  fi
   if [[ $component == agent && -n $core_helper ]]; then
     install -o root -g root -m 0500 -- "$core_helper" "$snapshot/core-stop-helper" || return 1
     # Store the digest alone, independent of the snapshot's absolute path.
@@ -1168,6 +1143,15 @@ recover_snapshot() {
       return 1
     fi
   fi
+  if [[ $component == panel && ( $phase == prepared || $phase == started ) ]]; then
+    local helper_expected='' helper_actual=''
+    database_helper=$snapshot/database-helper
+    validate_database_helper "$database_helper" || { printf '快照缺少可用数据库工具：%s\n' "$snapshot" >&2; return 1; }
+    [[ -f $snapshot/database-helper.sha256 && ! -L $snapshot/database-helper.sha256 ]] || return 1
+    helper_expected=$(cat -- "$snapshot/database-helper.sha256") || return 1
+    helper_actual=$(sha256sum -- "$database_helper") || return 1
+    [[ $helper_expected =~ ^[0-9a-f]{64}$ && $helper_expected == "${helper_actual%% *}" ]] || { printf '快照数据库工具摘要不匹配。\n' >&2; return 1; }
+  fi
   name=proxy-$component
   # A killed updater never forwarded its direct install child's captured output.
   # Replay it before recovery can dispose of the only durable copy.
@@ -1356,7 +1340,7 @@ restore_service_after_stop() {
 # (a database written by a newer panel), 4 when the caller has to refuse - with the
 # binary's own report printed - and 2 when the target is too old to know the flag.
 preflight_database() {
-  local file=$1 binary=$source_dir/bin/proxy-panel output='' status=0 checker=''
+  local file=$1 check_mode=${2:-direct} header='' binary=$source_dir/bin/proxy-panel output='' status=0 checker=''
   if [[ ! -f $binary || -L $binary ]]; then
     printf '归档里没有面板程序，无法检查数据库：%s\n' "$binary" >&2
     return 4
@@ -1372,7 +1356,22 @@ preflight_database() {
     printf '无法准备数据库检查程序，跳过预检。\n' >&2
     return 2
   fi
-  if output=$("$checker" --check-database "$file" 2>&1); then status=0; else status=$?; fi
+  if [[ $check_mode == backup ]]; then
+    if output=$(database_cli preflight --check-directory "$check_directory" --backup "$file" --checker "$checker" 2>&1); then
+      header=${output%%$'\n'*}
+      output=${output#*$'\n'}
+      if [[ ! $header =~ ^checker-exit:\ (0|[1-9][0-9]{0,2})$ ]] || ((BASH_REMATCH[1] > 255)); then
+        printf '数据库工具返回的检查状态无效：%s\n' "$header" >&2
+        rm -f -- "$checker"
+        return 4
+      fi
+      status=${BASH_REMATCH[1]}
+    else
+      printf '%s\n' "$output" >&2
+      rm -f -- "$checker"
+      return 4
+    fi
+  elif output=$("$checker" --check-database "$file" 2>&1); then status=0; else status=$?; fi
   rm -f -- "$checker"
   case $status in
     126|127)
@@ -1401,21 +1400,9 @@ preflight_database() {
 # the registry and backup directory to share a filesystem, so hardlinks work here.
 # Root never creates or removes anything inside the panel account's directory.
 preflight_backup() {
-  local backup=$1 status=0
-  if ! check_directory=$(mktemp -d "$registry/check.XXXXXXXX"); then
-    printf '无法创建数据库预检目录。\n' >&2
-    return 4
-  fi
-  if ! ln -P -- "$backup" "$check_directory/panel.db"; then
-    printf '无法为数据库预检创建主库硬链接：%s\n' "$backup" >&2
-    status=4
-  elif [[ -e $backup-wal || -L $backup-wal ]] \
-    && ! ln -P -- "$backup-wal" "$check_directory/panel.db-wal"; then
-    printf '无法为数据库预检创建 WAL 硬链接：%s\n' "$backup-wal" >&2
-    status=4
-  else
-    preflight_database "$check_directory/panel.db" || status=$?
-  fi
+  local status=0
+  check_directory=$(mktemp -d "$registry/check.XXXXXXXX") || return 4
+  preflight_database "$1" backup || status=$?
   if ! rm -rf -- "$check_directory"; then
     printf '无法删除数据库预检目录：%s\n' "$check_directory" >&2
     return 4
@@ -2075,6 +2062,7 @@ main() {
       original_status=1
     fi
     if [[ -n $agent_inputs ]]; then rm -rf -- "$agent_inputs"; fi
+    if [[ -n $database_helper_temporary ]]; then rm -f -- "$database_helper_temporary"; fi
     if [[ -n $directory ]]; then rm -rf -- "$directory"; fi
     if ((original_status == 0 && guard_status != 0)); then original_status=$guard_status; fi
     report_terminal "$original_status"
@@ -2082,6 +2070,7 @@ main() {
   }
   trap cleanup EXIT
   directory=$(mktemp -d) || fail '无法创建临时目录。'
+  if [[ " ${components[*]} " == *' panel '* ]]; then prepare_database_helper || fail '无法固定本次数据库工具，服务未停止。'; fi
   # The running script and the library it sourced are staged here, because take_snapshot
   # stores them in the snapshot: a recovery has to run the code that wrote the journal, and
   # install.sh replaces /usr/local/bin/qui-update while this script is running. The library

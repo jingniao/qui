@@ -314,12 +314,22 @@ func Run(ctx context.Context, operation, configPath, target, version string) (st
 		if s.Phase != "rebuilt" {
 			return "", errors.New("reset has not rebuilt new state")
 		}
-		response, err := request(ctx, c, s, true)
-		if err != nil {
-			return "", err
-		}
-		if response.StateResetStatus != "success" && response.StateResetStatus != "not_needed" {
-			return "", fmt.Errorf("reset redeployment remains %s", response.StateResetStatus)
+		for {
+			response, err := request(ctx, c, s, true)
+			if err != nil {
+				return "", err
+			}
+			if response.StateResetStatus == "success" || response.StateResetStatus == "not_needed" {
+				break
+			}
+			if response.StateResetStatus != "pending" && response.StateResetStatus != "queued" {
+				return "", fmt.Errorf("reset redeployment remains %s", response.StateResetStatus)
+			}
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
 		s.Phase = "complete"
 		if err = save(Directory, s); err != nil {

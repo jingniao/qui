@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -72,7 +73,9 @@ func validDigest(value string) bool {
 }
 
 // lockOwner obtains the actual lifecycle owner from the kernel, never from a
-// pidfile or process name. Absence is distinct from inaccessible lock evidence.
+// pidfile or process name. Btrfs stat and /proc/locks can report different
+// device numbers, so bind the kernel lock to its owner's descriptor before
+// comparing that descriptor's file identity with the lifecycle lock.
 func lockOwner(directory, name string) (int, error) {
 	var stat unix.Stat_t
 	if err := unix.Stat(filepath.Join(directory, name), &stat); err != nil {
@@ -94,21 +97,66 @@ func lockOwner(directory, name string) (int, error) {
 		if len(parts) != 3 {
 			return 0, errors.New("invalid /proc/locks device identity")
 		}
-		major, e1 := strconv.ParseUint(parts[0], 16, 32)
-		minor, e2 := strconv.ParseUint(parts[1], 16, 32)
-		inode, e3 := strconv.ParseUint(parts[2], 10, 64)
-		if err := errors.Join(e1, e2, e3); err != nil {
+		inode, err := strconv.ParseUint(parts[2], 10, 64)
+		if err != nil {
 			return 0, err
 		}
-		if major == uint64(unix.Major(uint64(stat.Dev))) && minor == uint64(unix.Minor(uint64(stat.Dev))) && inode == stat.Ino {
+		if inode == stat.Ino {
 			pid, err := strconv.Atoi(fields[4])
 			if err != nil || pid <= 0 {
 				return 0, errors.Join(core.ErrHandoverConflict, err)
 			}
-			return pid, nil
+			owned, err := descriptorOwnsLock(pid, stat, fields[1:])
+			if err != nil {
+				return 0, err
+			}
+			if owned {
+				return pid, nil
+			}
 		}
 	}
 	return 0, nil
+}
+
+func descriptorOwnsLock(pid int, target unix.Stat_t, lock []string) (bool, error) {
+	directory := fmt.Sprintf("/proc/%d/fdinfo", pid)
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil // The kernel lock's owner exited during observation.
+	}
+	if err != nil {
+		return false, fmt.Errorf("read lifecycle owner descriptors: %w", err)
+	}
+	for _, entry := range entries {
+		data, err := os.ReadFile(filepath.Join(directory, entry.Name()))
+		if errors.Is(err, os.ErrNotExist) {
+			continue // A descriptor may close while the Agent is running.
+		}
+		if err != nil {
+			return false, fmt.Errorf("read lifecycle owner fdinfo %s: %w", entry.Name(), err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			value, ok := strings.CutPrefix(line, "lock:")
+			if !ok {
+				continue
+			}
+			fields := strings.Fields(value)
+			if len(fields) < 2 || !slices.Equal(fields[1:], lock) {
+				continue
+			}
+			var stat unix.Stat_t
+			if err := unix.Stat(fmt.Sprintf("/proc/%d/fd/%s", pid, entry.Name()), &stat); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				return false, fmt.Errorf("stat lifecycle owner descriptor %s: %w", entry.Name(), err)
+			}
+			if stat.Dev == target.Dev && stat.Ino == target.Ino {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func processIdentity(pid int) (core.ProcessIdentity, error) {

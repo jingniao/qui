@@ -754,7 +754,7 @@ func (c *Control) Connect(stream grpc.BidiStreamingServer[pb.AgentMessage, pb.Se
 		if message.Sequence > lastSequence && (message.GetHeartbeat() != nil || message.GetCapabilities() != nil) {
 			c.Runtime.afterCommit(id)
 		}
-		if message.GetCapabilities() != nil && c.RecoveryRedeploy != nil {
+		if (message.GetCapabilities() != nil || len(message.GetAgentSystemUpdateEvent().GetResultJson()) > 0) && c.RecoveryRedeploy != nil {
 			if claimed, claimErr := c.Repository.ClaimRecoveryRedeploy(ctx, id); claimErr == nil && claimed {
 				// The redeploy records its own outcome (success, pending,
 				// not_needed or a fixed failure code), so a failure here must

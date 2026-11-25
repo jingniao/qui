@@ -38,17 +38,27 @@ func (h *Handler) reachability(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	udpOnly := i.Protocol == "hysteria2" || i.Protocol == "tuic" || i.Protocol == "wireguard" ||
+		(i.Protocol == "forward" && i.Settings.Forward != nil && i.Settings.Forward.Network == "udp")
+	if udpOnly {
+		httpapi.JSON(w, 200, map[string]any{"supported": false, "reachable": nil, "code": "udp_probe_unsupported", "origin": "panel", "transport": "udp"})
+		return
+	}
 	n, err := h.Service.Nodes.Get(r.Context(), i.NodeID)
 	if err != nil {
 		h.fail(w, err)
 		return
 	}
-	err = node.PanelReachability(r.Context(), n.PublicIP, i.Port, i.Settings.ServerName, i.Settings.Security == "tls", i.Settings.TrustedCAPEM, i.Settings.CertificatePEM)
+	transport := "tcp"
+	if i.Settings.Security == "tls" {
+		transport = "tls"
+	}
+	err = node.PanelReachability(r.Context(), n.PublicIP, i.Port, i.Settings.ServerName, transport == "tls", i.Settings.TrustedCAPEM, i.Settings.CertificatePEM)
 	code := "reachable"
 	if err != nil {
 		code = "unreachable"
 	}
-	httpapi.JSON(w, 200, map[string]any{"reachable": err == nil, "code": code, "origin": "panel"})
+	httpapi.JSON(w, 200, map[string]any{"supported": true, "reachable": err == nil, "code": code, "origin": "panel", "transport": transport})
 }
 func (h *Handler) protocolSupport(w http.ResponseWriter, r *http.Request) {
 	httpapi.JSON(w, 200, map[string]any{"protocols": desiredstate.ProtocolSupportTable()})

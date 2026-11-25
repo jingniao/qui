@@ -559,7 +559,7 @@
                 @click="testSingleNode(node); activeMoreId = null"
                 class="w-full text-left px-3 py-1.5 hover:bg-black/5 text-ios-label"
               >
-                连通性测试
+                面板连通性检查
               </button>
               <button v-if="isOwner"
                 type="button"
@@ -1126,6 +1126,7 @@ import { throttleTrailing, nodeStatusEventChangesInventory } from '../../../app/
 import { useNodeRuntime } from '../../nodes/useNodeRuntime';
 import { proxyPageInventory } from '../proxyPageInventory';
 import { request } from '../../../app/apiClient';
+import { checkNodeReachability } from '../reachability';
 import type { NodeView } from '../../nodes/api';
 import { serverStatus } from '../../nodes/components/serverListModel';
 import { deploymentAPI } from '../../system/deploymentApi';
@@ -1501,8 +1502,10 @@ async function testAllNodes() {
 }
 
 async function testSingleNode(node: ProxyNodeItem) {
-  if(node.sourceType!=='self_hosted'||!node.inboundId){showToast('当前仅支持自建节点的面板 TCP/TLS 连通性检查','info');return;}
-  try {const r=await request<{reachable:boolean;code:string}>(`/inbounds/${encodeURIComponent(node.inboundId)}/reachability`,'POST');showToast(`${node.name}：${r.reachable?'面板可连接':'面板无法连接'}`,r.reachable?'success':'error');}
+  try {
+    const result = await checkNodeReachability(node);
+    showToast(result.message, result.kind);
+  }
   catch(e){showToast((e as Error).message,'error');}
 }
 

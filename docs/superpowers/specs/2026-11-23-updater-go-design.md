@@ -1,6 +1,6 @@
 # 更新器 Go 化设计（B3）
 
-> 状态：Owner 已于 2026-11-23 选择方案 B（渐进下沉）。数据库文件链路已随 v1.10.4 发布；journal/快照丢弃/事件下沉已进入后续版本源码，尚未发布。实施见[数据库 Go 下沉计划](../plans/2026-11-23-update-database-go.md)，验证见[发布说明](../../releases/release-notes-1.10.4.md)。来源：2026-11-23 项目审查第二部分第 3 条。
+> 状态：采用方案 B（渐进下沉）。数据库文件链路已随 [v1.10.4](../../releases/release-notes-1.10.4.md) 发布，journal／快照丢弃／事件下沉已随 [v1.11.0](https://github.com/jingniao/qui/releases/tag/v1.11.0) 发布。实施见[数据库工具计划](../plans/2026-11-23-update-database-go.md)和[状态工具计划](../plans/2026-11-23-update-state-go.md)。以下保留 2026-11-23 设计时的规模、取舍与阶段描述，现行流程见[部署与升级](../../deployment.md#5-升级)。
 
 ## 1. 现状
 

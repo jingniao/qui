@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-当前正式版为 **v1.12.0**（tag → `2c4f8a3`，迁移头 **0165**）；上一正式版为 v1.11.0（tag → `602ed28`，迁移头 0164）。v1.12.0 允许升级期间重装，并在成功恢复登记时通过事务接替旧升级任务、释放配置恢复占用，保留真实执行证据；本轮只读核实生产，未部署升级；Release 见 https://github.com/jingniao/qui/releases/tag/v1.12.0。最低兼容版本为 **v1.7.5**，其有效面板数据与在途任务继续保留。
+当前正式版为 **[v1.12.1](releases/release-notes-1.12.1.md)**（tag `ccebc95`，迁移头 **0165**），最低兼容 **v1.7.5**，保留其有效面板数据与在途任务。版本变更与发布证据见[变更记录](changelog.md)。
 
-生产状态见[运维手册「当前生产环境」](operations.md#当前生产环境)（管理员登录入口不写入文档）。生产操作前须重新实时核实实际版本与节点状态；逐版本发布与部署记录见[变更记录](changelog.md)。
+生产状态见[运维手册「当前生产环境」](operations.md#当前生产环境)（管理员登录入口不写入文档），操作前须重新实机核实。
 
 ## 1. 文档目的
 
@@ -390,6 +390,8 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 
 Linux Xray、sing-box、GOST 已接入更新时的核心交接：认领沿用原 epoch/Revision 和累计计数，恢复已见计数源集合，来源消失时报记账失败；Xray/sing-box 共享文件 tail 从原 inode/完整行 checkpoint 接读，错误阻止交接就绪。Prepare 经原 TrafficSink 持久化最终采样并保存 checkpoint，Xray 还须证明静态路由 gate-free；Detach 仅释放句柄与 tail，Close 仍停止核心。认领 attach 期间保留文件，20 MiB 隐私上限仍生效并记录丢弃；认领成功后恢复追平清理。更新空窗内允许访问日志在文件积压，访问记录允许少量重复或缺失，不承诺恰好一次。sing-box 来源映射不持久化，交接前已建立连接的来源标记为 unavailable，不阻塞交接。“不漏计”仅承诺正常存活交接；核心在空窗内死亡后无法取得的尾部流量只记本机结构化 WARN `core_traffic_tail_unavailable`，不估算、不补零，不新增面板告警。验收范围见[交接设计 §9](archive/core-handover-plan.md#9-实施与验收结果2026-11-22)。
 
+交接授权从内核锁记录识别生命周期 owner，并以该进程 fdinfo 中的完整锁记录及描述符文件的设备号/inode 核对目标锁；不直接要求 `/proc/locks` 的设备号等于路径 `stat.st_dev`（Btrfs 可能不同）。同 inode 的其他文件不能被认领，进程启动 token、命名空间、配置路径和运行模式仍须验证；读取或权限错误明确失败。
+
 断线缓存、重连补传、Ack 后删；满时先淘汰最旧允许记录、保留阻断与流量。同一流量或访问批次连续被面板拒绝 3 次则隔离且不淘汰（1 小时后或重启重试），面板记限频 WARN「agent batch rejected」（不含用户名或域名）。删除用户前产生的批次按修订与凭据墓碑归属，仅累加仍存在用户。
 
 **三类流量口径**：
@@ -402,7 +404,7 @@ Linux Xray、sing-box、GOST 已接入更新时的核心交接：认领沿用原
 
    **v1.10.2 监控整合调度**：监控整合每 5 秒调度，单轮预算 2 秒（含数据库连接排队），每种监控最多处理 8 个五分钟桶。过期清理分表提交，每个桶的汇总与原样本删除单独事务提交，桶间释放唯一写连接；后续失败保留前面已提交进度并返回原始错误。选桶使用现有时间索引读取最早样本，继续保留 24 小时原始、7 天五分钟监控及加权字段、计数器前驱规则。节点离线判定时限不变。
 
-   **v1.10.2 Agent 旧状态换代顺序**：安装器发布完成后异步排队独立重置服务，服务按 `update.lock` → `operation.lock` 顺序同时持锁；其启动不阻挡 Agent 或网络/调优 helper，OpenRC 启动异步返回，避免升级持锁等待 helper、helper 又等待重置。发现尚未收尾的更新或核心交接 journal 时明确失败并保留数据，等待恢复结束。停旧 Agent 和 helper 后才封存身份及删除重建；停服或封存失败不删除。重建后恢复服务账号权限与目录监听，再启动新 Agent 并确认；OpenRC 新进程不继承重置锁。仅有旧请求、尚未准备 journal 时使用当前二进制摘要准备；`prepared`/`sealed`/`rebuilt` 继续使用原 reset ID 和身份绑定，`rebuilt` 重试不再封存或删除，`complete` 后后续升级不重复清理。
+   **Agent 旧状态换代顺序**：安装器发布完成后异步排队独立重置服务，服务按 `bridge.lock` → `update.lock` → `operation.lock` 顺序持锁，使 root 桥接完成最终健康复核及回执持久化后才重建。删除前等待当前本地完整升级任务的真实终态被面板确认；停旧 Agent 和 helper 后再次核对，新增未确认任务明确阻止封存和删除。已经进入 `sealed/deleting/deleted/rebuilt` 的重试沿用原阶段，不重新等待可能已删除的旧 ACK。其启动不阻挡 Agent 或网络/调优 helper，OpenRC 启动异步返回。发现尚未收尾的更新或核心交接 journal 时明确失败并保留数据，等待恢复结束；停服或封存失败不删除。重建后恢复服务账号权限，释放桥接锁并重新挂接升级目录及网络/调优监听，再启动新 Agent；OpenRC 新进程不继承重置锁。配置恢复 `pending/queued` 时等待，明确失败或网络错误原样返回；面板收到系统升级终态后也重试待恢复配置，避免只等待下一次能力报告。仅有旧请求、尚未准备 journal 时使用当前二进制摘要准备；已准备阶段继续使用原 reset ID 和身份绑定，`rebuilt` 重试不再封存或删除，`complete` 后后续升级不重复清理。
 3. **整机月流量**：独立于代理统计、用户额度与订阅。心跳上报非 lo 网卡累计字节、`bootId` 与 IPv4 默认路由网卡，面板同事务推进游标并按（服务器、网卡、面板时区本地日）写入 `node_machine_traffic_daily`（跨日按真实时长比例分摊且末份补足整数，首次/重启/回退仅建基线，改时区不重分桶）。单张网卡计算（显式 `interfaceName` 否则最近新鲜心跳默认路由网卡，不跨网卡拼接），重置日 1–31 短月夹月末，支持 `sum`/`outbound`/`max`；额度仅展示，不限速不停服。
 
 # 22. 配置发布与回滚
@@ -758,6 +760,8 @@ GET    /portal/me                              GET    /portal/traffic
 GET    /portal/nodes                           GET    /portal/devices-online
 GET    /portal/subscription                    POST   /portal/subscription/reset
 ```
+
+`POST /inbounds/{id}/reachability` 只检查面板到入站的 TCP 连接或可信 TLS 握手，返回 `supported=true`、`transport=tcp|tls` 与布尔 `reachable`；通过不代表代理认证和转发成功。Hysteria2、TUIC、WireGuard、纯 UDP 转发不执行 TCP 检查，返回 `supported=false`、`transport=udp`、`reachable=null`、`code=udp_probe_unsupported`；页面提示「未检测，暂不支持 UDP/QUIC 协议探测」，须用客户端验证，不显示连接失败。
 
 主要错误与语义：
 - `/canvas-tunnels` 写操作要求 CSRF（PUT 须带 `updatedAt`）；旧画布 GOST 只读视图仅露代数、服务器名、到期与指纹。

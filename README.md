@@ -1,14 +1,12 @@
 # qui · 多节点代理控制平台
 
-生产状态见[运维手册「当前生产环境」](docs/operations.md#当前生产环境)。生产操作前须重新实时核实。
-
 面向 1～10 名内部用户的自托管平台，用于自有或明确授权网络。中央端为 Go 单体程序（SQLite ＋ 嵌入式 Vue 前端），Node Agent 经 gRPC ＋ mTLS 主动接入；代理流量由节点处理，不经过面板。
 
 支持用户门户与节点组订阅、分流和域名级访问控制、协议中转/代理链、设备限制、用户额度、主机观测与整机月流量。节点可同时运行官方 Xray、官方或 qui 的未修改上游 sing-box 构建，以及仅做端口转发/加密中继的 GOST 3.3.2。中央失联时保留最后成功配置，配置失败自动回滚。
 
-最新正式版 **v1.12.0**（2026-11-24 UTC，tag `2c4f8a3`，发布迁移头 **0165**）：升级任务不再阻止安装；成功恢复登记时，在同一事务内将旧升级标为“已由重装接替”，保留执行证据并解除配置恢复占用。最低兼容 v1.7.5，保留有效面板数据及在途任务。本次只读核实生产，未部署升级；门禁、附件核验及实机边界见[发布说明](docs/releases/release-notes-1.12.0.md)。既有实机未验收边界见[实施决定](docs/implementation-decisions.md)。
+最新正式版 **[v1.12.1](docs/releases/release-notes-1.12.1.md)**（2026-11-25 UTC，tag `ccebc95`，迁移头 **0165**）：修复 Btrfs 生命周期锁识别、UDP 连通性提示及升级收尾与配置重建时序。最低兼容 **v1.7.5**，保留有效面板数据与在途任务。
 
-最低兼容版本按 Owner 决定为 **v1.7.5**。逐版本摘要见[变更记录](docs/changelog.md)，产品规则见[项目说明书](docs/project-spec.md)，协作要求见 [AGENTS.md](AGENTS.md)。
+生产运行版本见[运维手册](docs/operations.md#当前生产环境)，操作前须重新实机核实。发布证据见各版[发布说明](docs/README.md#发布与历史)，未实机验收项见[实施决定](docs/implementation-decisions.md)。
 
 | 任务 | 入口 |
 | --- | --- |
@@ -17,7 +15,7 @@
 | 备份恢复、证书、流量与排错 | [运维手册](docs/operations.md) |
 | 理解模块、数据流与开发边界 | [架构总览](docs/architecture.md)、[项目说明书](docs/project-spec.md) |
 | 查询协议与执行范围 | [协议矩阵](docs/protocol-support-matrix.md)、[设备限制](docs/device-limit.md) |
-| 查找全部现行文档与历史 | [文档导航](docs/README.md) |
+| 查找全部文档、历史与协作约定 | [文档导航](docs/README.md)、[AGENTS.md](AGENTS.md) |
 
 ## 快速开始
 
@@ -28,8 +26,6 @@ wget -O panel-install.sh https://raw.githubusercontent.com/jingniao/qui/main/dep
 bash panel-install.sh
 ```
 
-首次登录、添加节点、创建入站、节点组与订阅、日常运维与常见问题见[项目安装与使用指南](docs/install-guide.md)；手工安装与升级细节见[部署与升级](docs/deployment.md)。
-
-开发要求 Go（版本以 `go.mod` 为准）和 Node.js 22。构建、开发启动与 Linux 门禁命令见[部署与升级 §2](docs/deployment.md#2-构建发布包)与[发布手册](docs/release-runbook.md)。每个变更的证据来自 Linux 测试机的 `scripts/check.sh` 与真实核套件；GitHub 对发布提交再运行 `check`，标签构建要求同 SHA 已通过。
+后续按[安装与使用指南](docs/install-guide.md)完成首次登录、接入节点与订阅。开发要求 Go（版本以 `go.mod` 为准）和 Node.js 22；启动与构建见[部署与升级 §2](docs/deployment.md#2-构建发布包)，检查与发布门禁见[发布手册](docs/release-runbook.md)。
 
 仅记录域名级元数据，不解密 HTTPS、不记录正文、不提供任意远程命令。数据库、真实配置、私钥与运行状态不进入发布包。主项目尚未选择开源许可证；代理核心遵循各自上游许可并保留来源。

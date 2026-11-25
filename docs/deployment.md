@@ -223,7 +223,7 @@ systemctl enable --now proxy-agent.service
 
 数据库文件操作由独立 Go 工具 `/usr/local/lib/proxycontrol/qui-update-db` 的 `copy` / `compare` / `preflight` 执行，Bash 保留启停、锁、阶段选择和健康检查。面板与 Agent 安装均从同包 `bin/qui-update-db` 发布共享工具，缺失或协议不符在替换文件前拒绝；源码手工安装须先执行 `CGO_ENABLED=0 GOOS=linux GOARCH=<amd64|arm64> go build -o bin/qui-update-db ./cmd/qui-update-db`，与主程序放在同一发布目录。工具协议为 `qui-update-database-v1`，不加载面板配置，不改变目标 `proxy-panel --check-database` 的 0/3/4/5 合同。
 
-后续版本的源码已增加共享工具 `/usr/local/lib/proxycontrol/qui-update-state`（协议 `qui-update-state-v1`），从同包 `bin/qui-update-state` 安装。手工打包还须执行 `CGO_ENABLED=0 GOOS=linux GOARCH=<amd64|arm64> go build -o bin/qui-update-state ./cmd/qui-update-state`。它负责 journal v1 读写、快照丢弃与单行 JSON 事件；文件命令仅限 Linux，事件编码可跨平台。journal 字段顺序、四阶段和 Agent 提交后确认不变，读取保留旧格式的缺省字段及首次重复键规则。
+v1.11.0 起发布共享工具 `/usr/local/lib/proxycontrol/qui-update-state`（协议 `qui-update-state-v1`），从同包 `bin/qui-update-state` 安装。它负责 journal v1 读写、快照丢弃与单行 JSON 事件；文件命令仅限 Linux，事件编码可跨平台。journal 字段顺序、四阶段和 Agent 提交后确认不变，读取保留旧格式的缺省字段及首次重复键规则。构建脚本已包含该工具；手工打包须执行 `CGO_ENABLED=0 GOOS=linux GOARCH=<amd64|arm64> go build -o bin/qui-update-state ./cmd/qui-update-state`。
 
 新 updater 先将旧 `rollback.*` 转交快照自己的 updater，再固定本轮 root 0500 状态工具，随后清理 `discard.*`。面板和 Agent 新快照均保存 `state-helper` 与 `state-helper.sha256`；恢复必须先验证自身副本和摘要，缺失或损坏时保留现场并拒绝操作服务。活动副本持续到终态事件发送完毕，下一轮持锁后清理 `.state-helper.*`、`.database-helper.*`、`.update-event.*` 的普通非符号链接残留。丢弃先不覆盖地改名为 `discard.*`，同步登记目录后才删除；错误保留原始原因和路径。已持久化 committed/restored 的清理失败只告警，未持久化最终阶段且清理失败须非零退出，避免下轮回滚被误认为更新成功。
 
@@ -249,7 +249,7 @@ qui-update --version 1.7.5 --bundle proxy-control-1.7.5-linux-amd64.tar.gz --sum
 - **快照、健康检查与自动回滚**：面板在停服前准备并持久化程序快照，准备失败时服务继续运行，停服失败时丢弃快照；最终数据库备份与预检仍在停服后完成，成功后才写 `prepared`。Agent 在停服前完成快照及交接准备（见下文）。可能替换的文件与运行中的 `qui-update`/`service.sh` 副本保存到 `/var/lib/proxycontrol-install/rollback.XXXXXXXX/`（root 0700），阶段日志 `journal` 为 `prepared` → `started` → `committed`/`restored`。启动后须通过 10 秒 PID 不变的稳定检查才提交并清理快照；Agent 还须满足认领与实际 worker 摘要核对。失败自动回滚，面板保留新版本写过的库为 `failed-update-<目标版本>-<时间>.db`。原子文件发布采用文件及目录 fsync，递归快照保留整体同步。旧更新器仍按旧顺序执行，提前快照在新脚本安装后的下次更新生效；新目标程序的检查优化可在首次升级时生效。
 - **中断与开机恢复**：Ctrl-C / `SIGTERM` / `SIGHUP`（断线输出写 `/var/lib/proxycontrol-install/interrupted-update.log`）触发自动回滚；`kill -9` 或断电后由开机单元 `proxycontrol-update-recovery`（在服务启动前运行，输出写 `update-recovery.log`）或下一次 `qui-update` 幂等完成恢复。互斥锁为 `/var/lib/proxycontrol-install/update.lock`。`pre-update-*` 与 `failed-update-*` 需确认无用后手工清理。
 
-**Agent 核心交接（目标版本 1.10.0）**：`qui-update` 先用 `--core-handover-protocol` 探测源、目标及实际受管 worker 的能力。源或目标不支持时明确提示“本次更新会中断连接”；pidfd 不可用时不交接，说明原因后按停核更新，不使用裸 PID 替代。第一次升级到本版本由旧 Agent 执行，仍会断线。
+**Agent 核心交接（v1.10.0 起）**：`qui-update` 先用 `--core-handover-protocol` 探测源、目标及实际受管 worker 的能力。源或目标不支持时明确提示“本次更新会中断连接”；pidfd 不可用时说明原因后按停核更新，不使用裸 PID 替代。从不支持交接的旧 Agent 首次升级时仍会断线。
 
 支持交接时，流程为：停服前快照并保存带 SHA-256 校验的目标 helper 副本 → arm 授权 → stop → 确认 detached → 安装 → 启动 → 等待 adopted → 等服务稳定 → 查询并核对实际 worker 摘要（本地套接字未就绪时重试，最多 30 秒）→ 提交更新日志 → revoke 撤销授权。授权窗口为 300 秒 CLOCK_BOOTTIME。受管节点第二次 worker 切换同样单独授权并核对认领回执，受管 worker 接受 bootstrap 与 worker 两种作用域。配置或依赖确实变化仍走全核发布重启，不承诺这次连接持续。
 
@@ -339,7 +339,7 @@ deploy/linux/uninstall.sh panel     # 或 agent
 | 路径 | 属主 / 权限 | 内容 |
 | --- | --- | --- |
 | `/usr/local/lib/proxycontrol/qui-update-db` | root:root 0755 | 两端共享数据库更新工具，随最后一个组件卸载 |
-| `/usr/local/lib/proxycontrol/qui-update-state` | root:root 0755 | 后续版本源码中的共享 journal/丢弃/事件工具，随最后一个组件卸载 |
+| `/usr/local/lib/proxycontrol/qui-update-state` | root:root 0755 | v1.11.0 起的共享 journal/丢弃/事件工具，随最后一个组件卸载 |
 | `/usr/local/bin/proxy-panel`、`/usr/local/bin/proxy-agent` | root:root 0755 | 面板与 Agent 引导程序 |
 | `/usr/local/bin/qui`、`/usr/local/bin/qui-update` | root:root 0755 | 共用终端菜单与更新器（不进 manifest，更新时快照） |
 | `/usr/local/lib/proxycontrol/uninstall.sh` | root:root 0755 | 本机普通卸载／`--purge` 入口（不进 manifest，更新时快照） |

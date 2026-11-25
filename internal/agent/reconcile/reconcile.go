@@ -67,6 +67,10 @@ type Reconciler struct {
 	componentHoldsInvalid  map[string]bool
 	controlOnly            bool
 	startupErr             error
+	// sourceDigest and sourceTargets cache the source bindings MissingSources
+	// checks, keyed by the digest of the running revision they were read from.
+	sourceDigest  string
+	sourceTargets []sourceTarget
 }
 
 func New(directory, nodeID string, adapter core.Adapter) (*Reconciler, error) {

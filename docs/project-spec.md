@@ -298,8 +298,9 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 
 节点设置可配置出站网络，下一次发布配置生效，留空清除：
 - **核心出站源 IP / 网卡**：作用于代理核心拨号出站（Xray `sendThrough`/`sockopt.interface`，sing-box `inet4/inet6_bind_address`/`bind_interface`；出口组成员继承，sing-box 组节点与 WireGuard 入站不写）；指定源 IP 时固定地址族。
-- **服务器强制出站 IPv4 / IPv6**（仅 Linux）：通过 host-network helper 维护 nft 表 `inet proxy_agent_source` 对整机新建出站做 SNAT（核心出站源 IP 自动豁免），失败自动回滚。详见[运维手册](operations.md)。
+- **服务器强制出站 IPv4 / IPv6**（仅 Linux）：通过 host-network helper 维护 nft 表 `inet proxy_agent_source` 对整机新建出站做 SNAT（核心出站源 IP 自动豁免；helper 声明 `panel_exempt` 时发往面板控制地址解析结果的连接也不改写，强制地址失效时 Agent 仍能连面板接收修正），失败自动回滚。应用后的自检：有面板豁免时从强制地址绑定源拨面板，否则不绑定拨面板。详见[运维手册](operations.md)。
 - **逐出站源绑定**：非 Block 出站可单独设置 `sourceIp`/`sourceInterface`，优先级「出站非空 ＞ 服务器级核心设置 ＞ 不绑定」，需全部启用 Xray/sing-box 核心上报 `outbound_source_supported`（否则拒绝 `outbound_source_unsupported`）。与服务器强制出站并用时，启用出站的额外源 IP 自动汇总为 `ExtraHostExemptions` 传入 helper（需 `host_source_extra_exempt_supported`，否则 `host_source_exempt_unsupported`）。Agent 应用前校验可达出站的有效源 IP/网卡在本机存在且匹配，失败返回 `network_unavailable` 并保留旧配置。
+- **出口 IP 缺失报警**：应用成功后地址仍可能被移除或更换。Agent 每次心跳按运行修订检查上述全部绑定（入站出口 IP、核心出站源 IP/网卡、服务器强制出站 IPv4/IPv6、逐出站源绑定），以 `Heartbeat.source_address_status`（39：`revision`、`missing[kind,owner_id,address,interface]`、检查本身失败时 `error=source_check_failed`）上报，仅在缺失集合变化时写 Agent 日志。只报警不降级：不改配置、不换地址，受影响流量继续失败直至地址恢复或重新发布。面板在服务器在线时于列表、卡片、详情与仪表盘显示「出口 IP 缺失」（检查失败为「出口 IP 检查失败」）；未上报该字段的旧 Agent 不显示。
 
 ## 13.2 出站客户端字段与导入节点转换（v1.6.0）
 
@@ -450,7 +451,7 @@ Linux Agent 更新仅有效本机更新授权允许保留核心：旧 Agent 最�
 核心模块：`Identity`（身份/证书）、`Control`（连接/心跳/重连/Ack）、`Capability`（系统/核心探测）、`Reconciler`（期望协调）、`Compiler`（Xray/sing-box/GOST）、`Supervisor`（进程/健康）、`Collector`（统计/域名）、`Spool`（持久缓存）、`Updater`/`agenthost`/`agentjobs`（Agent 与核心更新）。GOST 持久化 JSON、运行前生成 YAML。
 
 **安全与固定操作白名单**：**严禁**任意 Shell、Web Terminal、任意命令或上传脚本执行。仅允许应用/回滚版本、重启/重载核心、健康检查、证书轮换、Agent/核心更新与移除，以及以下固定操作：
-- **强制出站源地址与端口跳跃**：独立 oneshot `host-network` helper（仅 `CAP_NET_ADMIN`）维护 nft 表 `inet proxy_agent_source`（含 `extra_exempt_ipv4/ipv6`，每族最多 16 项，由回执 `features:["extra_exempt"]` 声明能力）与 `inet proxy_agent_hop`。
+- **强制出站源地址与端口跳跃**：独立 oneshot `host-network` helper（仅 `CAP_NET_ADMIN`）维护 nft 表 `inet proxy_agent_source`（含 `extra_exempt_ipv4/ipv6`，每族最多 16 项，由回执 `features:["extra_exempt"]` 声明能力；`panel_ipv4/ipv6` 为面板控制地址每族最多 16 项、渲染为 `daddr != {…}`，由 `panel_exempt` 声明，旧 helper 不写该字段）与 `inet proxy_agent_hop`。
 - **白名单调优**：19 键 sysctl root helper（第 22.0 节）。
 - **TTL 设备门控**：Xray 运行时规则 API / sing-box Clash 关连接，不发修订不重启。
 - **受限 TCP-connect 探测**：仅接受已解析 IP、端口、次数（≤10）、超时（≤3 秒）与截止时间。定时每分钟探测在线节点（每目标 3×3000 ms，默认及每节点自定义各最多 5 目标，手动优先），采样表保留 7 天，≤12 小时返回原点，>12 小时按 epoch 分桶（每目标约 720 点）。
@@ -844,7 +845,7 @@ POST /api/v1/notification-channels/{id}/test
 - **面板下发**：`Welcome`、`DesiredState`、`ApplyCommand`、`RollbackCommand`、`HealthCommand`、`CertificateRotate`、`UpdateCommand`、`Ack`。
 
 关键字段与能力协商：
-- `Heartbeat`：省略即缺测、实测 0 保留；`public_ip`（9）由默认路由网卡按公网 IPv4 ＞ 公网 IPv6 选出（绝不发私网/回环/CGNAT）；`interfaces`（20）上报网卡累计字节；`boot_id`（34）与 `default_route_interface`（35）用于整机流量；`public_addresses`（36）上报最多 16 个全局单播候选；`tcp_out_segs`（37）与 `tcp_retrans_segs`（38）用于计算 TCP 重传率。
+- `Heartbeat`：省略即缺测、实测 0 保留；`public_ip`（9）由默认路由网卡按公网 IPv4 ＞ 公网 IPv6 选出（绝不发私网/回环/CGNAT）；`interfaces`（20）上报网卡累计字节；`boot_id`（34）与 `default_route_interface`（35）用于整机流量；`public_addresses`（36）上报最多 16 个全局单播候选；`tcp_out_segs`（37）与 `tcp_retrans_segs`（38）用于计算 TCP 重传率；`source_address_status`（39）上报运行修订中已不在本机的出站源绑定（见 13.1「出口 IP 缺失报警」）。
 - **GOST 能力**：`Hello.gost_core_supported`（13）声明可安装/移除 GOST（落库 `nodes.gost_core_supported`，恢复清零重连刷新）；`CoreCapability.gost_contract_version`（9）声明契约版本（0–4，当前 Agent 上报 **4**，隧道两节点 ≥3、三节点 ≥4）。
 - **逐核与主机能力**：逐核声明 `tls_certificate_files_supported`（12）、`domain_keyword_supported`（13）、`expanded_policy_supported`（14）、`native_rule_sets_supported`（15）、`outbound_source_supported`（16）及 `server_settings_contract_version`/`combinations`（10/11）；节点级声明 `panel_catalogue_supported`（26）、`port_hop_supported`（28）、`host_source_extra_exempt_supported`（32）。`HostInfo` 上报 `/etc/proxy-agent/certs/` 只读证书清单（9/10，永不读私钥，5 分钟重扫）及虚拟化、19 键调优状态、可用/可加载算法、句柄上限与 sysctl 来源（11–18）。`TuningResult.initial`（4）回传 19 键基线快照；`Welcome.agent_catalogue_port`（22）告知只读目录端口。
 

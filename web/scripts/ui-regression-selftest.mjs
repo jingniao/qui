@@ -273,6 +273,21 @@ const addressHelperA = await import('data:text/javascript;base64,' + Buffer.from
   read('modules/nodes/nodeAddress.ts'),
   { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
 ).outputText).toString('base64'));
+const sourceAddressA = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(
+  read('modules/nodes/sourceAddress.ts'),
+  { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }
+).outputText).toString('base64'));
+{
+  const missing = { revision: 3, missing: [{ kind: 'inbound_egress', owner_id: 'in-1', address: '2001:db8::7' }, { kind: 'host_source', address: '192.0.2.4' }, { kind: 'core_source', interface: 'wg0' }] };
+  const node = { heartbeat: { source_address_status: missing } };
+  assert.equal(sourceAddressA.sourceAddressAlert({ heartbeat: {} }, 'online'), null, 'Agents without the check show nothing');
+  assert.equal(sourceAddressA.sourceAddressAlert(node, 'offline'), null, 'a stale heartbeat is not trusted');
+  assert.equal(sourceAddressA.sourceAddressAlert({ heartbeat: { source_address_status: { revision: 3 } } }, 'online'), null);
+  assert.deepEqual(sourceAddressA.sourceAddressAlert(node, 'core_error'), { failed: false, issues: missing.missing });
+  assert.deepEqual(sourceAddressA.sourceAddressAlert({ heartbeat: { source_address_status: { error: 'source_check_failed' } } }, 'online'), { failed: true, issues: [] });
+  assert.deepEqual(missing.missing.map(sourceAddressA.describeSourceIssue), ['代理节点出口 IP 2001:db8::7', '服务器强制出站 IPv4 192.0.2.4', '核心出站源 网卡 wg0']);
+  console.log('PASS source address alert: live-only display, check failure, issue descriptions');
+}
 const bytesCode = ts.transpileModule(read('app/bytes.ts'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
 const byteFormattingA = await import('data:text/javascript;base64,' + Buffer.from(bytesCode).toString('base64'));
 const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
@@ -282,6 +297,7 @@ const dashboardA = vueSubset('modules/dashboard/pages/DashboardPage.vue', [
   formatBytes: byteFormattingA.formatBytes,
   connectAddress: addressHelperA.connectAddress,
   serverStatus: serverStatusA, statusNow: statusNowA,
+  sourceAddressAlert: sourceAddressA.sourceAddressAlert, describeSourceIssue: sourceAddressA.describeSourceIssue,
   allUsers: { value: [userA, disabledA, expiredA, quotaA, soonA, { ...disabledA, usedTraffic: 100 }] },
   allNodes: { value: [onlineA, pendingA, { ...onlineA, id: 'unknown', heartbeat: {} }] },
   allRevisions: { value: revisionsA }, dashboard: { value: { nodeNames: { named: '名称映射' } } }, unhealthyCoreLabel: () => ''

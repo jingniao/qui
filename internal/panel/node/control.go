@@ -1109,6 +1109,9 @@ func validateMessage(id string, message *pb.AgentMessage) error {
 		if heartbeat.PublicIp != "" && net.ParseIP(heartbeat.PublicIp) == nil {
 			return errors.New("invalid public IP")
 		}
+		if err := validateSourceAddressStatus(heartbeat.SourceAddressStatus); err != nil {
+			return err
+		}
 		if heartbeat.CurrentRevision < 0 || heartbeat.SuccessfulRevision < 0 {
 			return errors.New("invalid revision")
 		}

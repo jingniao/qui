@@ -57,6 +57,9 @@ type RuntimeHeartbeat struct {
 	ActiveConnectionsMeasured *bool               `json:"active_connections_measured,omitempty"`
 	CoreHealthy               *bool               `json:"core_healthy,omitempty"`
 	Cores                     []RuntimeCoreHealth `json:"cores,omitempty"`
+	// SourceAddressStatus is passed through so a live view shows a configured
+	// source that disappeared; Agents without the check omit it.
+	SourceAddressStatus *pb.SourceAddressStatus `json:"source_address_status,omitempty"`
 }
 
 type RuntimeCoreHealth struct {
@@ -144,6 +147,7 @@ func runtimeMetrics(source runtimeSource) (RuntimeHeartbeat, error) {
 	result := RuntimeHeartbeat{
 		CPU: heartbeat.CpuPercent, Memory: heartbeat.MemoryPercent, Disk: heartbeat.DiskPercent, HostUptime: heartbeat.HostUptimeSeconds,
 		CurrentRevision: heartbeat.CurrentRevision, ActiveConnectionsMeasured: heartbeat.ActiveConnectionsMeasured, CoreHealthy: heartbeat.CoreHealthy,
+		SourceAddressStatus: heartbeat.SourceAddressStatus,
 	}
 	if heartbeat.GetActiveConnectionsMeasured() {
 		result.ActiveConnections = &heartbeat.ActiveConnections

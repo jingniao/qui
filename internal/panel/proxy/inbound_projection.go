@@ -19,7 +19,7 @@ func (s *Service) InboundDraft(ctx context.Context, nodeID string) (desiredstate
 	if !n.Enabled {
 		return state, nil, errors.New("node unavailable")
 	}
-	rows, err := s.Repository.Database.QueryContext(ctx, `SELECT id,name,core,protocol,listen,port,enabled,default_outbound,subscription_visible,internal_relay,tls_source,coalesce(certificate_id,''),encrypted_settings
+	rows, err := s.Repository.Database.QueryContext(ctx, `SELECT id,name,core,protocol,listen,port,enabled,default_outbound,subscription_visible,internal_relay,tls_source,coalesce(certificate_id,''),egress_source_ip,encrypted_settings
 		FROM inbounds WHERE node_id=? ORDER BY created_at,id`, nodeID)
 	if err != nil {
 		return state, nil, err
@@ -29,7 +29,7 @@ func (s *Service) InboundDraft(ctx context.Context, nodeID string) (desiredstate
 		var record Inbound
 		var encoded []byte
 		if err := rows.Scan(&record.ID, &record.Name, &record.Core, &record.Protocol, &record.Listen, &record.Port, &record.Enabled,
-			&record.DefaultOutbound, &record.SubscriptionVisible, &record.InternalRelay, &record.TLSSource, &record.CertificateID, &encoded); err != nil {
+			&record.DefaultOutbound, &record.SubscriptionVisible, &record.InternalRelay, &record.TLSSource, &record.CertificateID, &record.EgressSourceIP, &encoded); err != nil {
 			rows.Close()
 			return state, nil, err
 		}

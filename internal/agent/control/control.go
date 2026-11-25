@@ -649,6 +649,7 @@ func session(ctx context.Context, client pb.AgentControlClient, state *identity.
 		return err
 	}
 	defer stream.CloseSend()
+	sources := &sourceWatch{logger: logger}
 	type packet struct {
 		message *pb.ServerMessage
 		err     error
@@ -1202,6 +1203,7 @@ heartbeatLoop:
 		}
 		heartbeat.CurrentRevision = manager.Current()
 		heartbeat.SuccessfulRevision = manager.Current()
+		heartbeat.SourceAddressStatus = sources.status(manager)
 		if source, ok := healthSource.(interface {
 			Health(context.Context) (core.HealthStatus, error)
 		}); ok {

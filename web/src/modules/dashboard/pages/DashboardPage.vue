@@ -554,6 +554,7 @@ import { useNodeRuntime } from '../../nodes/useNodeRuntime';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { unhealthyCoreLabel } from '../../nodes/coreSummary';
 import { serverStatus } from '../../nodes/components/serverListModel';
+import { describeSourceIssue, sourceAddressAlert } from '../../nodes/sourceAddress';
 import { userAPI, type UserSummary } from '../../users/api';
 import type { Revision } from '../../system/deploymentApi';
 import { isOwner, formatTime } from '../../../app/auth';
@@ -785,6 +786,21 @@ const pendingIssues = computed<PendingIssue[]>(() => {
         desc: `核心状态未通过健康检查 (${n.heartbeat?.core_error || '核心未运行'})。`,
         tag: unhealthyCoreLabel(n) || n.capabilities?.core_name || '代理核心',
         level: 'danger',
+        link: `/nodes/${n.id}`
+      });
+    }
+  }
+
+  // B2. 出口 IP 已不在服务器上（Agent 心跳报告）
+  for (const n of allNodes.value) {
+    if (n.deletedAt) continue;
+    const alert = sourceAddressAlert(n, serverStatus(n, statusNow.value).key);
+    if (alert) {
+      issues.push({
+        title: `${alert.failed ? '出口 IP 检查失败' : '出口 IP 缺失'}: ${n.name}`,
+        desc: alert.failed ? 'Agent 无法检查出口 IP 是否仍在服务器上，请查看 Agent 日志。' : `以下地址已不在服务器上，使用它们的流量会失败：${alert.issues.map(describeSourceIssue).join('；')}。`,
+        tag: connectAddress(n) || '未设置连接地址',
+        level: alert.failed ? 'warning' : 'danger',
         link: `/nodes/${n.id}`
       });
     }

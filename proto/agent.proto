@@ -153,6 +153,27 @@ message Heartbeat {
   repeated PublicAddress public_addresses = 36;
   optional uint64 tcp_out_segs = 37;
   optional uint64 tcp_retrans_segs = 38;
+  // Outbound source addresses and interfaces the running revision configures
+  // but the host no longer has. Absent from Agents that do not check them.
+  SourceAddressStatus source_address_status = 39;
+}
+
+// SourceAddressStatus is the result of checking the running revision's source
+// bindings against the host's interfaces at heartbeat time. An empty missing
+// list with an empty error means every configured source is present.
+message SourceAddressStatus {
+  int64 revision = 1;
+  repeated SourceAddressIssue missing = 2;
+  // Fixed code when the check itself could not run (source_check_failed).
+  string error = 3;
+}
+message SourceAddressIssue {
+  // core_source | host_source | inbound_egress | outbound_source
+  string kind = 1;
+  // Inbound or outbound ID; empty for node-level settings.
+  string owner_id = 2;
+  string address = 3;
+  string interface = 4;
 }
 
 message PublicAddress {

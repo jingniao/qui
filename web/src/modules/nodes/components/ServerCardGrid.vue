@@ -45,7 +45,7 @@
             </div>
 
             <div class="flex items-center gap-2 shrink-0">
-              <RelayCleanupBadge :node="node" />
+              <RelayCleanupBadge :node="node" /><SourceAddressBadge :node="node" :status-key="serverStatus(node, clockNow).key" />
               <div class="flex flex-col items-end text-[10px] leading-3 font-mono tabular-nums">
                 <div class="flex items-center gap-0.5" title="上传网速">
                   <svg class="w-2.5 h-2.5 text-ios-green shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -248,6 +248,7 @@
 </template>
 <script setup lang="ts">
 import RelayCleanupBadge from './RelayCleanupBadge.vue';
+import SourceAddressBadge from './SourceAddressBadge.vue';
 import OperatingSystemIcon from '../../../components/OperatingSystemIcon.vue';
 import { ref, toRef } from 'vue';
 import { useRouter } from 'vue-router';

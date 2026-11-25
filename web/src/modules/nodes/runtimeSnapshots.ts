@@ -1,6 +1,6 @@
 import type { NodeView } from './api';
 
-type RuntimeHeartbeat = Pick<NodeView['heartbeat'], 'cpu_percent' | 'memory_percent' | 'disk_percent' | 'current_revision' | 'active_connections' | 'active_connections_measured' | 'core_healthy' | 'cores'> & {
+type RuntimeHeartbeat = Pick<NodeView['heartbeat'], 'cpu_percent' | 'memory_percent' | 'disk_percent' | 'current_revision' | 'active_connections' | 'active_connections_measured' | 'core_healthy' | 'cores' | 'source_address_status'> & {
   host_uptime_seconds?: number;
   receive_bytes_per_second?: number;
   transmit_bytes_per_second?: number;

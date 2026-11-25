@@ -48,13 +48,25 @@ const MaxPortHops = 32
 // FeatureExtraExempt declares support for additional source exemptions.
 const FeatureExtraExempt = "extra_exempt"
 
+// FeaturePanelExempt declares support for panel_ipv4/panel_ipv6: connections to
+// the panel keep the host's own source, so the Agent stays reachable when an
+// enforced address disappears.
+const FeaturePanelExempt = "panel_exempt"
+
+// MaxPanelAddresses bounds the panel destinations per family.
+const MaxPanelAddresses = 16
+
+// helperFeatures is what this helper version reports in every status.
+func helperFeatures() []string { return []string{FeatureExtraExempt, FeaturePanelExempt} }
+
 // The helper protocol is two files in one directory. Their names and the field
 // set are fixed and minimal: an Agent that has updated itself writes
 // DesiredFileName and waits for StatusFileName, while the unit that answers may
 // still run the binary installed before that update. A new field may therefore
 // only be sent when supported: extra_exempt_ipv4 and extra_exempt_ipv6 appear
 // only when needed. Old helpers decode strictly and reject them, so the Agent
-// writes them only after the helper receipt declares extra_exempt.
+// writes them only after the helper receipt declares extra_exempt. panel_ipv4
+// and panel_ipv6 follow the same rule with panel_exempt.
 const (
 	DesiredFileName = "desired.json"
 	StatusFileName  = "status.json"
@@ -71,6 +83,10 @@ type Desired struct {
 	ExemptIPv4      string    `json:"exempt_ipv4"`
 	ExemptIPv6      string    `json:"exempt_ipv6"`
 	PortHops        []PortHop `json:"port_hops,omitempty"`
+	// PanelIPv4 and PanelIPv6 are the panel control destinations that are never
+	// rewritten. Written only after the helper receipt declares panel_exempt.
+	PanelIPv4 []string `json:"panel_ipv4,omitempty"`
+	PanelIPv6 []string `json:"panel_ipv6,omitempty"`
 }
 
 // PortHop is one Hysteria2 inbound's UDP range redirected to its listener.
@@ -127,6 +143,12 @@ func (d Desired) Validate() error {
 			return fmt.Errorf("invalid extra exempt IPv6 at index %d: %w", i, err)
 		}
 	}
+	if err := validPanelAddresses(d.PanelIPv4, 4); err != nil {
+		return err
+	}
+	if err := validPanelAddresses(d.PanelIPv6, 6); err != nil {
+		return err
+	}
 	if len(d.PortHops) > MaxPortHops {
 		return errors.New("too many port hops")
 	}
@@ -141,6 +163,21 @@ func (d Desired) Validate() error {
 			if hop.Start <= other.End && other.Start <= hop.End {
 				return errors.New("hop port ranges overlap")
 			}
+		}
+	}
+	return nil
+}
+
+// validPanelAddresses checks one family's panel destinations: unicast literals
+// of that family, at most MaxPanelAddresses.
+func validPanelAddresses(addresses []string, family int) error {
+	if len(addresses) > MaxPanelAddresses {
+		return fmt.Errorf("too many panel IPv%d addresses (maximum %d)", family, MaxPanelAddresses)
+	}
+	for i, value := range addresses {
+		address, err := netip.ParseAddr(value)
+		if err != nil || address.Zone() != "" || address.IsUnspecified() || address.IsMulticast() || address.Unmap().Is4() != (family == 4) {
+			return fmt.Errorf("invalid panel IPv%d address at index %d", family, i)
 		}
 	}
 	return nil
@@ -208,14 +245,14 @@ func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s } snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4, desired.ExtraExemptIPv4...), ipv4)
+			fmt.Fprintf(&rules, "    oifname %q ip saddr != { %s }%s snat ip to %s\n", name, sourceSet(ipv4, exemptIPv4, desired.ExtraExemptIPv4...), panelMatch("ip", desired.PanelIPv4), ipv4)
 		}
 		if ipv6 != "" {
 			name, err := interfaces(ipv6)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s } snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6, desired.ExtraExemptIPv6...), ipv6)
+			fmt.Fprintf(&rules, "    oifname %q ip6 saddr != { %s }%s snat ip6 to %s\n", name, sourceSet(ipv6, exemptIPv6, desired.ExtraExemptIPv6...), panelMatch("ip6", desired.PanelIPv6), ipv6)
 		}
 		rules.WriteString("  }\n")
 		rules.WriteString("}\n")
@@ -235,6 +272,23 @@ func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 		rules.WriteString("}\n")
 	}
 	return []byte(rules.String()), nil
+}
+
+// panelMatch is the destination condition that leaves connections to the panel
+// untranslated, or nothing when no panel address of the family is known.
+func panelMatch(family string, addresses []string) string {
+	seen := map[string]bool{}
+	var list []string
+	for _, value := range addresses {
+		if address := canonicalAddress(value); address != "" && !seen[address] {
+			seen[address] = true
+			list = append(list, address)
+		}
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" %s daddr != { %s }", family, strings.Join(list, ", "))
 }
 
 // canonicalAddress renders one configured address the way the core renderer does,
@@ -317,13 +371,13 @@ var applyDesired = func(ctx context.Context, desired Desired) error {
 func RunHelper(ctx context.Context, directory string) error {
 	desired, err := ReadDesired(directory)
 	if errors.Is(err, fs.ErrNotExist) {
-		return WriteStatus(directory, Status{OK: true, Features: []string{FeatureExtraExempt}})
+		return WriteStatus(directory, Status{OK: true, Features: helperFeatures()})
 	}
 	if err != nil {
 		return err
 	}
 	applyErr := applyDesired(ctx, desired)
-	status := Status{ID: desired.ID, OK: applyErr == nil, Features: []string{FeatureExtraExempt}}
+	status := Status{ID: desired.ID, OK: applyErr == nil, Features: helperFeatures()}
 	if applyErr != nil {
 		status.Error = applyErr.Error()
 	}

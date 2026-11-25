@@ -76,9 +76,18 @@ func (r *Reconciler) verifyOutboundNetworks(state desiredstate.State) error {
 // own: the source address must be assigned to a local interface, the interface
 // must exist, and when both are set the address must be on that interface.
 func verifyNetworkAvailable(network desiredstate.Network) error {
-	interfaces, err := net.Interfaces()
+	names, addresses, err := hostInterfaces()
 	if err != nil {
 		return err
+	}
+	return checkNetworkAvailable(network, names, addresses)
+}
+
+// hostInterfaces reads every local interface name and its assigned addresses.
+func hostInterfaces() (map[string]bool, map[string][]net.IP, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, nil, err
 	}
 	addresses := map[string][]net.IP{}
 	names := map[string]bool{}
@@ -86,17 +95,17 @@ func verifyNetworkAvailable(network desiredstate.Network) error {
 		names[entry.Name] = true
 		assigned, err := entry.Addrs()
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		for _, address := range assigned {
 			ip, _, err := net.ParseCIDR(address.String())
 			if err != nil {
-				return err
+				return nil, nil, err
 			}
 			addresses[entry.Name] = append(addresses[entry.Name], ip)
 		}
 	}
-	return checkNetworkAvailable(network, names, addresses)
+	return names, addresses, nil
 }
 
 // checkNetworkAvailable is the pure part of the check, shared with tests.

@@ -17,7 +17,7 @@
         <h1 class="text-ios-label tracking-normal truncate text-xl font-bold leading-snug">
           {{ node?.name || '服务器详情' }}
         </h1>
-        <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" /><RelayCleanupBadge v-if="node" :node="node" />
+        <StatusBadge v-if="node" :status="status.tone" :label="status.label" class="shrink-0" /><RelayCleanupBadge v-if="node" :node="node" /><SourceAddressBadge v-if="displayNode" :node="displayNode" :status-key="status.key" />
         <span v-if="stateReset && stateReset.state !== 'not_needed'" class="rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/20 px-2 py-0.5 text-xs font-semibold shrink-0">旧数据清理：{{ stateResetLabel }}</span>
       </div>
     </div>
@@ -28,6 +28,8 @@
     <p v-else-if="!displayNode" role="status" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">服务器已删除或不存在。</p>
     <template v-else>
       <p v-if="status.key === 'core_error'" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat?.core_healthy === false && node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(displayNode) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
+      <p v-if="sourceAlert && !sourceAlert.failed" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">以下出口地址已不在服务器上，使用它们的流量会失败：{{ sourceAlert.issues.map(describeSourceIssue).join('；') }}。请把地址加回服务器，或改选后重新发布配置。</p>
+      <p v-else-if="sourceAlert" role="status" class="rounded-xl bg-ios-orange/10 p-3 text-sm text-ios-orange">Agent 无法检查出口 IP 是否仍在服务器上，请查看该服务器的 Agent 日志。</p>
       <p v-if="error" role="status" class="text-sm text-ios-red">{{ error }}</p>
       <p v-if="warnings.length" role="status" class="text-sm text-ios-orange">{{ warnings.join('；') }}</p>
       <nav class="ios-segmented-container inline-flex overflow-x-auto max-w-full -mt-0.5" aria-label="服务器详情页签">
@@ -68,8 +70,10 @@ import ErrorState from '../../../components/ErrorState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
 import RelayCleanupBadge from '../components/RelayCleanupBadge.vue';
+import SourceAddressBadge from '../components/SourceAddressBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import { serverStatus } from '../components/serverListModel';
+import { describeSourceIssue, sourceAddressAlert } from '../sourceAddress';
 import { unhealthyCoreLabel } from '../coreSummary';
 import { detailState } from '../components/detail/serverDetailModel';
 import ServerSetupGuide from '../components/detail/ServerSetupGuide.vue';
@@ -94,6 +98,7 @@ const runtime = useNodeRuntime({ onInventoryChanged: () => { void refreshNode(tr
 const { statusNow, error: runtimeError } = runtime;
 const displayNode = computed(() => node.value ? runtime.project(node.value) : null);
 const status = computed(() => !node.value ? { key: 'loading', tone: 'offline', label: '读取中' } : !displayNode.value ? { key: 'deleted', tone: 'disabled', label: '已删除' } : serverStatus(displayNode.value, statusNow.value));
+const sourceAlert = computed(() => displayNode.value ? sourceAddressAlert(displayNode.value, status.value.key) : null);
 const pending = computed(() => displayNode.value && detailState(displayNode.value) === 'pending');
 const offline = computed(() => ['offline', 'reconnecting', 'disabled', 'deleted'].includes(status.value.key));
 const editorOpen = ref(false), editing = ref<Inbound | null>(null), unpublished = ref(false), nodeRefresh = ref(0), revisionRefresh = ref(0);

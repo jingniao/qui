@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/netip"
 	"os"
 	"runtime"
 	"slices"
@@ -51,6 +52,19 @@ var hostNetworkDial = func(ctx context.Context, network, address string) error {
 	dialCtx, cancel := context.WithTimeout(ctx, hostNetworkDialTimeout)
 	defer cancel()
 	var dialer net.Dialer
+	connection, err := dialer.DialContext(dialCtx, network, address)
+	if err != nil {
+		return err
+	}
+	return connection.Close()
+}
+
+// hostNetworkDialFrom proves that a connection sent from one local source still
+// reaches the panel. It is a variable so the tests can fail or stall the proof.
+var hostNetworkDialFrom = func(ctx context.Context, network, source, address string) error {
+	dialCtx, cancel := context.WithTimeout(ctx, hostNetworkDialTimeout)
+	defer cancel()
+	dialer := net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(source)}}
 	connection, err := dialer.DialContext(dialCtx, network, address)
 	if err != nil {
 		return err
@@ -169,6 +183,23 @@ func (r *Reconciler) syncHostNetworkState(ctx context.Context, state desiredstat
 			return errors.New("the host-network helper is too old for extra exemptions; run qui-update --component agent once on the node")
 		}
 	}
+	// A helper that declares panel_exempt leaves connections to the panel
+	// untranslated, so a removed or changed enforced address cannot cut the
+	// Agent off from the panel that would publish the fix.
+	panelExempt := false
+	if len(hostNetworkFamilies(network)) > 0 {
+		status, err := hostnet.ReadStatus(directory)
+		panelExempt = err == nil && slices.Contains(status.Features, hostnet.FeaturePanelExempt)
+		if panelExempt {
+			if r.ControlAddress == "" {
+				return errors.New("the panel control address is unknown, so it cannot be kept out of the enforced source")
+			}
+			desired.PanelIPv4, desired.PanelIPv6, err = controlAddresses(proofCtx, r.ControlAddress)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	if err := hostnet.WriteDesired(directory, desired); err != nil {
 		return err
 	}
@@ -189,11 +220,52 @@ func (r *Reconciler) syncHostNetworkState(ctx context.Context, state desiredstat
 		if !available {
 			continue
 		}
+		if panelExempt {
+			// The panel is exempt, so an unbound dial no longer passes the
+			// translation. Binding the enforced address sends exactly what
+			// the translation would, which proves that address still works.
+			source := network.HostSourceIPv4
+			if family.family == 6 {
+				source = network.HostSourceIPv6
+			}
+			if err := hostNetworkDialFrom(proofCtx, family.network, source, r.ControlAddress); err != nil {
+				return fmt.Errorf("new %s connections from the enforced source %s do not reach the panel at %s: %w", family.network, source, r.ControlAddress, err)
+			}
+			continue
+		}
 		if err := hostNetworkDial(proofCtx, family.network, r.ControlAddress); err != nil {
 			return fmt.Errorf("new %s connections no longer reach the panel at %s: %w", family.network, r.ControlAddress, err)
 		}
 	}
 	return nil
+}
+
+// controlAddresses resolves the panel control address into the destinations the
+// helper keeps untranslated, split by family.
+func controlAddresses(ctx context.Context, address string) ([]string, []string, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid panel control address %s: %w", address, err)
+	}
+	var resolved []netip.Addr
+	if literal, err := netip.ParseAddr(host); err == nil {
+		resolved = []netip.Addr{literal}
+	} else if resolved, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host); err != nil {
+		return nil, nil, fmt.Errorf("cannot resolve the panel control address %s: %w", host, err)
+	}
+	var ipv4, ipv6 []string
+	for _, ip := range resolved {
+		ip = ip.Unmap().WithZone("")
+		if ip.Is4() {
+			ipv4 = append(ipv4, ip.String())
+		} else {
+			ipv6 = append(ipv6, ip.String())
+		}
+	}
+	if len(ipv4) > hostnet.MaxPanelAddresses || len(ipv6) > hostnet.MaxPanelAddresses {
+		return nil, nil, fmt.Errorf("the panel control address %s resolves to more than %d addresses of one family", host, hostnet.MaxPanelAddresses)
+	}
+	return ipv4, ipv6, nil
 }
 
 // hostNetworkFamily is one configured address family and the dial network that

@@ -266,7 +266,7 @@ func TestRunHelperIsANoOpWithoutADesiredFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.ID != "" || !status.OK || status.Error != "" || !reflect.DeepEqual(status.Features, []string{FeatureExtraExempt}) {
+	if status.ID != "" || !status.OK || status.Error != "" || !reflect.DeepEqual(status.Features, []string{FeatureExtraExempt, FeaturePanelExempt}) {
 		t.Fatalf("initial helper capability receipt = %+v", status)
 	}
 }

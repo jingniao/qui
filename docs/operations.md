@@ -157,6 +157,8 @@ systemctl start proxy-agent.service
 
 在代理节点高级选项选择「出口 IP」并发布；清空为「跟随服务器设置」。全部非 Block 流量固定所选地址，域名只解析该地址族；无该族地址、另一族 IP 字面量及回环目标连接失败。`inbound_egress_unsupported` 请升级入站使用的 Agent 核心，GOST 不支持。`network_unavailable` 请确认该地址仍配置在本机网卡上；失败保留旧配置。与服务器强制出站共用时需 helper 支持额外豁免。
 
+**出口 IP 缺失**：服务器徽标或仪表盘显示「出口 IP 缺失」表示 Agent 心跳发现所列地址/网卡已不在本机，使用它的流量正在失败（强制出站缺失时整机该地址族新建连接失败；helper 未声明 `panel_exempt` 的旧节点上，强制出站 IPv4 缺失还会切断 Agent 与面板的连接，此时 SSH 执行 `nft delete table inet proxy_agent_source` 后再改设置并发布）。处理：把地址加回网卡（流量随即恢复），或改选/清空后重新发布。地址恢复但未重新发布时，`host-network/status.json` 可能仍为上次失败结果，下一次发布会刷新。「出口 IP 检查失败」查 Agent 日志 `outbound source check failed`。
+
 出口组按每个出口 IP 分别探测、分别选路，保留原有策略及失败处理；默认出口探测失败不会删掉其他出口 IP 的可用成员。尚无探测结果时沿用组的失败策略，探测入口保留并持续检测。面板显示的出站健康仍来自默认来源，不能用它代替指定出口 IP 的连通结果。
 
 > 注：旧示例配置（`deploy/examples/agent.yaml`、`panel.yaml`）中提及的签名发布下载与公钥配置仅适用于旧版工作进程自更新；现行 Agent 更新与排障见第 10 节与[部署与升级](deployment.md)。
@@ -168,7 +170,7 @@ systemctl start proxy-agent.service
 | 影响 / 机制 | 代理核心拨号套接字（Xray `sendThrough`/`sockopt.interface`；sing-box `inet4/6_bind_address`/`bind_interface`） | 经该网卡新建的全部出站连接（nft 表 `inet proxy_agent_source` postrouting SNAT，优先级 90） |
 | 权限 / 平台 | 无特权 / 任意平台 | 仅独立 helper 持 `CAP_NET_ADMIN` / Linux ≥ 5.2 + nftables |
 
-- A 自动豁免于 B；NAT 在首包决定，不改写已建连接与入站回包；双栈主机须同时填 IPv4/IPv6。
+- A 自动豁免于 B；发往面板控制地址的连接也自动豁免（需本机 helper 回执含 `panel_exempt`，旧 helper 经 `qui-update --component agent` 升级），强制地址失效时 Agent 不掉线，可在面板改设置后重新发布；NAT 在首包决定，不改写已建连接与入站回包；双栈主机须同时填 IPv4/IPv6。
 - **逐出站源 IP（`sourceIp`/`sourceInterface`）**：Direct 出站可覆盖服务器级设置（缺能力返 `outbound_source_unsupported`）；启用 B 时自动加入 `extra_exempt_ipv4/6`（每族 ≤16），返 `host_source_exempt_unsupported` 须升级本机 helper（`qui-update --component agent` 或 v1.7.5 完整网页升级）并核对 `status.json` 的 `features` 含 `extra_exempt`。`network_unavailable` / `host_network_failed` 均回滚保旧配置。
 
 ```sh

@@ -136,7 +136,7 @@ systemctl enable --now proxy-panel.service
 
 - **首次创建 Owner**：数据库无管理员时，面板以 WARN 打印一次性 `first-run setup token` 并写入 `<database 目录>/setup-token`（0600）。打开 `https://<host>/` 粘贴令牌设置 Owner、平台名称与时区，完成后令牌与文件立即失效。
 - **日志**：面板只写 stdout，使用 `journalctl -u proxy-panel -f` 查看（不写 `/var/log`）。节点 Agent 运行日志自 v1.7.3 起写入 `/var/lib/proxy-agent/logs/agent.log`（轮转上限 100 MiB），`journalctl -u proxy-agent` / syslog 仅接收启动与日志写入错误。
-- **终端菜单 `/usr/local/bin/qui`**（root 专用）：面板主机显示 `1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、7. 查看／重置管理员登录地址、8. 卸载并清除全部数据、0. 退出`；仅装 Agent 时显示精简菜单（`1. 更新、2. 卸载并清除全部数据、0. 退出` 及状态/版本）。详见[运维手册](operations.md) §14。
+- **终端菜单 `/usr/local/bin/qui`**（root 专用）：面板主机显示 `1. 修改管理员账号密码、2. 修改端口、3. 重启、4. 启动、5. 停止、6. 更新（从 GitHub）、7. 查看／重置管理员登录地址、8. 卸载并清除全部数据、0. 退出`；仅装 Agent 时显示精简菜单（`1. 更新、2. 卸载并清除全部数据、3. 启动、0. 退出` 及状态/版本）。详见[运维手册](operations.md) §14。
 
 ## 4. 接入节点
 
@@ -174,6 +174,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.7.
 | 开机启动 | `systemctl enable` | `rc-update add … default` |
 
 - 均以 `proxy-agent` 运行（`no_new_privs`、`umask=077`）；OpenRC 无 systemd 的 `ProtectSystem`/`PrivateTmp` 等文件系统隔离。
+- systemd 主单元自 v1.12.2 起不设 `ProtectKernelTunables`：LXC 中它重新挂载 `/proc/sys` 后 Agent 读到宿主 `boot_id`，与 root 更新器读到的容器 `boot_id` 不同，核心交接授权恒失败（升级/安装回滚为“核心未确认 detached：armed”）。无特权、无能力的服务账号本就不能写 sysctl。v1.12.2 之前安装的 LXC 节点首次升级前，须先让运行中的 Agent 换用新单元（例如 drop-in `ProtectKernelTunables=false` 后重启一次 Agent）。
 - Linux 核心独立于 Agent 存活，服务停止后由同一屏障确认 worker 退出并检查授权。仅有效更新授权及交接回执允许保留核心；普通 stop/restart、卸载、非更新崩溃仍停核，停核未确认须报失败。
 - Linux 核心以 `Setsid` 启动，不设 `Pdeathsig`；退出清理由上述授权检查与停核屏障负责。OpenRC 自动 respawn 不执行 `stop_post`，新 worker 因而在 lifecycle 锁内先执行同一已认证停核屏障，再恢复保留配置；有效 detached/adopting 交接仍走授权认领。
 - OpenRC 缺失有效 `/etc/machine-id` 时由 `install.sh --node` 自动补写（root 0444）；`agent.manifest` 第 10 行记为 `openrc`。服务命令对照见[运维手册](operations.md)第 1 节。
@@ -332,7 +333,7 @@ deploy/linux/uninstall.sh panel     # 或 agent
 
 普通卸载先确认服务已完全停止（systemd：`ActiveState=inactive` 且 `Result=success`；OpenRC：`stopped`），再删除程序、服务定义与安装记录，保留身份、配置、数据、备份与账号。Agent 卸载须先撤销全部交接授权，再停服并执行 `--finish-core-stop` 屏障确认核心退出；仅服务 inactive 不足以确认停核，屏障失败保留现场并中止卸载。旧 Agent 不支持协议时沿用其停核流程。Agent 卸载还须恢复内核调优快照并删除 `inet proxy_agent_source`、`inet proxy_agent_hop` 两张 nft 表。卸载后写入 `/var/lib/proxycontrol-install/<component>.removed`（重装须带 `--reinstall`）；最后一个组件卸载后一并移除公共 `qui`、`qui-update`、`qui-update-db`、`qui-update-state`、`service.sh`、本机卸载脚本与开机恢复单元。
 
-彻底清除使用 `qui`「卸载并清除全部数据」或 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可指定 `panel`/`agent`）：按记录先 Agent 后面板，须交互依次输入 `y`、`purge`（无免确认参数），删除配置、状态、备份与账号；不要先普通卸载再补 `--purge`。详见[运维手册](operations.md) §14。
+彻底清除使用 `qui`「卸载并清除全部数据」或 `/usr/local/lib/proxycontrol/uninstall.sh all --purge`（也可指定 `panel`/`agent`）：按记录先 Agent 后面板，须在终端交互输入 `y` 确认（v1.12.2 起不再要求再输入 `purge`；无免确认参数），删除配置、状态、备份与账号；不要先普通卸载再补 `--purge`。详见[运维手册](operations.md) §14。
 
 ## 7. 目录与权限
 

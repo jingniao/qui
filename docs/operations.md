@@ -4,14 +4,21 @@
 
 ## 当前生产环境
 
-**最近核实日期：未实时核实。** 主机与地址依据 Owner 于 **2026-11-13** 的指定记录（原 README 与本节）；原 AGENTS.md 引用的会话 [772](codeg://session/772) 只读记录面板 **1.7.5**、迁移头 **0158**，但现有文档未注明该次核实日期，不能用版本发布日期推定。上述均为历史记录，本轮未连接生产；生产操作前须重新实时核实运行版本、迁移头、节点与备份状态。
+**最近核实日期：2026-11-25 03:40 UTC。** 本轮以 Owner 提供的密钥只读排查 Agent 升级失败，并按 Owner 授权恢复三台停机节点；未升级面板。后续生产操作仍须重新实时核实运行版本、迁移头、节点与备份状态。
 
 | 项目 | 当前登记 |
 | --- | --- |
-| 服务器 / 面板地址 | `5.45.96.43`（德国 netcup） / `https://qui.lluu.de` |
-| 面板版本 / 迁移头（历史只读记录） | 1.7.5 / 0158（会话 772，核实日期未确认；未实时核实） |
+| 服务器 / 面板地址 | `5.45.96.43`（德国 netcup，1 vCPU / 约 1 GB 内存） / `https://qui.lluu.de` |
+| 面板版本 / 迁移头 | 1.12.1 / 0165（2026-11-25 02:45 UTC 升级；`panel.db` 约 466 MB，WAL 约 157 MB） |
+| 节点状态 | 13 个节点，11 在线、2 离线（洛杉矶 rn、香港 阿里国际*1，本轮未排查）；台湾 wap 为 1.12.0，香港 阿里国际*1 为 1.9.0，其余 1.12.1 |
+| 待完成事项 | 美国 CC、德国 netcup 旧状态重建停在 `prepared`，原 1.12.1 Agent 临时运行；面板升级到 1.12.2 后在两台依次执行 `systemctl start proxy-agent-state-reset`（或 `qui` 菜单「3. 启动」）。台湾 wap 升级前须先加 `ProtectKernelTunables=false` drop-in 并重启 Agent |
+| 最近数据库保护文件 | `/var/lib/proxy-panel/backups/pre-update-1.12.0-20261125-034511.db`（正式更新器创建） |
 | 管理员登录 | 自定义地址不入文档；Owner 登录后在「系统设置」查看，忘记时用服务器 `qui` 菜单重置（需停面板），见[说明书 §27.18](project-spec.md#2718-系统设置管理员登录地址与门户字段v154) |
 | 用户门户 | `https://qui.lluu.de/` |
+
+2026-11-25 03:00 UTC 批量升级 Agent 到 1.12.1 后，德国 netcup、美国 CC、日本 zouter升级本身成功，旧状态重建封存超时，脚本退出后 Agent 与核心停止。根因是面板封存事务逐行改写十万级历史回执，超过 Agent 30 秒期限并独占写连接，已在 [v1.12.2](releases/release-notes-1.12.2.md) 修复。处置：日本 zouter 重跑重建完成（`complete`）；美国 CC、德国 netcup 面板侧身份未变，手工启动原 Agent 与网络/调优监听后在线。台湾 wap（Proxmox LXC）因 `ProtectKernelTunables` 改变 `boot_id` 视图，自 1.10 起升级/安装均回滚，drop-in 操作本轮被会话权限策略拒绝，未执行。
+
+此前 2026-11-24 记录：面板 1.10.1 → 1.10.4 升级（`qui-update --component panel --version 1.10.4 --yes`，数据库保护文件 `pre-update-1.10.1-20261124-032827.db`，证据在生产主机 `/root/qui-upgrade-1.10.4-20261124/`），详见 [v1.10.4 发布说明](releases/release-notes-1.10.4.md#生产面板升级)。Owner 登录操作、真实浏览器交互和真实代理请求本轮均未验证。
 
 ## 1. 日常检查
 
@@ -280,7 +287,9 @@ sysctl --system
 
 ## 14. 终端菜单 qui
 
-root 专用菜单 `/usr/local/bin/qui`（仅装 Agent 显示精简菜单：更新、彻底卸载及引导/实际 Agent 版本；含面板显示完整 8 项，不提供 shell 或日志入口）：
+root 专用菜单 `/usr/local/bin/qui`（仅装 Agent 显示精简菜单：1. 更新、2. 彻底卸载、3. 启动及引导/实际 Agent 版本；含面板显示完整 8 项，不提供 shell 或日志入口）。
+
+Agent 菜单「3. 启动」：Agent 已运行时不操作；更新或旧状态重建持有 `update.lock` 时拒绝；存在未完成的旧状态重建（`agent-state-reset/request` 且阶段不是 `complete`）时在后台继续该重建，由重建脚本完成后启动新 Agent（封存失败则恢复旧 Agent），不在重建旁启动旧状态；其余情况启动已安装的网络/调优监听与 `proxy-agent`。
 
 | 菜单项 | 行为 |
 | --- | --- |
@@ -301,7 +310,7 @@ systemctl start proxy-panel.service
 
 ### 彻底卸载（qui 菜单／uninstall.sh --purge）
 
-以 root 走 `qui` 菜单或直接执行（依次输入 `y` 与 `purge`，无 `--yes`；**勿先普通卸载**，`all` 仅按现存 `.manifest` 清理，不补清 `.removed`；普通卸载保留数据/备份/账号与 `.removed`，重装需 `--reinstall`）：
+以 root 走 `qui` 菜单或直接执行（终端输入 `y` 确认，v1.12.2 起不再要求输入 `purge`，无 `--yes`；**勿先普通卸载**，`all` 仅按现存 `.manifest` 清理，不补清 `.removed`；普通卸载保留数据/备份/账号与 `.removed`，重装需 `--reinstall`）：
 
 ```sh
 /usr/local/lib/proxycontrol/uninstall.sh all --purge   # 单组件换为 panel 或 agent

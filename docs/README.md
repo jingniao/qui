@@ -1,6 +1,6 @@
 # 文档导航
 
-当前正式版 **[v1.12.1](releases/release-notes-1.12.1.md)**（tag `ccebc95`，迁移头 **0165**），最低兼容 **v1.7.5**。生产运行状态单独登记在[运维手册](operations.md#当前生产环境)，生产操作前须重新实机核实。
+当前正式版 **[v1.12.2](releases/release-notes-1.12.2.md)**（tag `984f332`，迁移头 **0165**），最低兼容 **v1.7.5**。生产运行状态单独登记在[运维手册](operations.md#当前生产环境)，生产操作前须重新实机核实。
 
 ## 按任务阅读
 
@@ -21,7 +21,8 @@
 
 | 范围 | 入口 |
 | --- | --- |
-| 当前正式版 v1.12.1 | [发布说明](releases/release-notes-1.12.1.md)：锁识别、UDP 提示与升级收尾时序 |
+| 当前正式版 v1.12.2 | [发布说明](releases/release-notes-1.12.2.md)：重建封存提速、LXC 核心交接、Agent 菜单启动 |
+| v1.12.1 | [发布说明](releases/release-notes-1.12.1.md)：锁识别、UDP 提示与升级收尾时序 |
 | v1.12.0 | [发布说明](releases/release-notes-1.12.0.md)：重装接替旧更新任务 |
 | v1.11.0 | [GitHub Release](https://github.com/jingniao/qui/releases/tag/v1.11.0)：更新状态 Go 下沉、存储整理与告警 |
 | v1.7.5 起的版本摘要 | [变更记录](changelog.md)，各版证据见 [releases/](releases/) |

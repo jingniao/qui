@@ -20,6 +20,14 @@
 - [GitHub check 45303141640](https://github.com/jingniao/qui/actions/runs/45303141640) 同 SHA 成功，完整四分片、汇总 check 及 cores 均通过；[Release workflow 45306835366](https://github.com/jingniao/qui/actions/runs/45306835366) 成功，[v1.10.4 Release](https://github.com/jingniao/qui/releases/tag/v1.10.4) 于 2026-11-24T01:47:10Z 发布。
 - 已下载核验全部 13 个附件：GitHub SHA256 与大小、SHA256SUMS 的 10 项、双架构 ELF 与源码 SHA、无源码修改标记、归档与独立 Agent 一致、官方 Ed25519 签名序号 1010004、安装脚本及 sing-box provenance 均通过；双架构程序归档均包含新工具。Linux 隔离目录运行 amd64 面板、Agent 及数据库工具版本检查，均为 1.10.4，工具协议为 `qui-update-database-v1`。
 
-未连接或升级生产，未运行真实浏览器交互、arm64 原生执行或 Alpine/OpenRC 真机升级。
+未运行真实浏览器交互、arm64 原生执行或 Alpine/OpenRC 真机升级。
+
+## 生产面板升级
+
+2026-11-24 02:33 UTC 完成实机核验。Owner 授权本轮仅升级面板，并明确跳过手工加密备份；执行 `qui-update --component panel --version 1.10.4 --yes`，面板从 1.10.1 升到 1.10.4，命令退出 0，迁移头保持 0163。更新器自动创建 `pre-update-1.10.1-20261124-032827.db` 并完成目标版本数据库预检。
+
+升级后服务 active、`NRestarts=0`；curl GET 公网健康接口和门户均返回 200，健康正文为 `status=ok`。配置摘要、全部节点修订和 Agent 版本未变，13 节点仍为 11 在线、2 离线，在线节点心跳已恢复；面板无新增 WARN/ERROR，无 rollback/discard 残留。新数据库工具版本及协议核验通过。Python urllib 曾收到 Cloudflare 403，curl 对相同地址验证正常，未调整生产配置。
+
+Agent 本轮未升级。德国节点和“香港 阿里云*1”的既有离线状态、德国 Agent 停用状态及旧 running 升级任务均保持原状；未执行 Owner 登录、真实浏览器交互或代理请求验证。基线、数据库保护文件与证据位置见[运维手册](../operations.md#当前生产环境)。
 
 逐文件职责及相关回归见 [B1 实施计划](../superpowers/plans/2026-11-23-node-liveness.md)与 [B3 实施计划](../superpowers/plans/2026-11-23-update-database-go.md)。

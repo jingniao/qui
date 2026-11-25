@@ -245,6 +245,48 @@ start_panel() {
   printf '服务状态：%s\n' "$(menu_service_state)"
 }
 
+# Agent host: start the Agent and its root helper watchers. An unfinished
+# legacy state reset owns the Agent's stop/start and must not have the old
+# state started beside it; it is resumed in the background instead and starts
+# the Agent itself when it finishes (or restores the previous one).
+start_agent() {
+  local request=/var/lib/proxycontrol-install/agent-state-reset/request phase='' helper=''
+  if service_is_active proxy-agent; then printf 'proxy-agent 已在运行。\n'; return 0; fi
+  if ! flock -n /var/lib/proxycontrol-install/update.lock true; then
+    printf '更新或旧状态重建正在进行，未启动；请稍后再试。\n'; return 0
+  fi
+  if [[ -f $request ]]; then
+    if ! phase=$("$program" --config /etc/proxy-agent/config.yaml --reset-legacy-state status); then
+      printf '无法读取旧状态重建进度，未启动。\n'; return 0
+    fi
+  fi
+  if [[ -n $phase && $phase != complete ]]; then
+    printf '旧状态重建尚未完成（%s），已在后台继续；完成后会自动启动 Agent。\n' "$phase"
+    if [[ $init_system == systemd ]]; then
+      systemctl start --no-block proxy-agent-state-reset.service \
+        || printf '无法启动旧状态重建；查看日志：journalctl -u proxy-agent-state-reset -n 50\n'
+    else
+      service_start proxy-agent-state-reset || printf '无法启动旧状态重建：rc-service proxy-agent-state-reset start\n'
+    fi
+    return 0
+  fi
+  if [[ $init_system == systemd ]]; then
+    for helper in proxy-agent-host-network.path proxy-agent-tuning.path; do
+      if [[ -f /etc/systemd/system/$helper ]]; then systemctl start "$helper" || printf '启动 %s 失败。\n' "$helper"; fi
+    done
+  else
+    for helper in proxy-agent-host-network proxy-agent-tuning; do
+      if [[ -f /etc/init.d/$helper ]]; then service_start "$helper" || printf '启动 %s 失败。\n' "$helper"; fi
+    done
+  fi
+  if service_start proxy-agent; then
+    printf 'proxy-agent 已启动。\n'
+  else
+    printf '启动 proxy-agent 失败；查看日志：%s\n' "$(service_log_hint proxy-agent)"
+  fi
+  printf '服务状态：%s\n' "$(menu_service_state)"
+}
+
 # 5. Stop.
 stop_panel() {
   if ! service_active; then printf '%s 已处于停止状态。\n' "$service"; return 0; fi
@@ -295,7 +337,7 @@ print_menu() {
   if ! $has_panel; then
     printf 'Agent 服务状态：%s\n' "$(menu_service_state)"
     print_agent_versions
-    printf '\n1. 更新（从 GitHub）\n2. 卸载并清除全部数据\n0. 退出\n\n'
+    printf '\n1. 更新（从 GitHub）\n2. 卸载并清除全部数据\n3. 启动\n0. 退出\n\n'
     return
   fi
   printf '\033[1m%s\033[0m\n' '代理控制平台 终端菜单'
@@ -324,6 +366,7 @@ main() {
       case $choice in
         1) update_panel;;
         2) uninstall_all;;
+        3) start_agent;;
         0) return 0;;
         *) printf '无效选择：%s\n' "$choice";;
       esac

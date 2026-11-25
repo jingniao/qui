@@ -128,6 +128,8 @@ for scenario in pending prepared sealed deleting deleted rebuilt seal-fails stop
   if [[ $scenario == seal-fails || $scenario == stop-fails || $scenario == rollback-pending || $scenario == missing-result || $scenario == new-unconfirmed ]]; then
     check test "$code" -eq 1
     check bash -c '! grep -Eq "^(rebuild|complete)$" "$root/ops"'
+    # Nothing was deleted: a failed seal restores the previous Agent.
+    if [[ $scenario == seal-fails ]]; then check test -e "$root/started"; fi
   else
     check test "$code" -eq 0
     check test "$(cat "$root/phase")" = complete

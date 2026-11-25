@@ -69,6 +69,21 @@ confirm_update_receipts() {
     done
   done
 }
+# A newly started Agent probes the root bridge: release it before that probe,
+# and re-arm the watchers against the current directories before the Agent.
+start_agent_services() {
+  exec 6>&-
+  if [[ -d /run/systemd/system ]]; then
+    systemctl restart proxy-agent-update.path
+    systemctl restart proxy-agent-host-network.path proxy-agent-tuning.path
+    systemctl start proxy-agent.service
+  else
+    rc-service proxy-agent-update restart 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+    rc-service proxy-agent-host-network start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+    rc-service proxy-agent-tuning start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+    rc-service proxy-agent start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  fi
+}
 phase=$(/usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state status)
 case $phase in
   pending|prepared) confirm_update_receipts true;;
@@ -98,7 +113,14 @@ if [[ $phase != rebuilt && $phase != complete ]]; then
   case $phase in
     pending|prepared) confirm_update_receipts false;;
   esac
-  /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state seal --reset-target-sha256 "$target"
+  if ! /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state seal --reset-target-sha256 "$target"; then
+    # Nothing has been deleted. Unless the panel committed and only its reply
+    # was lost, the old identity is still valid; a later run (boot, update or
+    # the qui menu) replays the same reset ID. Do not leave the node offline.
+    printf 'legacy state reset could not seal the old identity; restarting the previous Agent\n' >&2
+    start_agent_services
+    exit 1
+  fi
   /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state rebuild --reset-target-sha256 "$target"
 fi
 # The root CLI creates fresh private files; return ownership before the service
@@ -108,17 +130,5 @@ install -d -o proxy-agent -g proxy-agent -m 0700 /var/lib/proxy-agent/tuning
 install -d -o proxy-agent -g proxy-agent -m 0700 /var/lib/proxy-agent/system-update
 chown -R proxy-agent:proxy-agent /var/lib/proxy-agent
 chown proxy-agent:proxy-agent /etc/proxy-agent/config.yaml
-# A newly started Agent probes this root bridge. Release it before that probe,
-# and re-arm the watcher against the new directory before starting the Agent.
-exec 6>&-
-if [[ -d /run/systemd/system ]]; then
-  systemctl restart proxy-agent-update.path
-  systemctl restart proxy-agent-host-network.path proxy-agent-tuning.path
-  systemctl start proxy-agent.service
-else
-  rc-service proxy-agent-update restart 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-  rc-service proxy-agent-host-network start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-  rc-service proxy-agent-tuning start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-  rc-service proxy-agent start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-fi
+start_agent_services
 /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state complete --reset-target-sha256 "$target"

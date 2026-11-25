@@ -23,7 +23,10 @@ ProtectSystem=strict
 ReadWritePaths=-/run/proxy-agent-handover
 ProtectHome=true
 PrivateTmp=true
-ProtectKernelTunables=true
+# No ProtectKernelTunables: in LXC it remounts /proc/sys and exposes the host
+# boot_id instead of the container's, so core handover authorization (bound to
+# the boot_id root observes) always fails. The unprivileged, capability-free
+# service account cannot write sysctls anyway.
 # Keep module files readable for algorithm discovery; the syscall filter and
 # capability set block explicit loading, while kernel sysctl autoload uses modprobe outside this sandbox.
 SystemCallFilter=~@module

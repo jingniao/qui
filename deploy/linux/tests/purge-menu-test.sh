@@ -166,7 +166,7 @@ for INIT in systemd openrc; do
   command -v script >/dev/null || { printf 'SKIP PTY scenarios: util-linux script unavailable.\n'; continue; }
   for selection in panel agent all; do
     if [[ $selection == all ]]; then setup panel agent; else setup "$selection"; fi
-    terminal 'y\npurge\n' "$selection"
+    terminal 'y\n' "$selection"
     check "$INIT purge $selection" test "$status" = 0
     check 'registry removed' test ! -e "$R/var/lib/proxycontrol-install"
     check 'shared library removed' test ! -e "$R/usr/local/lib/proxycontrol"
@@ -184,13 +184,13 @@ for INIT in systemd openrc; do
   done
   setup panel
   RULES=no; export RULES
-  terminal 'y\npurge\n' panel
+  terminal 'y\n' panel
   unset RULES
   check 'missing firewall rules accepted' test "$status" = 0
   check 'missing rules not deleted' bash -c '! grep -q "^ufw\|^firewall" "$1"' _ "$R/calls"
   setup panel
   UFW_ACTIVE=no; export UFW_ACTIVE
-  terminal 'y\npurge\n' panel
+  terminal 'y\n' panel
   unset UFW_ACTIVE
   check "$INIT inactive firewalld purge succeeds" test "$status" = 0
   check 'inactive firewalld state checked' grep -qx 'firewall --state' "$R/calls"
@@ -222,7 +222,7 @@ for INIT in systemd openrc; do
       check "$mode tool cleans staging directory" test -z "$remaining_stages"
     done
   fi
-  for answer in 'n\n' 'y\nno\n'; do
+  for answer in 'n\n' '\n'; do
     setup agent
     terminal "$answer" agent
     check 'cancel exits zero' test "$status" = 0
@@ -231,7 +231,7 @@ for INIT in systemd openrc; do
     check 'cancel manifest retained' test -f "$R/var/lib/proxycontrol-install/agent.manifest"
   done
   setup panel agent
-  terminal 'y\npurge\n' agent
+  terminal 'y\n' agent
   check 'single component purge succeeds' test "$status" = 0
   check 'shared database tool retained' test -x "$R/usr/local/lib/proxycontrol/qui-update-db"
   check 'shared state tool retained' test -x "$R/usr/local/lib/proxycontrol/qui-update-state"
@@ -247,14 +247,14 @@ for INIT in systemd openrc; do
   done
   empty=$(printf '' | sha256sum); empty=${empty%% *}
   printf '%s\n%s\n' "$empty" "$empty" >> "$R/var/lib/proxycontrol-install/agent.manifest"
-  terminal 'y\npurge\n' agent
+  terminal 'y\n' agent
   check 'tuning restore failure refused' test "$status" != 0
   check 'tuning failure data retained' test -d "$R/var/lib/proxy-agent/tuning"
   check 'tuning failure binary retained' test -x "$R/usr/local/bin/proxy-agent"
   setup agent
   mv "$R/var/lib/proxy-agent" "$R/saved"
   ln -s "$R/saved" "$R/var/lib/proxy-agent"
-  terminal 'y\npurge\n' agent
+  terminal 'y\n' agent
   check 'symlink refused' test "$status" != 0
   check 'symlink target preserved' test -d "$R/saved/tuning"
 done
@@ -276,6 +276,7 @@ for selection in agent panel all; do
   check "$selection menu shows version" grep -q fixture-version "$R/menu-output"
   if [[ $selection == agent ]]; then
     check 'agent compact menu' grep -q '^2. 卸载并清除全部数据' "$R/menu-output"
+    check 'agent menu offers start' grep -q '^3. 启动' "$R/menu-output"
     check 'agent hides owner reset' bash -c '! grep -q "修改管理员" "$1"' _ "$R/menu-output"
     choice=2
   else
@@ -294,7 +295,7 @@ for selection in agent panel all; do
       sed -i "3s/.*/${bd%% *}/" "$R/var/lib/proxycontrol-install/$c.manifest"
     fi
   done
-  for answer in 'n\n' 'y\nwrong\n'; do
+  for answer in 'n\n' '\n'; do
     status=0
     back='\n'; [[ $selection != agent ]] || back=''
     printf '%b' "$choice\n${answer}${back}0\n" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
@@ -306,14 +307,14 @@ for selection in agent panel all; do
   mv "$R/var/lib/proxy-$c" "$R/saved"
   ln -s "$R/saved" "$R/var/lib/proxy-$c"
   status=0
-  printf '%s\ny\npurge\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
+  printf '%s\ny\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
   check 'menu preserves purge failure exit' test "$status" != 0
   check 'menu preserves original purge error' grep -q 'Uninstall refused:' "$R/menu-output"
   check 'failed purge preserves data' test -d "$R/saved/tuning"
   rm "$R/var/lib/proxy-$c"
   mv "$R/saved" "$R/var/lib/proxy-$c"
   status=0
-  printf '%s\ny\npurge\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
+  printf '%s\ny\n' "$choice" | script -q -e -c "bash '$R/menu.sh'" /dev/null > "$R/menu-output" 2>&1 || status=$?
   cat "$R/menu-output"
   check "$selection menu purge exits zero" test "$status" = 0
   check 'menu purge removes registry' test ! -e "$R/var/lib/proxycontrol-install"

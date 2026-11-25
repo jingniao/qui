@@ -87,10 +87,12 @@ func (c *Control) ResetLegacyState(ctx context.Context, request *pb.LegacyStateR
 	if _, err = tx.ExecContext(ctx, "UPDATE node_identities SET certificate_pem=?,fingerprint=?,expires_at=?,revoked_at=NULL WHERE node_id=?", string(encoded), pki.Fingerprint(leaf), expiry, nodeID); err != nil {
 		return nil, err
 	}
-	for _, table := range []string{"access_batches", "traffic_batches", "traffic_pending_batches"} {
-		if _, err = tx.ExecContext(ctx, "UPDATE "+table+" SET reset_id=? WHERE node_id=? AND reset_id=''", request.ResetId, nodeID); err != nil {
-			return nil, err
-		}
+	// Only pending batches and delivery queues are read by generation. Completed
+	// access/traffic receipts keep deduplicating by (node_id,batch_id); marking
+	// every historical row here rewrote 100k+ rows inside the request and
+	// outlived the Agent's 30-second seal deadline on small panel hosts.
+	if _, err = tx.ExecContext(ctx, "UPDATE traffic_pending_batches SET reset_id=? WHERE node_id=? AND reset_id=''", request.ResetId, nodeID); err != nil {
+		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE traffic_delivery_queues SET reset_id=?,closed_at=?,recovery_id=?,updated_at=? WHERE node_id=? AND reset_id=''", request.ResetId, now, request.ResetId, now, nodeID); err != nil {
 		return nil, err

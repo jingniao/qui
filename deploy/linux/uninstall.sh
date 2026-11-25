@@ -371,8 +371,6 @@ done
 printf '同时删除组件程序、服务、helper 单元与记录内核心；最后停用并删除 proxycontrol-update-recovery 单元。\n'
 read -r -p '确认卸载并清除全部数据？[y/N] ' answer || answer=''
 [[ $answer == y ]] || { printf '已取消\n'; exit 0; }
-read -r -p '请输入 purge：' answer || answer=''
-[[ $answer == purge ]] || { printf '已取消\n'; exit 0; }
 for path in "${paths[@]}"; do
   [[ ! -L $path ]] || fail "拒绝清除符号链接：$path"
 done

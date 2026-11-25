@@ -4,19 +4,19 @@
 
 ## 当前生产环境
 
-**最近核实日期：2026-11-25 03:40 UTC。** 本轮以 Owner 提供的密钥只读排查 Agent 升级失败，并按 Owner 授权恢复三台停机节点；未升级面板。后续生产操作仍须重新实时核实运行版本、迁移头、节点与备份状态。
+**最近核实日期：2026-11-25 04:45 UTC。** 本轮按 Owner 授权排查并恢复三台停机节点，将面板升级到 1.12.2 后完成美国 CC 与德国 netcup 的旧状态重建。Owner 会话不可用，未创建或校验手工加密备份，恢复点为正式更新器的数据库保护文件。后续生产操作仍须重新实时核实运行版本、迁移头、节点与备份状态。
 
 | 项目 | 当前登记 |
 | --- | --- |
 | 服务器 / 面板地址 | `5.45.96.43`（德国 netcup，1 vCPU / 约 1 GB 内存） / `https://qui.lluu.de` |
-| 面板版本 / 迁移头 | 1.12.1 / 0165（2026-11-25 02:45 UTC 升级；`panel.db` 约 466 MB，WAL 约 157 MB） |
+| 面板版本 / 迁移头 | 1.12.2 / 0165（tag `984f332`；2026-11-25 04:39–04:41 UTC 升级；`panel.db` 约 466 MB，WAL 约 157 MB） |
 | 节点状态 | 13 个节点，11 在线、2 离线（洛杉矶 rn、香港 阿里国际*1，本轮未排查）；台湾 wap 为 1.12.0，香港 阿里国际*1 为 1.9.0，其余 1.12.1 |
-| 待完成事项 | 美国 CC、德国 netcup 旧状态重建停在 `prepared`，原 1.12.1 Agent 临时运行；面板升级到 1.12.2 后在两台依次执行 `systemctl start proxy-agent-state-reset`（或 `qui` 菜单「3. 启动」）。台湾 wap 升级前须先加 `ProtectKernelTunables=false` drop-in 并重启 Agent |
-| 最近数据库保护文件 | `/var/lib/proxy-panel/backups/pre-update-1.12.0-20261125-034511.db`（正式更新器创建） |
+| 待完成事项 | 台湾 wap 升级前须先加 `ProtectKernelTunables=false` drop-in 并重启 Agent（本轮被会话权限策略拒绝，未执行）；洛杉矶 rn、香港 阿里国际*1 离线待查 |
+| 本轮数据库保护文件 | `/var/lib/proxy-panel/backups/pre-update-1.12.1-20261125-053952.db`（正式更新器创建）；升级基线与日志在生产主机 `/root/qui-upgrade-1.12.2-20261125/` |
 | 管理员登录 | 自定义地址不入文档；Owner 登录后在「系统设置」查看，忘记时用服务器 `qui` 菜单重置（需停面板），见[说明书 §27.18](project-spec.md#2718-系统设置管理员登录地址与门户字段v154) |
 | 用户门户 | `https://qui.lluu.de/` |
 
-2026-11-25 03:00 UTC 批量升级 Agent 到 1.12.1 后，德国 netcup、美国 CC、日本 zouter升级本身成功，旧状态重建封存超时，脚本退出后 Agent 与核心停止。根因是面板封存事务逐行改写十万级历史回执，超过 Agent 30 秒期限并独占写连接，已在 [v1.12.2](releases/release-notes-1.12.2.md) 修复。处置：日本 zouter 重跑重建完成（`complete`）；美国 CC、德国 netcup 面板侧身份未变，手工启动原 Agent 与网络/调优监听后在线。台湾 wap（Proxmox LXC）因 `ProtectKernelTunables` 改变 `boot_id` 视图，自 1.10 起升级/安装均回滚，drop-in 操作本轮被会话权限策略拒绝，未执行。
+2026-11-25 03:00 UTC 批量升级 Agent 到 1.12.1 后，德国 netcup、美国 CC、日本 zouter升级本身成功，旧状态重建封存超时，脚本退出后 Agent 与核心停止。根因是面板封存事务逐行改写十万级历史回执，超过 Agent 30 秒期限并独占写连接，已在 [v1.12.2](releases/release-notes-1.12.2.md) 修复。处置：日本 zouter 重跑重建完成（`complete`）；美国 CC、德国 netcup 面板侧身份未变，先手工启动原 Agent 与网络/调优监听恢复在线。面板以 `qui-update --component panel --version 1.12.2 --yes` 升级（退出 0，服务 active、`NRestarts=0`，配置 SHA256 未变，无 `rollback.*`/`discard.*`，`/healthz` 与门户 200，13 节点状态/版本/修订与升级前一致，升级后无新增面板 WARN/ERROR）；04:43 UTC 在美国 CC、德国 netcup 依次重跑重建，各约 10 秒 `sealed → rebuilt → complete`，核心运行并连上面板，三台重建的面板重部署状态均为 `success`（美国 CC 修订 203、德国 204）。台湾 wap（Proxmox LXC）因 `ProtectKernelTunables` 改变 `boot_id` 视图，自 1.10 起升级/安装均回滚，drop-in 操作本轮被会话权限策略拒绝，未执行。
 
 此前 2026-11-24 记录：面板 1.10.1 → 1.10.4 升级（`qui-update --component panel --version 1.10.4 --yes`，数据库保护文件 `pre-update-1.10.1-20261124-032827.db`，证据在生产主机 `/root/qui-upgrade-1.10.4-20261124/`），详见 [v1.10.4 发布说明](releases/release-notes-1.10.4.md#生产面板升级)。Owner 登录操作、真实浏览器交互和真实代理请求本轮均未验证。
 

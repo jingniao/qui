@@ -2,6 +2,8 @@
 
 本页按倒序保留 v1.7.5 起的版本摘要；更早记录全文见[历史归档](archive/changelog-before-1.7.5.md)。各版门禁、失败及附件核验见对应发布说明，带日期的阶段结论按当时状态读取。当前规则见[项目说明书](project-spec.md)，验收边界见[实施决定](implementation-decisions.md)，生产运行状态见[运维手册](operations.md#当前生产环境)。
 
+**v1.12.5（2026-11-27 UTC，tag → `68f9d31`，迁移头 0166，无新迁移）** 节点策略发布只预览配置有差异的节点，提交时跳过已生效的配置。修复 Linux 更新器解析 GitHub 长响应误报缺少版本，以及 Proxmox LXC 各服务开机身份不一致导致的核心交接失败。实测德国入口经日本单服务器及按名称匹配的服务器组出站。GitHub Release 于 17:31:27 UTC 发布，共 13 个附件。[发布说明](releases/release-notes-1.12.5.md)
+
 **v1.12.3（2026-11-25 UTC，tag → `9a6d731`，迁移头 0165，无新迁移）** 修复入站出口 IP 草稿保存。Agent 上报运行修订的出口地址或网卡缺失，面板显示告警。支持 `panel_exempt` 的 host-network helper 豁免面板控制连接。GitHub Release 于 10:08:50 UTC 发布，共 13 个附件。同提交的 GitHub Check 成功，Linux 完整门禁未找到记录。[发布说明](releases/release-notes-1.12.3.md)
 
 **v1.12.2（2026-11-25 UTC，tag → `984f332`，迁移头 0165，无新迁移）**：面板旧状态重建封存不再逐行改写节点全部历史访问/流量回执，只标记待处理批次与投递队列，修复十万级回执节点超出 Agent 30 秒封存期限并长时间独占写连接；封存失败时重建脚本恢复旧 Agent。`proxy-agent.service` 去掉 `ProtectKernelTunables`，修复 LXC 中 `boot_id` 视图不一致导致核心交接恒失败。仅装 Agent 的 `qui` 菜单新增「3. 启动」（可继续未完成的重建），彻底卸载不再要求输入 purge。Linux 完整门禁 check 1041 秒、真实核心 425 秒首轮通过，GitHub check 45541937684 成功。同日生产面板升级到 1.12.2，日本 zouter、美国 CC、德国 netcup 旧状态重建均完成（后两台各约 10 秒），台湾 wap drop-in 未执行，见[发布说明](releases/release-notes-1.12.2.md)。

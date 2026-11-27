@@ -13,7 +13,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# The probe receipt written after applying settings also uses this boot identity.
+# Match the boot identity the Agent uses to validate tuning receipts.
 BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id
 # This operation writes sysctls; ProtectKernelTunables=true would prevent it.
 ProtectKernelTunables=false

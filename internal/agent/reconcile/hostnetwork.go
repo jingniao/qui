@@ -87,6 +87,23 @@ func (r *Reconciler) applyHostNetwork(ctx context.Context, state desiredstate.St
 	return sync(ctx, value)
 }
 
+// restoreCurrentHostNetwork undoes an early host-network update without
+// disturbing the previous core, which may still be serving the old revision.
+func (r *Reconciler) restoreCurrentHostNetwork(ctx context.Context) error {
+	var state desiredstate.State
+	if r.manifest.Revision > 0 {
+		data, err := r.readRevision(r.manifest.Revision)
+		if err != nil {
+			return err
+		}
+		state, err = desiredstate.Decode(data)
+		if err != nil {
+			return err
+		}
+	}
+	return r.applyHostNetwork(ctx, state)
+}
+
 // collectPortHops mirrors the enabled Hysteria2 hop inbounds of one revision
 // into the helper's second table. A hop range has no listener of its own: the
 // target is the inbound's real listening port.
@@ -166,6 +183,19 @@ func (r *Reconciler) syncHostNetworkState(ctx context.Context, state desiredstat
 		ExemptIPv4: exemptAddress(network.OutboundSourceIP, 4),
 		ExemptIPv6: exemptAddress(network.OutboundSourceIP, 6),
 		PortHops:   r.HostNetworkPortHops,
+	}
+	if state.NeedsForcedEgress() {
+		status, err := hostnet.ReadStatus(directory)
+		if err != nil {
+			return fmt.Errorf("read the managed egress host-network helper status: %w", err)
+		}
+		if !slices.Contains(status.Features, hostnet.FeatureForcedEgress) {
+			return errors.New("the host-network helper lacks managed egress support; update the Agent services")
+		}
+		if err := hostnet.CheckForcedEgressMark(); err != nil {
+			return err
+		}
+		desired.ForcedEgress = true
 	}
 	desired.ExtraExemptIPv4, desired.ExtraExemptIPv6 = desiredstate.ExtraHostExemptions(state)
 	for _, family := range hostNetworkFamilies(network) {

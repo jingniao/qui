@@ -70,25 +70,25 @@ func recoveryFixture(t *testing.T) *fixture {
 	c.NodeIdentityDirectory = filepath.Join(root, "identity")
 	owner, err := panelstore.Try(c.Database, c.NodeIdentityDirectory)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("lock panel store: %v", err)
 	}
 	t.Cleanup(func() { owner.Close() })
 	c.Database, c.NodeIdentityDirectory = owner.Database, owner.IdentityDirectory
 	database, err := dbtest.Open(ctx, c.Database)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open panel database: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
 	key, err := vault.Open(filepath.Join(c.NodeIdentityDirectory, "configuration.key"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open configuration vault: %v", err)
 	}
 	authority, err := pki.LoadOrCreate(c.NodeIdentityDirectory)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("load node certificate authority: %v", err)
 	}
 	if _, err := authority.DevelopmentServer(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("create development server certificate: %v", err)
 	}
 	systems := &system.Repository{Database: database}
 	admins := &auth.Repository{Database: database}
@@ -193,7 +193,7 @@ func recoveryFixture(t *testing.T) *fixture {
 	}
 	created, err := f.source.Create(ctx, filepath.Join(root, "backups"), "snapshot_restore_001", "owner", recoveryPassword)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create backup: %v", err)
 	}
 	if _, err := database.Exec("DELETE FROM backup_file_ops"); err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func recoveryFixture(t *testing.T) *fixture {
 	target := archive.RestoreTarget{Panel: c, ConfigurationPath: filepath.Join(root, "panel.yaml")}
 	f.prepared, err = archive.PrepareRestore(ctx, filepath.Join(root, "stages"), filepath.Join(root, "backups", created.Manifest.ID+".pcb"), recoveryPassword, target)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("prepare backup for restore: %v", err)
 	}
 	return f
 }
@@ -217,6 +217,56 @@ func (f *fixture) record(t *testing.T, id string, upload, download int64) {
 		t.Fatal(err)
 	}
 	f.latest = batch
+}
+
+func TestRestoreCandidateNeedsNoStartupIdentityWrites(t *testing.T) {
+	f := recoveryFixture(t)
+	ctx := context.Background()
+	u, err := f.users.Save(ctx, "", user.Input{Username: "after_backup", DisplayName: "New account", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	database.SetMaxOpenConns(1)
+	if _, err := database.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
+		t.Fatal(err)
+	}
+	repo := &user.Repository{Database: database, Vault: f.source.ConfigurationVault}
+	if ids, err := repo.GrantAllProtocols(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("read-only startup tried to grant protocols: %v %v", ids, err)
+	}
+	if ids, err := repo.EnsureAllAccessIdentities(ctx); err != nil || len(ids) != 0 {
+		t.Fatalf("read-only startup tried to repair identities: %v %v", ids, err)
+	}
+	assertText(t, database, "SELECT status FROM users WHERE id=?", "disabled", u.ID)
+	assertText(t, database, "SELECT status FROM devices WHERE user_id=?", "active", u.ID)
+}
+
+func TestRestoreBackupTakenBeforeManualTrafficReset(t *testing.T) {
+	f := recoveryFixture(t)
+	ctx := context.Background()
+	if err := f.users.ResetTraffic(ctx, f.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := PrepareDatabase(ctx, f.owner, f.source, f.prepared, recoveryPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := dbtest.Open(ctx, filepath.Join(candidate.Directory, "database", "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	assertInt(t, database, "SELECT used_traffic FROM users WHERE id=?", 0, f.user.ID)
+	assertInt(t, database, "SELECT used_traffic FROM devices WHERE id=?", 0, f.device.ID)
 }
 
 func TestDatabaseRecoveryPreservesNewUsageReceiptsRevocationsAndDraftSnapshot(t *testing.T) {

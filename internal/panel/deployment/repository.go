@@ -192,6 +192,32 @@ func (r *Repository) PublishedWithIntent(ctx context.Context, nodeID string) (de
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}
+	return r.stateWithInboundIntent(ctx, revision)
+}
+
+// QuotaBaseline reads the applied revision and its tunnel reservation together.
+// An Agent can report success before the corresponding relay targets are
+// finalized. That revision cannot yet be combined with the credential view.
+func (r *Repository) QuotaBaseline(ctx context.Context, nodeID string) (desiredstate.State, []string, error) {
+	var revision sql.NullInt64
+	var reserved bool
+	err := r.Database.QueryRowContext(ctx, `SELECT
+		(SELECT revision FROM node_runtime_state WHERE node_id=?),
+		EXISTS(SELECT 1 FROM deployment_batches b,json_each(b.tunnel_publication_json,'$.nodes') n
+			WHERE b.tunnel_finalized=0 AND n.value=?)`, nodeID, nodeID).Scan(&revision, &reserved)
+	if err != nil {
+		return desiredstate.State{}, nil, err
+	}
+	if reserved {
+		return desiredstate.State{}, nil, ErrNodeBusy
+	}
+	if !revision.Valid {
+		return desiredstate.State{}, nil, sql.ErrNoRows
+	}
+	return r.stateWithInboundIntent(ctx, revision.Int64)
+}
+
+func (r *Repository) stateWithInboundIntent(ctx context.Context, revision int64) (desiredstate.State, []string, error) {
 	state, err := r.State(ctx, revision)
 	if err != nil {
 		return desiredstate.State{}, nil, err
@@ -223,6 +249,17 @@ func (r *Repository) AppliedState(ctx context.Context, nodeID string, revision i
 	return state, err
 }
 func (r *Repository) Deploy(ctx context.Context, id int64) error {
+	return r.deploy(ctx, id, nil)
+}
+
+var ErrPublishedBaselineChanged = errors.New("published baseline changed before deployment")
+
+// DeployFromBaseline queues an automatic revision only while its published base is current.
+func (r *Repository) DeployFromBaseline(ctx context.Context, id, expected int64) error {
+	return r.deploy(ctx, id, &expected)
+}
+
+func (r *Repository) deploy(ctx context.Context, id int64, expected *int64) error {
 	state, err := r.State(ctx, id)
 	if err != nil {
 		return err
@@ -249,6 +286,15 @@ func (r *Repository) Deploy(ctx context.Context, id int64) error {
 	}
 	if err := nodeAvailable(ctx, tx, state.NodeID, ""); err != nil {
 		return err
+	}
+	if expected != nil {
+		var published int64
+		if err := tx.QueryRowContext(ctx, "SELECT coalesce((SELECT revision FROM node_runtime_state WHERE node_id=?),0)", state.NodeID).Scan(&published); err != nil {
+			return err
+		}
+		if published != *expected {
+			return ErrPublishedBaselineChanged
+		}
 	}
 	if err := validateStateCoresTx(ctx, tx, state); err != nil {
 		return err

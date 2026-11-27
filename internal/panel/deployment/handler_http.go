@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"proxycontrol/internal/panel/auth"
 	"proxycontrol/internal/panel/node"
+	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/platform/httpapi"
 	"proxycontrol/pkg/contracts/desiredstate"
 	"strconv"
@@ -148,6 +149,19 @@ func (h *Handler) publishNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := auth.Actor(r.Context()).Username
+	if planner, ok := h.Proxy.(interface {
+		ServerEgressSnapshots(context.Context, string, proxy.AccessReader, func(context.Context, string) (desiredstate.State, []string, error)) ([]proxy.NodeSnapshot, error)
+	}); ok && h.Users != nil {
+		snapshots, err := planner.ServerEgressSnapshots(r.Context(), nodeID, h.Users, h.Repository.PublishedWithIntent)
+		if err != nil {
+			h.fail(w, &apiFailure{Status: 409, Code: "server_egress_preflight_failed", Message: err.Error()})
+			return
+		}
+		if len(snapshots) != 0 {
+			h.publishServerEgress(w, r, nodeID, body.Summary, actor, snapshots)
+			return
+		}
+	}
 	revision, err := h.createProxyRevision(r.Context(), nodeID, body.Summary, actor)
 	if err != nil {
 		h.fail(w, err)
@@ -162,6 +176,27 @@ func (h *Handler) publishNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.JSON(w, 202, map[string]any{"revision": revision.ID, "status": "pending"})
+}
+
+func (h *Handler) publishServerEgress(w http.ResponseWriter, r *http.Request, entryID, summary, actor string, snapshots []proxy.NodeSnapshot) {
+	publisher := CanvasPublisher{Repository: h.Repository}
+	result, err := publisher.PublishCanvas(r.Context(), summary, actor, snapshots)
+	if err != nil {
+		h.fail(w, &apiFailure{Status: 409, Code: "server_egress_unavailable", Message: err.Error()})
+		return
+	}
+	for _, item := range result.Nodes {
+		if item.NodeID != entryID {
+			continue
+		}
+		if err := h.Audit.Record(r.Context(), actor, "发布节点策略服务器出站", entryID, "成功", r.RemoteAddr); err != nil {
+			h.fail(w, err)
+			return
+		}
+		httpapi.JSON(w, http.StatusAccepted, map[string]any{"revision": item.Revision, "status": item.Status, "batchId": result.BatchID})
+		return
+	}
+	h.fail(w, errors.New("server egress publication has no entry revision"))
 }
 
 // deployRevision hands a stored revision to the node's Agent. The revision

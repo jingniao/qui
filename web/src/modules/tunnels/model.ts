@@ -4,7 +4,7 @@ export const publishStatuses = {
   draft: { label: '草稿', status: 'draft' }, modified: { label: '已修改', status: 'pending' },
   needs_publish: { label: '待发布', status: 'pending' }, published: { label: '已发布', status: 'success' },
 };
-export const resultLabels = { publishing: '发布中', applied: '已应用', unchanged: '无变更', failed: '失败', rolled_back: '已回滚', skipped: '已跳过' };
+export const resultLabels = { publishing: '发布中', applied: '已应用', unchanged: '无变更', failed: '失败', rolled_back: '已回滚', rollback_failed: '回滚失败', skipped: '已跳过' };
 export function routeLabel(tunnel: Pick<Tunnel, 'hops'>) { return tunnel.hops.map(hop => hop.nodeName).join(' → '); }
 export function endpoint(host: string, port: number) { return `${host.includes(':') ? `[${host}]` : host}:${port}`; }
 export function ruleTargetLabel(target: TunnelRule['target']) {

@@ -52,7 +52,7 @@ func (r *Repository) PrepareRestoreTx(ctx context.Context, tx *sql.Tx) error {
 	for _, item := range []struct{ table, columns string }{
 		{"deployment_targets", "revision,node_id,status,result_code,updated_at"},
 		{"deployment_batches", "id,chain_id,name,author,status,created_at,tunnel_publication_json,tunnel_finalized"},
-		{"deployment_batch_items", "batch_id,position,node_id,revision,previous_revision,status,rollback_command_id"},
+		{"deployment_batch_items", "batch_id,position,node_id,revision,previous_revision,status,rollback_command_id,expected_previous_revision"},
 		{"deployment_commands", "id,node_id,revision,operation,status,result_code,created_at"},
 		{"node_runtime_state", "node_id,revision"},
 	} {

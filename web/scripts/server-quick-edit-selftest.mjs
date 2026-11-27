@@ -5,13 +5,18 @@ import { reactive, ref } from 'vue';
 import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/modules/nodes/components/ServerQuickEdit.vue', import.meta.url), 'utf8');
+const modelSource = readFileSync(new URL('../src/modules/nodes/components/serverListModel.ts', import.meta.url), 'utf8');
 const drawerSource = readFileSync(new URL('../src/components/FormDrawer.vue', import.meta.url), 'utf8');
 function functionSource(source, name) {
   const result = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?^}`, 'm'))?.[0];
   assert.ok(result, `${name} exists`);
   return result;
 }
-const functions = ['openEditDrawer', 'saveEdit'].map(name => functionSource(source, name)).join('\n');
+const functions = [
+  functionSource(modelSource, 'editedNodeMeta'),
+  functionSource(source, 'openEditDrawer'),
+  functionSource(source, 'saveEdit'),
+].join('\n');
 const code = ts.transpileModule(`${functions}\nreturn { openEditDrawer, saveEdit };`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 }).outputText;
@@ -22,6 +27,12 @@ function savingEditor() {
   const pending = new Promise(resolve => { resume = resolve; });
   const nodeA = { id: 'A', name: 'Server A', enabled: true, allowSubscription: true, maintenance: false };
   const nodeB = { ...nodeA, id: 'B', name: 'Server B' };
+  const editBaseline = {
+    name: nodeA.name, region: 'A', remark: '', renewDate: '',
+    renewCurrency: 'CNY', renewPrice: '', renewCycle: '/年',
+    enabled: nodeA.enabled, allowSubscription: nodeA.allowSubscription,
+    maintenance: nodeA.maintenance, autoRenew: false, tags: [],
+  };
   const editForm = reactive({
     name: 'Edited A', region: ' JP ', remark: ' A note ', renewDate: '2027-01-01',
     renewCurrency: 'USD', renewPrice: '20', renewCycle: '/月',
@@ -46,7 +57,7 @@ function savingEditor() {
     addressChanges: (before, after) => before.connectHost === after.connectHost ? {} : { connectHost: after.connectHost },
     mergeLatestEditForm: () => {}, showToast: () => {}, emit: () => {}, APIError: class extends Error {},
   };
-  const prelude = `let loadToken = 0;\nlet machineBaseline = ${JSON.stringify(traffic)};\nlet connectionBaseline = { connectHost: '', portRange: '' };`;
+  const prelude = `let loadToken = 0;\nlet machineBaseline = ${JSON.stringify(traffic)};\nlet connectionBaseline = { connectHost: '', portRange: '' };\nlet editBaseline = ${JSON.stringify(editBaseline)};`;
   const editor = new Function(...Object.keys(state), `${prelude}\n${code}`)(...Object.values(state));
   return { ...state, ...editor, requests, resume, nodeB };
 }

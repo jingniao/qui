@@ -7,6 +7,8 @@
       :description="description"
     >
       <template #actions>
+        <button v-if="isOwner && egressGroups.length" type="button" class="ios-btn-secondary" @click="egressGroupsVisible = true">管理出站服务器组</button>
+        <button v-if="isOwner" type="button" class="ios-btn-secondary" @click="openEgressGroup(null)">新建出站服务器组</button>
         <router-link to="/routing/rules/new" class="ios-btn-primary inline-flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -23,21 +25,6 @@
         </button>
       </template>
     </PageHeader>
-
-    <!-- Important Notice Banner -->
-    <div class="p-4 rounded-2xl bg-ios-blue/[0.06] border border-ios-blue/15 space-y-2">
-      <div class="flex items-center gap-2 text-ios-blue font-semibold text-xs tracking-wide">
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>节点端分流与网站控制生效规范</span>
-      </div>
-      <p class="text-xs text-neutral-600 leading-relaxed">
-        • <strong>已合并功能</strong>：原“分流规则”与“网站控制”已整合为统一的“节点策略”，由服务器内核（Xray / Sing-box）集中执行。<br />
-        • <strong>服务器直连 (Direct)</strong>：由服务器节点直接发起外部出站访问，与用户设备端的“客户端直连”严格区分。<br />
-        • <strong>Agent 发布生效机制</strong>：此处保存的修改为配置草稿，生成配置版本并发布到各节点后生效；Agent 不会自动拉取草稿。
-      </p>
-    </div>
 
     <!-- Search Bar -->
     <form @submit.prevent="search" class="flex flex-wrap items-center gap-3">
@@ -124,7 +111,7 @@
               <span>{{ actionNames[rule.action.type] || rule.action.type }}</span>
             </span>
             <p v-if="rule.action.target_id" class="text-xs text-ios-secondary mt-1 font-mono font-medium truncate max-w-[180px]">
-              ↳ {{ targetName(rule.action.target_id) }}
+              ↳ {{ targetName(rule.action.type, rule.action.target_id) }}
             </p>
           </td>
 
@@ -167,11 +154,34 @@
       @confirm="execute"
     />
 
+    <AppDialog v-if="egressGroupsVisible" v-model="egressGroupsVisible" title="管理出站服务器组">
+      <ul class="divide-y divide-black/[0.06]">
+        <li v-for="group in egressGroups" :key="group.id" class="flex items-center gap-3 py-2 text-sm">
+          <div class="min-w-0 flex-1">
+            <p class="break-words font-semibold">{{ group.name }}</p>
+            <p class="break-all text-xs text-ios-secondary">
+              {{ group.serverIds.length }} 台手选服务器<span v-if="group.namePattern"> · 正则 {{ group.namePattern }}</span>
+            </p>
+          </div>
+          <button type="button" :disabled="egressGroupDeleting" class="ios-action-btn-secondary" @click="openEgressGroup(group)">编辑</button>
+          <button type="button" :disabled="egressGroupDeleting" class="ios-action-btn-danger" @click="confirmEgressGroupDeletion(group)">删除</button>
+        </li>
+      </ul>
+      <p v-if="!egressGroups.length" class="text-sm text-ios-secondary">暂无出站服务器组。</p>
+    </AppDialog>
+    <ServerEgressGroupDialog v-if="egressGroupVisible" :group="editingEgressGroup" @close="closeEgressGroup" @saved="egressGroupSaved" />
+    <ConfirmDialog
+      v-model="confirmEgressGroupDelete"
+      title="删除出站服务器组"
+      :message="`删除出站服务器组「${deletingEgressGroup?.name || ''}」？组仍被节点策略引用时无法删除。`"
+      @confirm="deleteEgressGroup"
+    />
+
     <!-- Publish to nodes -->
     <AppDialog
       v-model="publishVisible"
       title="发布到节点"
-      description="按各节点当前已保存的入站、出站、出口组、代理链与分流规则生成配置版本并发布，节点确认后生效。"
+      description="按当前已保存的配置和节点策略生成版本。涉及远端出站时，先向目标服务器发布，入口服务器确认后生效。"
       confirm-text="开始发布"
       :loading="publishLoading"
       @confirm="runPublish"
@@ -190,7 +200,7 @@
       <div v-if="publishResults.length" class="space-y-1.5 border-t border-black/[0.06] pt-3">
         <p v-for="result in publishResults" :key="result.nodeId" class="text-xs">
           <span class="font-medium text-ios-label">{{ result.name }}</span>
-          <span class="ml-2" :class="result.ok ? 'text-ios-green' : 'text-ios-red'">{{ result.message }}</span>
+          <span class="ml-2" :class="{ pending: 'text-ios-secondary', success: 'text-ios-green', failed: 'text-ios-red', unconfirmed: 'text-ios-orange' }[result.status]">{{ result.message }}</span>
         </p>
       </div>
     </AppDialog>
@@ -199,12 +209,15 @@
 
 <script setup lang="ts">
 import { readTogether } from '../../../app/readTogether';
+import { APIError } from '../../../app/apiClient';
 import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
-import { ref, onMounted } from 'vue';
-import { policyAPI, input, actionNames, type PolicyRecord, type ServiceSet } from '../api';
+import { reactive, ref, onMounted, onUnmounted } from 'vue';
+import { policyAPI, serverEgressGroupAPI, input, actionNames, type PolicyRecord, type ServerEgressGroup, type ServiceSet } from '../api';
 import { proxyAPI, type Outbound, type OutboundGroup, type ProxyChain, choices } from '../../proxy/api';
-import { nodeAPI } from '../../nodes/api';
-import { deploymentAPI } from '../../system/deploymentApi';
+import { nodeAPI, type NodeView } from '../../nodes/api';
+import { deploymentAPI, type NodePublication } from '../../system/deploymentApi';
+import { publishWatchTimeout } from '../../system/publishProgress';
+import { revisionResult } from '../../system/revisionResult';
 import { showToast } from '../../../app/api';
 import { isOwner } from '../../../app/auth';
 import PageHeader from '../../../components/PageHeader.vue';
@@ -213,6 +226,7 @@ import Pagination from '../../../components/Pagination.vue';
 import StatusBadge from '../../../components/StatusBadge.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import AppDialog from '../../../components/AppDialog.vue';
+import ServerEgressGroupDialog from '../components/ServerEgressGroupDialog.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import LoadingSkeleton from '../../../components/LoadingSkeleton.vue';
@@ -224,7 +238,7 @@ withDefaults(
   }>(),
   {
     title: '节点策略',
-    description: '合并管理服务器端（Xray / Sing-box）的分流规则与访问控制。通过 Agent 发布到服务器，支持指定用户、节点、直连、阻断、出站与代理链。'
+    description: '管理服务器端的分流规则和访问控制，支持指定服务器或服务器组出站。'
   }
 );
 
@@ -233,6 +247,8 @@ const chains = ref<ProxyChain[]>([]);
 const rules = ref<PolicyRecord[]>([]);
 const services = ref<ServiceSet[]>([]);
 const outbounds = ref<Outbound[]>([]);
+const servers = ref<NodeView[]>([]);
+const egressGroups = ref<ServerEgressGroup[]>([]);
 const total = ref(0);
 const page = ref(1);
 const keyword = ref('');
@@ -242,7 +258,9 @@ const target = ref<PolicyRecord | null>(null);
 const operation = ref('');
 const confirmVisible = ref(false);
 
-function targetName(id: string) {
+function targetName(type: string, id: string) {
+  if (type === 'ServerEgress') return servers.value.find(server => server.id === id)?.name || id;
+  if (type === 'ServerEgressGroup') return egressGroups.value.find(group => group.id === id)?.name || id;
   return (
     outbounds.value.find(item => item.id === id)?.name ||
     outboundGroups.value.find(item => item.id === id)?.name ||
@@ -287,8 +305,10 @@ function getActionBadgeClass(type: string): string {
     case 'Block':
       return 'bg-red-50 text-red-600';
     case 'Outbound':
+    case 'ServerEgress':
       return 'bg-blue-50 text-ios-blue';
     case 'OutboundGroup':
+    case 'ServerEgressGroup':
       return 'bg-purple-50 text-purple-700';
     case 'ProxyChain':
       return 'bg-amber-50 text-amber-700';
@@ -304,8 +324,10 @@ function getActionDotClass(type: string): string {
     case 'Block':
       return 'bg-red-500';
     case 'Outbound':
+    case 'ServerEgress':
       return 'bg-ios-blue';
     case 'OutboundGroup':
+    case 'ServerEgressGroup':
       return 'bg-purple-500';
     case 'ProxyChain':
       return 'bg-amber-500';
@@ -321,12 +343,14 @@ async function load() {
   const current = ++generation;
   loading.value = true; error.value = '';
   try {
-    const [result, sets, outs, gs, cs] = await readTogether([
+    const [result, sets, outs, gs, cs, serverChoices, egress] = await readTogether([
       policyAPI.list(page.value, keyword.value),
       policyAPI.services(1, 100),
       proxyAPI.outbounds('', 1, 100),
       choices((p, s) => proxyAPI.groups('', p, s)),
-      choices((p, s) => proxyAPI.chains('', p, s))
+      choices((p, s) => proxyAPI.chains('', p, s)),
+      choices((p, size) => nodeAPI.choices(p, '', size)),
+      serverEgressGroupAPI.list()
     ]);
     if (current !== generation) return;
     display.ready = true; rules.value = result.items;
@@ -335,6 +359,8 @@ async function load() {
     outbounds.value = outs.items;
     outboundGroups.value = gs;
     chains.value = cs;
+    servers.value = serverChoices;
+    egressGroups.value = egress;
     error.value = '';
   } catch (e) {
     if (current === generation) { display.reject(e); error.value = (e as Error).message; }
@@ -378,18 +404,65 @@ async function execute() {
 
 // ----------------- Publish to nodes -----------------
 interface PublishChoice { id: string; name: string; checked: boolean; }
-interface PublishResult { nodeId: string; name: string; ok: boolean; message: string; }
+interface PublishOutcome { status: 'pending' | 'success' | 'failed' | 'unconfirmed'; message: string; }
+interface PublishResult extends PublishOutcome { nodeId: string; name: string; }
+
+const egressGroupVisible = ref(false);
+const egressGroupsVisible = ref(false);
+const editingEgressGroup = ref<ServerEgressGroup | null>(null);
+const deletingEgressGroup = ref<ServerEgressGroup | null>(null);
+const confirmEgressGroupDelete = ref(false);
+const egressGroupDeleting = ref(false);
+
+function openEgressGroup(group: ServerEgressGroup | null) {
+  editingEgressGroup.value = group;
+  egressGroupsVisible.value = false;
+  egressGroupVisible.value = true;
+}
+
+function closeEgressGroup() {
+  egressGroupVisible.value = false;
+  if (editingEgressGroup.value) egressGroupsVisible.value = true;
+}
+
+async function egressGroupSaved(group: ServerEgressGroup) {
+  showToast(editingEgressGroup.value ? '出站服务器组已更新' : '已创建出站服务器组');
+  egressGroups.value = [...egressGroups.value.filter(item => item.id !== group.id), group];
+  closeEgressGroup();
+  await load();
+}
+
+function confirmEgressGroupDeletion(group: ServerEgressGroup) {
+  deletingEgressGroup.value = group;
+  confirmEgressGroupDelete.value = true;
+}
+
+async function deleteEgressGroup() {
+  const group = deletingEgressGroup.value;
+  if (!group) return;
+  egressGroupDeleting.value = true;
+  try {
+    await serverEgressGroupAPI.delete(group.id);
+    egressGroups.value = egressGroups.value.filter(item => item.id !== group.id);
+    showToast('已删除出站服务器组');
+    await load();
+  } catch (e) {
+    showToast((e as Error).message, 'error');
+  } finally {
+    deletingEgressGroup.value = null;
+    egressGroupDeleting.value = false;
+  }
+}
 
 const publishVisible = ref(false);
 const publishLoading = ref(false);
 const publishNodes = ref<PublishChoice[]>([]);
 const publishResults = ref<PublishResult[]>([]);
+let mounted = true;
 
-// Saving a strategy only writes a draft. Publishing renders each node's saved
-// configuration and hands it to that node's Agent in one step, one node at a
-// time, so a failure on one node still lets the rest continue.
 async function openPublish() {
   publishVisible.value = true;
+  if (publishLoading.value) return;
   publishResults.value = [];
   publishNodes.value = [];
   try {
@@ -408,6 +481,39 @@ async function openPublish() {
   }
 }
 
+async function waitForPublication(nodeId: string, publication: NodePublication): Promise<PublishOutcome> {
+  const { revision, batchId } = publication;
+  const deadline = Date.now() + publishWatchTimeout;
+  while (mounted && Date.now() < deadline) {
+    if (batchId) {
+      const { status } = await deploymentAPI.batch(batchId);
+      switch (status) {
+        case 'success': return { status: 'success', message: `配置 #${revision} 已生效` };
+        case 'failed': return { status: 'failed', message: `批次发布失败，配置 #${revision}` };
+        case 'rolled_back': return { status: 'failed', message: `批次已回滚，配置 #${revision}` };
+        case 'rollback_failed': return { status: 'unconfirmed', message: `批次回滚失败，仍可能占用服务器。批次 ${batchId}` };
+        case 'deploying':
+        case 'rolling_back': break;
+        default: return { status: 'unconfirmed', message: `批次 ${batchId} 状态未确认（${status}）` };
+      }
+    } else {
+      const { items } = await deploymentAPI.nodeRevisions(nodeId);
+      const record = items.find(item => item.id === revision);
+      switch (record?.status) {
+        case 'success': return { status: 'success', message: `配置 #${revision} 已生效` };
+        case 'failed':
+          return { status: record.resultCode === 'rollback_failed' ? 'unconfirmed' : 'failed', message: `配置 #${revision}：${revisionResult(record.resultCode || 'failed')}` };
+        case 'rollback':
+        case 'rolled_back': return { status: 'failed', message: `配置 #${revision} 已回滚` };
+        case 'pending': break;
+        default: return { status: 'unconfirmed', message: `配置 #${revision} 状态未确认` };
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  return { status: 'unconfirmed', message: `${batchId ? `批次 ${batchId}` : `配置 #${revision}`} 暂未确认，等待超时` };
+}
+
 async function runPublish() {
   if (publishLoading.value) return;
   const selected = publishNodes.value.filter(item => item.checked);
@@ -417,18 +523,49 @@ async function runPublish() {
   }
   publishLoading.value = true;
   publishResults.value = [];
-  for (const item of selected) {
-    try {
-      const result = await deploymentAPI.publishNode(item.id, '发布节点策略');
-      publishResults.value.push({ nodeId: item.id, name: item.name, ok: true, message: `成功 #${result.revision}` });
-    } catch (e) {
-      publishResults.value.push({ nodeId: item.id, name: item.name, ok: false, message: `失败: ${(e as Error).message}` });
+  try {
+    for (const item of selected) {
+      if (!mounted) return;
+      item.checked = false;
+      const feedback = reactive<PublishResult>({
+        nodeId: item.id, name: item.name, status: 'pending', message: '正在提交发布'
+      });
+      publishResults.value.push(feedback);
+      let publication: NodePublication | undefined;
+      try {
+        publication = await deploymentAPI.publishNode(item.id, '发布节点策略');
+        feedback.message = `配置 #${publication.revision} 已提交，等待服务器确认`;
+        // A submitted batch can reserve the next selected server as a target.
+        // Continue only after a terminal outcome that releases its reservations.
+        if (selected.length > 1) {
+          Object.assign(feedback, await waitForPublication(item.id, publication));
+        }
+      } catch (e) {
+        if (!publication && e instanceof APIError && e.code === 'server_egress_preflight_failed') {
+          feedback.status = 'failed';
+          feedback.message = `发布未提交：${e.message}`;
+        } else {
+          feedback.status = 'unconfirmed';
+          feedback.message = publication ? `无法确认配置 #${publication.revision}：${(e as Error).message}` : `发布请求未确认：${(e as Error).message}`;
+        }
+      }
+      if (feedback.status === 'unconfirmed') break;
     }
+    if (!mounted) return;
+    const succeeded = publishResults.value.filter(result => result.status === 'success').length;
+    if (publishResults.value.some(result => result.status === 'unconfirmed')) {
+      const remaining = selected.length - publishResults.value.length;
+      showToast(remaining ? `发布已暂停，后续 ${remaining} 个节点未提交。请先确认当前发布结果` : '发布结果未确认，请查看配置记录', 'error');
+    } else if (selected.length === 1 && publishResults.value[0]?.status === 'pending') {
+      showToast('已提交发布，等待服务器确认');
+    } else {
+      showToast(`已确认生效 ${succeeded}/${selected.length} 个节点`, succeeded === selected.length ? 'success' : 'error');
+    }
+  } finally {
+    publishLoading.value = false;
   }
-  publishLoading.value = false;
-  const succeeded = publishResults.value.filter(result => result.ok).length;
-  showToast(`已发布 ${succeeded}/${selected.length} 个节点，节点确认后生效`, succeeded === selected.length ? 'success' : 'error');
 }
 
 onMounted(load);
+onUnmounted(() => { mounted = false; });
 </script>

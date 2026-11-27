@@ -302,8 +302,8 @@ test('review: deleting the last row on page two reloads page one and preserves a
         if (reads.length === 1) return { items, total: 20 + visible };
         throw new Error('offline');
       }
-    } }, 'page,total,services,target,remove,load,error,display');
-    p.page.value = 2; await p.load(); p.target.value = { id: '0' };
+    } }, 'page,pageSize,total,services,target,remove,load,error,display');
+    p.pageSize.value = 20; p.page.value = 2; await p.load(); p.target.value = { id: '0' };
     await p.remove();
     assert.deepEqual(reads, [2, expectedPage]); assert.equal(p.page.value, expectedPage);
     assert.equal(p.error.value, 'offline');

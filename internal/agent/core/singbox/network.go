@@ -3,6 +3,7 @@ package singbox
 import (
 	"errors"
 	"net/netip"
+	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -26,9 +27,16 @@ type domainResolver struct {
 // loopback address) cannot be reached from the pinned source address and fails
 // to connect.
 func applyOutboundSource(doc *document, state desiredstate.State) error {
+	forced := state.NeedsForcedEgress()
 	// Outbound tags are the desired outbound IDs (group members are referenced,
 	// not copied), so each outbound looks up its own binding by tag.
 	dial := func(outbound *outbound) error {
+		if outbound.useHostNetwork {
+			if forced {
+				outbound.RoutingMark = hostnet.ForcedEgressMark
+			}
+			return nil
+		}
 		network := state.OutboundNetwork(outbound.Tag)
 		if outbound.egressSourceIP != "" {
 			network = desiredstate.Network{OutboundSourceIP: outbound.egressSourceIP}

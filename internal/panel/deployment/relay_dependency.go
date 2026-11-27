@@ -22,6 +22,14 @@ func relayDependency(outbound desiredstate.Outbound, target desiredstate.State) 
 		if !inbound.Enabled || inbound.Protocol != outbound.Protocol || inbound.Port != outbound.Port || inbound.SubscriptionVisible {
 			continue
 		}
+		if inbound.InternalRelay {
+			listen, listenErr := netip.ParseAddr(inbound.Listen)
+			target, targetErr := netip.ParseAddr(outbound.Address)
+			if listenErr != nil || targetErr != nil || listen.Unmap().Is4() != target.Unmap().Is4() {
+				reason = "internal_inbound_address_family_mismatch"
+				continue
+			}
+		}
 		reason = "internal_credential_missing"
 		for _, credentialID := range inbound.CredentialIDs {
 			if credentialID != outbound.CredentialID {

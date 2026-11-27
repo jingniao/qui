@@ -167,7 +167,7 @@ func (s *Service) prepareTunnelPublication(ctx context.Context, selection Publis
 	}
 	snapshots := []NodeSnapshot{}
 	for _, server := range p.view.Servers {
-		state, intent, e := s.SnapshotIntent(ctx, server.NodeID, users)
+		state, intent, e := s.snapshotIntent(ctx, server.NodeID, users, p.relayTargets)
 		if e != nil {
 			return p, batchID, nil, e
 		}

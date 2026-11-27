@@ -14,7 +14,7 @@ import (
 )
 
 type UserAccess interface {
-	AccessForGroups(context.Context, []string) ([]user.Access, error)
+	AccessForGroups(context.Context, []string, map[string]string) ([]user.Access, error)
 }
 type UserAccessInput struct {
 	NodeID   string `json:"nodeId"`
@@ -82,11 +82,11 @@ func (h *Handler) EnsureUserAccess(ctx context.Context, input UserAccessInput) (
 	if node.CoreOptional(n.Capabilities) {
 		return desiredstate.State{}, nil, node.ErrNoUserCore
 	}
-	groups, err := h.Nodes.SubscriptionGroups(ctx, n.ID)
+	groups, err := h.Nodes.SubscriptionGroups(ctx, n.ID, nil)
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}
-	access, err := h.Users.AccessForGroups(ctx, groups)
+	access, err := h.Users.AccessForGroups(ctx, groups, nil)
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}

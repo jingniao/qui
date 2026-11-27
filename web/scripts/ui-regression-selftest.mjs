@@ -425,6 +425,28 @@ console.log('PASS review 1: online/degraded upgrades, enrollment and heartbeat b
 
 const reviewNodeProps = { node: { capabilities: { core_name: 'xray', cores: [{ name: 'sing-box' }] } } };
 const serverNodesPath = 'modules/nodes/components/detail/ServerNodes.vue';
+const quickEdit = read('modules/nodes/components/ServerQuickEdit.vue');
+assert.match(quickEdit, /name: form\.name !== editBaseline\.name \? form\.name : latest\.name/);
+assert.match(quickEdit, /maintenance: form\.maintenance !== editBaseline\.maintenance \? form\.maintenance : latest\.maintenance/);
+assert.match(quickEdit, /\.\.\.editedNodeMeta\(form, editBaseline, meta\)/);
+const editedNodeMetaSource = read('modules/nodes/components/serverListModel.ts').match(/export function editedNodeMeta[\s\S]*?\n}/)[0];
+const editedNodeMeta = new Function(ts.transpileModule(editedNodeMetaSource.replace('export ', '') + '\nreturn editedNodeMeta;', {
+  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None }
+}).outputText)();
+const legacyMeta = { region: 'HK', remark: '', renewDate: '2027-01-01', renewPrice: '$10/月', autoRenew: true, tags: ['a'] };
+const editOpened = { name: 'n', region: 'HK', remark: '', renewDate: '2026-12-01', renewCurrency: 'USD', renewPrice: '10', renewCycle: '/月', enabled: true, allowSubscription: true, maintenance: false, autoRenew: false, tags: ['a'] };
+assert.deepEqual(editedNodeMeta({ ...editOpened, remark: '备注' }, editOpened, legacyMeta),
+  { region: 'HK', remark: '备注', renewDate: '2027-01-01', renewPrice: '$10/月', renewCurrency: undefined, renewCycle: undefined, autoRenew: true, tags: ['a'] },
+  'an unchanged field keeps the latest stored value, including an automatic renewal');
+assert.deepEqual(editedNodeMeta({ ...editOpened, renewPrice: ' 12 ' }, editOpened, legacyMeta),
+  { region: 'HK', remark: '', renewDate: '2027-01-01', renewPrice: '12', renewCurrency: 'USD', renewCycle: '/月', autoRenew: true, tags: ['a'] },
+  'changing only the price keeps the currency and cycle parsed from a legacy price');
+const accountTraffic = read('modules/access/pages/AccessRecordPage.vue');
+assert.match(accountTraffic, /accountSummaryUserId[^\n]*已采样账户流量[^\n]*节点核心流量（含端口转发）/);
+assert.match(accountTraffic, /accountSummaryUserId\.value = filter\.userId/);
+const tunnelsPage = read('modules/tunnels/pages/TunnelsPage.vue');
+assert.match(tunnelsPage, /result\.status === 'rollback_failed'[^]*rollbackFailure\(result\)[^]*else if \(problem\)/);
+assert.match(read('modules/tunnels/applyTunnels.ts'), /自动回滚失败，以下服务器可能仍运行新配置/);
 // The badge text comes from the shared per-core view, so the run uses the real
 // helper instead of a copy of the labels.
 const coreSummary = await import(await tsModuleUrl(new URL('../src/modules/nodes/coreSummary.ts', import.meta.url)));
@@ -441,13 +463,18 @@ assert.match(read(serverNodesPath), /<ProtocolBadge v-if="inboundCoreName\(item\
 console.log('PASS review 2: inbound core badge, explicit core, primary/fallback core and unknown');
 let toggleLatest = { id: 'entry', name: 'entry', nodeId: 'server', protocol: 'http', listen: '0.0.0.0', port: 8080, enabled: true, egressSourceIp: '192.0.2.10', settings: {} };
 const toggledPayloads = [];
+const toggleNotices = [];
 const toggleInbound = vueSubset(serverNodesPath, ['toggle'], {
-  props: { node: { id: 'server' } }, busy: { value: false }, error: { value: '' }, isOwner: { value: true }, emit: () => {},
+  props: { node: { id: 'server' } }, busy: { value: false }, error: { value: '' }, isOwner: { value: true }, inbounds: { value: [] }, emit: () => {},
   choices: async fetch => (await fetch(1, 100)).items,
+  showToast: message => toggleNotices.push(message),
   proxyAPI: { inbounds: async () => ({ items: [toggleLatest] }), saveInbound: async (id, payload) => { toggledPayloads.push(payload); toggleLatest = { id, ...payload }; } }
 });
-await toggleInbound.toggle({ id: 'entry', egressSourceIp: 'stale' });
-await toggleInbound.toggle({ id: 'entry', egressSourceIp: 'stale' });
+await toggleInbound.toggle({ id: 'entry', enabled: true, egressSourceIp: 'stale' });
+await toggleInbound.toggle({ id: 'entry', enabled: true, egressSourceIp: 'stale' });
+assert.equal(toggledPayloads.length, 1, 'stale disable does not re-enable an already disabled inbound');
+assert.deepEqual(toggleNotices, ['状态已被其他页面修改']);
+await toggleInbound.toggle({ id: 'entry', enabled: false, egressSourceIp: 'stale' });
 assert.deepEqual(toggledPayloads.map(payload => [payload.enabled, payload.egressSourceIp]), [[false, '192.0.2.10'], [true, '192.0.2.10']], 'disable and re-enable preserve the latest stored egress IP');
 
 const previewReview = read('modules/users/pages/PortalPreviewPage.vue');

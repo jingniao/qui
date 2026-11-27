@@ -266,6 +266,8 @@ func (h *Handler) fail(w http.ResponseWriter, err error) {
 		httpapi.Error(w, 409, "conflict", err.Error())
 	case errors.Is(err, ErrInactive), errors.Is(err, ErrCredential):
 		httpapi.Error(w, 403, "user_inactive", err.Error())
+	case errors.Is(err, ErrGroupGrantIneligible):
+		httpapi.Error(w, 400, "group_grant_ineligible", err.Error())
 	default:
 		message := err.Error()
 		for _, prefix := range []string{"invalid ", "username ", "device name ", "maximum devices ", "protocol ", "node group ", "too many ", "display name ", "expiry ", "choose ", "request ", "Content-Type "} {

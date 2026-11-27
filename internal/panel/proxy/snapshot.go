@@ -11,7 +11,7 @@ import (
 )
 
 type AccessReader interface {
-	AccessForGroups(context.Context, []string) ([]user.Access, error)
+	AccessForGroups(context.Context, []string, map[string]string) ([]user.Access, error)
 }
 
 func snapshotList[T any](read func(int, int) ([]T, int, error)) ([]T, error) {
@@ -45,6 +45,9 @@ func snapshotList[T any](read func(int, int) ([]T, int, error)) ([]T, error) {
 type NodeSnapshot struct {
 	State         desiredstate.State
 	InboundIntent []string
+	// Set when this state modifies an already applied configuration. Reject
+	// the batch if another revision applied before the batch started.
+	ExpectedPreviousRevision *int64
 	// ExpandedOnly marks a node a drawing captured only because a relay
 	// relationship reaches it, not because the drawing itself touches it. A
 	// publication may leave such a node alone when it already runs exactly this
@@ -64,16 +67,20 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 // as the revision's inbound intent, so an automatic quota revision can tell an
 // inbound the Owner disabled from one that merely has no users at the moment.
 func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users AccessReader) (desiredstate.State, []string, error) {
+	return s.snapshotIntent(ctx, nodeID, users, nil)
+}
+
+func (s *Service) snapshotIntent(ctx context.Context, nodeID string, users AccessReader, relayTargets map[string]string) (desiredstate.State, []string, error) {
 	enabled := []string{}
 	n, err := s.Nodes.Get(ctx, nodeID)
 	if err != nil || !n.Enabled {
 		return desiredstate.State{}, nil, errors.New("node unavailable")
 	}
-	groups, err := s.Nodes.SubscriptionGroups(ctx, nodeID)
+	groups, err := s.Nodes.SubscriptionGroups(ctx, nodeID, relayTargets)
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}
-	access, err := users.AccessForGroups(ctx, groups)
+	access, err := users.AccessForGroups(ctx, groups, relayTargets)
 	if err != nil {
 		return desiredstate.State{}, nil, err
 	}
@@ -230,6 +237,9 @@ func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users Acces
 			return state, enabled, err
 		}
 		state.Policies = rules
+	}
+	if err := s.expandServerEgress(ctx, n, &state); err != nil {
+		return state, enabled, err
 	}
 	cores := node.EnabledCores(n.Capabilities)
 	if err := node.RequireOutboundSourceSupport(state, n.Capabilities, n.Name); err != nil {

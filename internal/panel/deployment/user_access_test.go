@@ -20,7 +20,7 @@ type stubUserAccess struct {
 	access []user.Access
 }
 
-func (s stubUserAccess) AccessForGroups(context.Context, []string) ([]user.Access, error) {
+func (s stubUserAccess) AccessForGroups(context.Context, []string, map[string]string) ([]user.Access, error) {
 	return s.access, nil
 }
 

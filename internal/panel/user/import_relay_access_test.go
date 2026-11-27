@@ -31,7 +31,7 @@ VALUES('import-rule','import relay',?,23001,'manual','both','import',1,1,'draft'
 	if _, err := r.Database.ExecContext(ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES(?,?)", u.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	access, err := r.AccessForGroups(ctx, []string{g.ID})
+	access, err := r.AccessForGroups(ctx, []string{g.ID}, nil)
 	if err != nil || len(access) != 1 || len(access[0].InboundIDs) != 0 {
 		t.Fatalf("import relay introduced managed inbound access: %+v, %v", access, err)
 	}

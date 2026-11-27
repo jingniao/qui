@@ -6,6 +6,7 @@
       <button v-else class="ios-btn-secondary shrink-0" @click="logout">退出登录</button>
     </header>
     <main class="max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
+      <p v-if="sessionError" role="status" class="text-sm text-ios-red">{{ sessionError }}</p>
       <nav class="flex gap-2 overflow-x-auto flex-nowrap -mx-1 px-1 pb-1">
         <button v-for="item in sections" :key="item.id" class="ios-btn-secondary shrink-0 whitespace-nowrap"
           :class="section === item.id ? 'text-ios-blue bg-blue-50' : ''" @click="navigate(item.id)">{{ item.label }}</button>
@@ -15,9 +16,9 @@
   </div>
 </template>
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { portalAPI, portalState, type Snapshot } from './api';
+import { portalAPI, portalState, refreshPortalSession, type Snapshot } from './api';
 import PortalPage from './PortalPage.vue';
 const props = defineProps<{ preview?: boolean; snapshot?: Snapshot }>();
 const route = useRoute(), router = useRouter(), previewSection = ref('overview');
@@ -28,6 +29,14 @@ const name = computed(() => {
   return me?.displayName || me?.username || '我的账号';
 });
 function navigate(id: string) { if (props.preview) previewSection.value = id; else void router.push('/portal/' + id); }
+const sessionError = ref('');
+async function visibilityChanged() {
+  if (props.preview || document.visibilityState !== 'visible') return;
+  try { await refreshPortalSession(); sessionError.value = ''; }
+  catch (error) { sessionError.value = (error as Error).message; }
+}
+onMounted(() => document.addEventListener('visibilitychange', visibilityChanged));
+onUnmounted(() => document.removeEventListener('visibilitychange', visibilityChanged));
 async function logout() {
   try { await portalAPI.logout(); await router.replace('/'); }
   catch (e) { window.alert((e as Error).message); }

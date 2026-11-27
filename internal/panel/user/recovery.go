@@ -71,8 +71,19 @@ FROM restore_source.credentials c JOIN devices d ON d.id=c.device_id WHERE NOT E
 SELECT c.credential_id,c.user_id,c.device_id,c.deleted_at FROM restore_source.credential_tombstones c`); err != nil {
 		return err
 	}
-	if err := validateStoredTrafficMaterial(ctx, tx, ""); err != nil {
+	// Server startup also performs these repairs. Finish them while the
+	// candidate is writable so read-only preparation only verifies the result.
+	if _, err := grantAllProtocolsTx(ctx, tx); err != nil {
 		return err
 	}
-	return nil
+	ids, err := accessIdentityUserIDs(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := r.ensureAccessIdentityTx(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	return validateStoredTrafficMaterial(ctx, tx, "")
 }

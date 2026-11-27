@@ -15,8 +15,8 @@
 #   TimeoutStopSec=90         -> retry=TERM/90/KILL/5
 #   KillMode=process          -> rc_cgroup_cleanup=no (only the Agent is signalled)
 #   ExecStopPost=+...         -> stop_post runs the same root stop barrier
-#   CapabilityBoundingSet/AmbientCapabilities=CAP_NET_BIND_SERVICE
-#                             -> capabilities="^cap_net_bind_service" (the ^ marks
+#   CapabilityBoundingSet/AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+#                             -> capabilities="^cap_net_bind_service,^cap_net_raw" (the ^ marks
 #                                the capability ambient, so the cores the Agent
 #                                spawns inherit it and can bind ports below 1024)
 #   LimitNOFILE=524288        -> rc_ulimit="-n 524288"
@@ -47,7 +47,7 @@ command_args="--config /etc/proxy-agent/config.yaml"
 command_user="proxy-agent:proxy-agent"
 directory="/var/lib/proxy-agent"
 umask=077
-capabilities="^cap_net_bind_service"
+capabilities="^cap_net_bind_service,^cap_net_raw"
 no_new_privs="yes"
 respawn_delay=5
 respawn_max=0

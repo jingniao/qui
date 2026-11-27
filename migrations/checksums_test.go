@@ -14,6 +14,7 @@ import (
 // restore. Add new migrations here; never change an existing entry. The
 // checksums of the legacy files 0001-0152 live in internal/platform/db.
 var applied = map[string]string{
+	"0166_server_egress_groups.sql":            "850b1e0d5edc8b71e14b14597c7991b4533dbed319554a4746cfb33b3a08d1cc",
 	"0165_reinstall_superseded_updates.sql":    "b2003e19b83a1d22f97e42eb2f4277a9f3c76ff05aa5342c040c6914f74b9794",
 	"0164_traffic_hour_sample_counts.sql":      "6a873005eabe889228e0a77bff167065695668d904356e90674b4fe9777247fe",
 	"0161_agent_state_reset.sql":               "9f9ae4093317b8f86a1cf240f6b43b471c8255a49b234ff35238e3770b06a2fa",

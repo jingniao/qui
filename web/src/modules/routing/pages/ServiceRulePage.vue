@@ -1,35 +1,21 @@
 <template>
-  <div class="space-y-6">
+  <div ref="pageRoot" class="space-y-6">
     <!-- Header -->
-    <PageHeader
-      title="规则集"
-      parent="分流控制"
-      description="统一维护可复用的域名、域名后缀、关键字、IP 与 CIDR 集合，并可引入外部规则来源。只定义匹配目标，不包含转发动作，供客户端策略与节点策略共同引用。"
-    >
-      <template #actions>
-        <button type="button" @click="openCreate" class="ios-btn-primary inline-flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          <span>创建规则集</span>
-        </button>
-      </template>
-    </PageHeader>
-
-    <!-- Important Notice Banner -->
-    <div class="p-4 rounded-2xl bg-ios-blue/[0.06] border border-ios-blue/15 space-y-2">
-      <div class="flex items-center gap-2 text-ios-blue font-semibold text-xs tracking-wide">
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>规则集定位与两端更新生效机制</span>
-      </div>
-      <p class="text-xs text-neutral-600 leading-relaxed">
-        • <strong>纯目标定义</strong>：规则集仅定义域名、IP 或网段的匹配目标（如 OpenAI、常见广告黑名单、内网私有地址），<strong>不包含任何转发或阻断动作</strong>。动作在“客户端策略”与“节点策略”中自由绑定。<br />
-        • <strong>两端更新方式（保存不承诺立即生效）</strong>：<br />
-        &nbsp;&nbsp;1. <strong>客户端端</strong>：Clash / Mihomo 需等待其 rule-providers 的定时拉取周期（默认 24h）或在客户端中手动点击“刷新规则集”；<br />
-        &nbsp;&nbsp;2. <strong>节点端</strong>：保存后规则集版本号递增，需通过 Agent 发布配置草稿后，目标服务器才会加载最新集合。
-      </p>
+    <div ref="pageHeading">
+      <PageHeader
+        title="规则集"
+        parent="分流控制"
+        description="统一维护可复用的域名、域名后缀、关键字、IP 与 CIDR 集合，并可引入外部规则来源。只定义匹配目标，不包含转发动作，供客户端策略与节点策略共同引用。"
+      >
+        <template #actions>
+          <button type="button" @click="openCreate" class="ios-btn-primary inline-flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            <span>创建规则集</span>
+          </button>
+        </template>
+      </PageHeader>
     </div>
 
     <!-- Table States -->
@@ -42,7 +28,7 @@
     />
 
     <!-- Rule Sets Table -->
-    <DataTable v-else-if="display.ready">
+    <DataTable v-else-if="display.ready" class="service-rule-table">
       <template #header>
         <th>规则集名称</th>
         <th>来源 / 版本</th>
@@ -56,7 +42,7 @@
         <tr v-for="service in services" :key="service.id" class="hover:bg-black/[0.015] transition-colors">
           <!-- 1. Name & Description -->
           <td class="p-4">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 whitespace-nowrap">
               <span class="font-bold text-neutral-900 text-base">{{ service.name }}</span>
               <span v-if="service.builtin" class="px-1.5 py-0.2 rounded text-xs font-bold bg-blue-50 text-ios-blue uppercase">
                 内置
@@ -72,13 +58,13 @@
             </span>
             <template v-if="service.sources.length">
               <span class="ml-1 text-neutral-500 whitespace-nowrap">{{ service.sources.length }} 个外部来源</span>
-              <span class="block mt-1 font-medium" :class="sourceStatus(service).tone">{{ sourceStatus(service).label }}</span>
+              <span class="block mt-1 font-medium whitespace-nowrap" :class="sourceStatus(service).tone">{{ sourceStatus(service).label }}</span>
             </template>
           </td>
 
           <!-- 3. Size -->
           <td class="text-xs font-mono text-neutral-600">
-            <div class="flex flex-wrap items-center gap-x-1">
+            <div class="flex items-center gap-x-1 whitespace-nowrap">
               <span class="whitespace-nowrap">手写 {{ service.domains.length + service.suffixes.length }} 域名</span>
               <span class="text-neutral-300">/</span>
               <span class="whitespace-nowrap">{{ service.keywords?.length || 0 }} 关键字</span>
@@ -109,7 +95,7 @@
           </td>
 
           <!-- 6. Update Time -->
-          <td class="text-xs font-mono text-neutral-400">
+          <td class="text-xs font-mono text-neutral-400 whitespace-nowrap">
             {{ formatTime(service.updatedAt) }}
           </td>
 
@@ -121,14 +107,14 @@
             <button type="button" @click="copy(service)" class="ios-action-btn-secondary">
               克隆
             </button>
-            <button v-if="!service.builtin" type="button" @click="promptDelete(service)" class="ios-action-btn-danger">
+            <button type="button" @click="promptDelete(service)" class="ios-action-btn-danger">
               删除
             </button>
           </td>
         </tr>
       </template>
       <template #footer>
-        <Pagination :total="total" :current-page="page" :page-size="20" @update:page="changePage" />
+        <Pagination :total="total" :current-page="page" :page-size="pageSize" @update:page="changePage" />
       </template>
     </DataTable>
 
@@ -146,7 +132,7 @@
     <!-- Confirm Delete -->
     <ConfirmDialog
       v-model="confirmVisible"
-      title="删除自定义规则集"
+      title="删除规则集"
       :message="`确定删除规则集【${target?.name || ''}】？被客户端策略或节点策略引用的集合请先解除引用。`"
       @confirm="remove"
     />
@@ -155,7 +141,7 @@
 
 <script setup lang="ts">
 import { retainedQuery, removePageItem } from '../../../app/retainedQuery';
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { policyAPI, type ServiceSet } from '../api';
 import { formatTime } from '../../../app/auth';
 import { showToast } from '../../../app/api';
@@ -172,6 +158,9 @@ import ServiceProviderDialog from '../components/ServiceProviderDialog.vue';
 
 const services = ref<ServiceSet[]>([]);
 const page = ref(1);
+const pageSize = ref(1);
+const pageRoot = ref<HTMLElement>();
+const pageHeading = ref<HTMLElement>();
 const total = ref(0);
 const error = ref('');
 const loading = ref(false);
@@ -188,13 +177,21 @@ const selectedService = ref<ServiceSet | null>(null);
 let generation = 0;
 const display = retainedQuery(() => { services.value = []; total.value = 0; });
 async function load() {
-  display.begin(page.value);
+  const size = pageSize.value;
+  display.begin(page.value, size);
   const current = ++generation;
   loading.value = true; error.value = '';
   try {
-    const result = await policyAPI.services(page.value);
+    const result = await policyAPI.services(page.value, size);
     if (current !== generation) return;
-    display.ready = true; services.value = result.items;
+    const lastPage = Math.max(1, Math.ceil(result.total / size));
+    if (page.value > lastPage) {
+      page.value = lastPage;
+      await load();
+      return;
+    }
+    display.ready = true;
+    services.value = result.items;
     total.value = result.total;
     error.value = '';
   } catch (e) {
@@ -269,7 +266,7 @@ async function remove() {
   try {
     const id = target.value.id;
     await policyAPI.deleteService(id);
-    removePageItem(services, total, page, id, 20);
+    removePageItem(services, total, page, id, pageSize.value);
     showToast('规则集已删除');
     await load();
   } catch (e) {
@@ -286,5 +283,32 @@ function openProviderModal(service: ServiceSet) {
 // address was an Owner-only JSON API no client could fetch). Its name comes from
 // the id, so two services with similar names never share a cache file.
 
-onMounted(load);
+let resizeObserver: ResizeObserver | undefined;
+onMounted(() => {
+  const heading = pageHeading.value!;
+  const main = pageRoot.value!.closest('main')!;
+  const fitPage = () => {
+    const bottomPadding = parseFloat(getComputedStyle(main).paddingBottom);
+    const available = main.getBoundingClientRect().bottom - heading.getBoundingClientRect().bottom - bottomPadding;
+    // Leave room for the gap, table heading, footer and a horizontal scrollbar.
+    const size = Math.min(100, Math.max(1, Math.floor((available - 144) / 76)));
+    if (size === pageSize.value) return;
+    const firstRow = (page.value - 1) * pageSize.value;
+    pageSize.value = size;
+    page.value = Math.floor(firstRow / size) + 1;
+    void load();
+  };
+  fitPage();
+  if (pageSize.value === 1) void load();
+  resizeObserver = new ResizeObserver(fitPage);
+  resizeObserver.observe(main);
+  resizeObserver.observe(heading);
+});
+onUnmounted(() => resizeObserver?.disconnect());
 </script>
+
+<style scoped>
+.service-rule-table :deep(tbody tr) {
+  height: 76px;
+}
+</style>

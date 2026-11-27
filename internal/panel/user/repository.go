@@ -124,7 +124,22 @@ func setGrants(ctx context.Context, tx *sql.Tx, userID string, groups []string) 
 	if len(groups) > 100 {
 		return errors.New("too many node group grants")
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM user_node_group_grants WHERE user_id=?", userID); err != nil {
+	rows, err := tx.QueryContext(ctx, "SELECT group_id FROM user_node_group_grants WHERE user_id=?", userID)
+	if err != nil {
+		return err
+	}
+	var previous []string
+	for rows.Next() {
+		var group string
+		if err := rows.Scan(&group); err != nil {
+			rows.Close()
+			return err
+		}
+		previous = append(previous, group)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -133,11 +148,38 @@ func setGrants(ctx context.Context, tx *sql.Tx, userID string, groups []string) 
 			return errors.New("invalid or duplicate node group grant")
 		}
 		seen[group] = true
-		if _, err := tx.ExecContext(ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES(?,?)", userID, group); err != nil {
-			return errors.New("node group does not exist")
+		if err := addGrant(ctx, tx, userID, group); err != nil {
+			return err
+		}
+	}
+	for _, group := range previous {
+		if !seen[group] {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM user_node_group_grants WHERE user_id=? AND group_id=?", userID, group); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+var ErrGroupGrantIneligible = errors.New("node group must have subscription or mixed purpose")
+
+func addGrant(ctx context.Context, tx *sql.Tx, userID, groupID string) error {
+	var purpose string
+	var granted bool
+	err := tx.QueryRowContext(ctx, `SELECT purpose, EXISTS(SELECT 1 FROM user_node_group_grants WHERE user_id=? AND group_id=node_groups.id)
+		FROM node_groups WHERE id=?`, userID, groupID).Scan(&purpose, &granted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("node group does not exist")
+	}
+	if err != nil || granted {
+		return err
+	}
+	if purpose != "subscription" && purpose != "mixed" {
+		return ErrGroupGrantIneligible
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES(?,?)", userID, groupID)
+	return err
 }
 func (r *Repository) Save(ctx context.Context, userID string, input Input) (User, error) {
 	if err := input.Validate(); err != nil {
@@ -248,10 +290,10 @@ func (r *Repository) Grant(ctx context.Context, userID, groupID string, remove b
 	if remove {
 		_, err = tx.ExecContext(ctx, "DELETE FROM user_node_group_grants WHERE user_id=? AND group_id=?", userID, groupID)
 	} else {
-		_, err = tx.ExecContext(ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES(?,?) ON CONFLICT DO NOTHING", userID, groupID)
+		err = addGrant(ctx, tx, userID, groupID)
 	}
 	if err != nil {
-		return errors.New("node group does not exist")
+		return err
 	}
 	return tx.Commit()
 }
@@ -264,7 +306,7 @@ func (r *Repository) ResetTraffic(ctx context.Context, userID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "UPDATE users SET used_traffic=0 WHERE id=?", userID); err != nil {
+	if err := resetTrafficTx(ctx, tx, userID, timestamp(time.Now())); err != nil {
 		return err
 	}
 	return tx.Commit()

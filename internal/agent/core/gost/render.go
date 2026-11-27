@@ -209,7 +209,7 @@ func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfi
 	command.Stdout = printed
 	command.Stderr = diagnostics
 	if err := command.Run(); err != nil {
-		return fmt.Errorf("gost rejected the rendered configuration: %w: %s", err, diagnostics.reason())
+		return core.NativeValidationError(deadline, fmt.Errorf("gost native configuration validation failed: %w: %s", err, diagnostics.reason()))
 	}
 	if printed.cut {
 		return fmt.Errorf("gost re-printed more than %d bytes of configuration", validateOutputLimit)

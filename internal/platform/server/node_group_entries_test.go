@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"proxycontrol/internal/panel/node"
@@ -78,6 +79,45 @@ func TestGroupInboundBoundarySubscriptionPortalAndQuota(t *testing.T) {
 	nodes, err = portalService.GrantedNodes(f.ctx, account.ID)
 	if err != nil || len(nodes) != 0 {
 		t.Fatal(nodes, err)
+	}
+}
+
+func TestMaintenanceKeepsPublishedCredentials(t *testing.T) {
+	f := newQuotaFixture(t)
+	_, credential := f.addUser(t, "maintenance_user", "")
+	f.publish(t)
+	if _, err := f.app.Database.ExecContext(f.ctx, "UPDATE nodes SET maintenance=1 WHERE id=?", f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	revision := f.publish(t)
+	if !stateHasCredential(f.state(t, revision), credential) {
+		t.Fatal("publishing removed an existing credential in maintenance mode")
+	}
+}
+
+func TestNewGrantRejectsEgressGroup(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "grant_user", "")
+	group, err := f.app.nodeRepository.SaveGroup(f.ctx, "", node.GroupInput{Name: "Exit", Purpose: "egress", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "/api/v1/users/" + account.ID
+	for _, response := range []struct {
+		call string
+		path string
+		body any
+	}{
+		{"POST", endpoint + "/node-groups/" + group.ID, nil},
+		{"PUT", endpoint, map[string]any{"username": account.Username, "displayName": account.DisplayName, "status": account.Status, "nodeGroupIds": []string{group.ID}}},
+	} {
+		got := f.owner.call(response.call, response.path, response.body)
+		if got.Code != 400 || !strings.Contains(got.Body.String(), "group_grant_ineligible") {
+			t.Errorf("%s accepted an egress grant or returned the wrong code: %d %s", response.call, got.Code, got.Body.String())
+		}
+		if _, err := f.app.Database.ExecContext(f.ctx, "DELETE FROM user_node_group_grants WHERE user_id=? AND group_id=?", account.ID, group.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

@@ -208,7 +208,7 @@ func TestQuickCanvasPlanRejectsUnsupportedProtocolAndExhaustedPorts(t *testing.T
 
 type quickCanvasFailedAccess struct{ err error }
 
-func (r quickCanvasFailedAccess) AccessForGroups(context.Context, []string) ([]user.Access, error) {
+func (r quickCanvasFailedAccess) AccessForGroups(context.Context, []string, map[string]string) ([]user.Access, error) {
 	return nil, r.err
 }
 

@@ -27,7 +27,8 @@
     <LoadingSkeleton v-else-if="!node" />
     <p v-else-if="!displayNode" role="status" class="rounded-xl bg-ios-orange/10 p-4 text-sm text-ios-orange">服务器已删除或不存在。</p>
     <template v-else>
-      <p v-if="status.key === 'core_error'" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat?.core_healthy === false && node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(displayNode) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
+      <p v-if="status.key === 'core_error' && displayNode.heartbeat?.spool_status?.failure_code === 'queue_unavailable'" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">Agent 无法打开流量队列，代理服务已阻断。请查看 Agent 日志，恢复流量队列后重启 Agent。</p>
+      <p v-else-if="status.key === 'core_error'" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">{{ node.heartbeat?.core_healthy === false && node.heartbeat.core_error === 'accounting_interrupted' ? '代理已停止，流量消费需要核对；已采集流量继续补传。' : `最后心跳报告核心 ${unhealthyCoreLabel(displayNode) || node.capabilities?.core_name || '代理核心'} 未通过健康检查，请检查该核心的程序与配置发布结果。` }}</p>
       <p v-if="sourceAlert && !sourceAlert.failed" role="status" class="rounded-xl bg-ios-red/10 p-3 text-sm text-ios-red">以下出口地址已不在服务器上，使用它们的流量会失败：{{ sourceAlert.issues.map(describeSourceIssue).join('；') }}。请把地址加回服务器，或改选后重新发布配置。</p>
       <p v-else-if="sourceAlert" role="status" class="rounded-xl bg-ios-orange/10 p-3 text-sm text-ios-orange">Agent 无法检查出口 IP 是否仍在服务器上，请查看该服务器的 Agent 日志。</p>
       <p v-if="error" role="status" class="text-sm text-ios-red">{{ error }}</p>

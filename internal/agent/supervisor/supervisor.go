@@ -262,7 +262,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 			}
 			if multi, ok := adapter.(interface {
 				CoreHealths(context.Context) []core.CoreHealth
-			}); ok {
+			}); ok && reconciler.RuntimeRestoreError() == nil {
 				unhealthy := false
 				reported := map[string]bool{}
 				for _, item := range multi.CoreHealths(ctx) {
@@ -324,7 +324,7 @@ func Run(ctx context.Context, adapter core.Adapter, reconciler *reconcile.Reconc
 				}
 				// Health comes first: while the core cannot run the retained
 				// revision, a refresh would only re-render and re-apply it.
-				health, err := adapter.Health(ctx)
+				health, err := reconciler.Health(ctx)
 				if err == nil && !health.Healthy {
 					// Every restore must name its reason, even when an
 					// adapter reports unhealthy without one.

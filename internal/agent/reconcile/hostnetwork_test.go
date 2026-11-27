@@ -599,7 +599,7 @@ func TestApplyRollsBackRuntimeAndHostNetworkWhenTheHelperFails(t *testing.T) {
 	if err == nil || result.Code != hostNetworkFailedCode {
 		t.Fatalf("a helper failure was not reported: %+v %v", result, err)
 	}
-	if permanentFailure(result.Code) {
+	if permanentFailure(result.Code, err) {
 		t.Fatal("a helper failure must not be cached permanently")
 	}
 	if !result.RolledBack || manager.Current() != 1 {

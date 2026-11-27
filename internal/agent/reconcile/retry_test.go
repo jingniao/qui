@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"proxycontrol/internal/agent/core"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -61,7 +62,7 @@ func TestStoragePreflightFailureCarriesCodeAndMessage(t *testing.T) {
 func TestPermanentValidationFailureIsCached(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
-	adapter := &fakeCoreAdapter{failValidate: true}
+	adapter := &fakeCoreAdapter{validationErr: &core.ValidationRejectedError{Err: errors.New("validation failed")}}
 	manager, err := New(directory, "node-test", adapter)
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +85,35 @@ func TestPermanentValidationFailureIsCached(t *testing.T) {
 	}
 	if adapter.validateCalls != validations {
 		t.Fatal("cached validation failure re-ran validation")
+	}
+}
+
+func TestValidationTimeoutDoesNotCacheFailure(t *testing.T) {
+	cases := map[string]*fakeCoreAdapter{
+		"preflight":    {validationErr: context.DeadlineExceeded},
+		"during_apply": {applyValidationErr: context.DeadlineExceeded},
+	}
+	for name, adapter := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			directory := t.TempDir()
+			manager, err := New(directory, "node-test", adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configuration := state(1080, 1)
+			result, err := manager.Apply(ctx, configuration)
+			if !errors.Is(err, context.DeadlineExceeded) || result.Code != "validation_failed" {
+				t.Fatalf("validation timeout not reported: %+v %v", result, err)
+			}
+			if _, err := os.Stat(filepath.Join(directory, "revisions", "1", "result.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("validation timeout left a receipt: %v", err)
+			}
+			adapter.validationErr, adapter.applyValidationErr = nil, nil
+			if result, err := manager.Apply(ctx, configuration); err != nil || !result.Success {
+				t.Fatalf("same revision could not retry: %+v %v", result, err)
+			}
+		})
 	}
 }
 

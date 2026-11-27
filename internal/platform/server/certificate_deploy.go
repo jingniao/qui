@@ -308,7 +308,11 @@ func (d *certificateDeployer) deploy(ctx context.Context, nodeID string, node st
 		revision = created.ID
 		d.setRevision(entry, revision)
 	}
-	if err := d.deployments.Deploy(ctx, revision); err != nil {
+	if err := d.deployments.DeployFromBaseline(ctx, revision, node.published.Revision); err != nil {
+		if errors.Is(err, deployment.ErrPublishedBaselineChanged) {
+			d.setRevision(entry, 0)
+			return
+		}
 		if errors.Is(err, deployment.ErrNodeBusy) {
 			// Another deployment owns the node; the revision stays a draft and the
 			// next pass retries it.

@@ -78,6 +78,12 @@ func (r *Reconciler) RestoreStartup(ctx context.Context, materials map[string]co
 	if err != nil {
 		return fmt.Errorf("startup handover: %w", err)
 	}
+	hostNetworkApplied := state.NeedsForcedEgress()
+	if hostNetworkApplied {
+		if err := r.applyHostNetwork(ctx, state); err != nil {
+			return err
+		}
+	}
 	if changed {
 		if _, err := multi.Apply(ctx, rendered); err != nil {
 			return err
@@ -86,8 +92,10 @@ func (r *Reconciler) RestoreStartup(ctx context.Context, materials map[string]co
 	if err := multi.FinishStartupRuntimes(); err != nil {
 		return err
 	}
-	if err := r.applyHostNetwork(ctx, state); err != nil {
-		return err
+	if !hostNetworkApplied {
+		if err := r.applyHostNetwork(ctx, state); err != nil {
+			return err
+		}
 	}
 	r.renderedDigest = digest(rendered.Data)
 	return nil

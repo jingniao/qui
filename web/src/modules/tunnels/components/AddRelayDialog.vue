@@ -22,7 +22,8 @@
     <p v-if="error" role="alert" class="text-sm text-ios-red">{{ error }}</p>
     <div class="flex justify-end gap-3">
       <button class="ios-dialog-btn-secondary" :disabled="saving" @click="emit('close')">关闭</button>
-      <button v-if="created && applyState && !applyState.ok" class="ios-dialog-btn-primary" :disabled="saving" @click="applyCreated">重试</button>
+      <button v-if="applyState?.rollbackBatchId" class="ios-dialog-btn-primary" :disabled="saving" @click="rollbackBatch(applyState.rollbackBatchId)">回滚发布批次</button>
+      <button v-else-if="created && applyState && !applyState.ok" class="ios-dialog-btn-primary" :disabled="saving" @click="applyCreated">重试</button>
       <button v-else-if="!created" class="ios-dialog-btn-primary" :disabled="saving || (mode === 'tunnel' && loading)" @click="save">{{ saving ? '处理中…' : mode === 'canvas' ? '创建并打开画布' : '创建并应用' }}</button>
     </div>
   </FormDrawer>
@@ -31,7 +32,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import FormDrawer from '../../../components/FormDrawer.vue';
 import PortControl from './PortControl.vue';
-import { applyProblem, applyTunnelChanges, clause } from '../applyTunnels';
+import { applyProblem, applyTunnelChanges, clause, rollbackFailure } from '../applyTunnels';
+import { deploymentAPI } from '../../system/deploymentApi';
 import { nodeRelayAPI, tunnelAPI, tunnelError, type Tunnel, type NodeRelay } from '../api';
 import { routeLabel } from '../model';
 import type { Inbound } from '../../proxy/api';
@@ -59,14 +61,27 @@ async function save() {
   if (created.value) await applyCreated();
 }
 // The new rule is applied at once; a failure keeps the saved rule and offers 重试.
-const applyState = ref<{ ok: boolean; text: string } | null>(null);
+const applyState = ref<{ ok: boolean; text: string; rollbackBatchId?: string } | null>(null);
+async function rollbackBatch(batchId: string) {
+  saving.value = true;
+  error.value = '';
+  try {
+    await deploymentAPI.rollbackBatch(batchId);
+    applyState.value = { ok: true, text: '已提交批次回滚，请在服务器配置版本中查看执行结果。' };
+  } catch (e) { error.value = tunnelError(e); }
+  finally { saving.value = false; }
+}
 async function applyCreated() {
   if (!created.value || saving.value) return;
   saving.value = true; applyState.value = { ok: false, text: '正在应用…' };
   try {
     const result = await applyTunnelChanges({ tunnelIds: [], ruleIds: [created.value.rule.id] }, text => { applyState.value = { ok: false, text }; });
     const problem = applyProblem(result);
-    applyState.value = problem ? { ok: result.status === 'publishing', text: result.status === 'publishing' ? problem : `应用失败，已恢复原配置：${problem}` } : { ok: true, text: '中转已创建并生效。' };
+    if (result.status === 'rollback_failed') {
+      applyState.value = { ok: false, text: rollbackFailure(result), rollbackBatchId: result.batchId };
+    } else {
+      applyState.value = problem ? { ok: result.status === 'publishing', text: result.status === 'publishing' ? problem : `应用失败，已恢复原配置：${problem}` } : { ok: true, text: '中转已创建并生效。' };
+    }
   } catch (e) { applyState.value = { ok: false, text: `应用失败：${clause(tunnelError(e))}。规则已保存，可重试。` }; }
   finally { saving.value = false; emit('saved'); }
 }

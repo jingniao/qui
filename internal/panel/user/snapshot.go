@@ -2,8 +2,11 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
+
+	"proxycontrol/internal/panel/node"
 )
 
 type Access struct {
@@ -12,12 +15,16 @@ type Access struct {
 	InboundIDs  []string
 }
 
-func (r *Repository) AccessForGroups(ctx context.Context, groups []string) ([]Access, error) {
+func (r *Repository) AccessForGroups(ctx context.Context, groups []string, relayTargets map[string]string) ([]Access, error) {
 	if len(groups) == 0 {
 		return []Access{}, nil
 	}
 	if len(groups) > 100 {
 		return nil, ErrCredential
+	}
+	targets, err := json.Marshal(relayTargets)
+	if err != nil {
+		return nil, err
 	}
 	placeholders := make([]string, len(groups))
 	arguments := make([]any, len(groups))
@@ -62,22 +69,23 @@ func (r *Repository) AccessForGroups(ctx context.Context, groups []string) ([]Ac
 		}
 		entry := Access{User: u, Credentials: []Credential{}, InboundIDs: []string{}}
 		args := append(append([]any{}, arguments...), userID, userID)
+		args = append(args, string(targets))
 		args = append(append(args, arguments...), userID, userID)
 		// A granted tunnel rule needs the user's credential on its target
 		// inbound: the rule only forwards bytes, so its clients authenticate
 		// there. The group need not also hold the inbound itself.
 		eligible := `AND g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed')
 AND i.subscription_visible=1 AND i.internal_relay=0
-AND n.enabled=1 AND n.status<>'disabled' AND n.maintenance=0 AND n.allow_subscription=1 AND n.deleted_at IS NULL
+AND n.enabled=1 AND n.status<>'disabled' AND n.allow_subscription=1 AND n.deleted_at IS NULL
 AND (json_array_length(i.allowed_users_json)=0 OR EXISTS(SELECT 1 FROM json_each(i.allowed_users_json) WHERE value=?))`
 		in := strings.Join(placeholders, ",")
 		rows, err := r.Database.QueryContext(ctx, `SELECT i.id FROM node_group_inbounds e
 JOIN node_groups g ON g.id=e.group_id JOIN user_node_group_grants a ON a.group_id=g.id
 JOIN inbounds i ON i.id=e.inbound_id JOIN nodes n ON n.id=i.node_id
 WHERE g.id IN (`+in+`) AND a.user_id=? `+eligible+`
-UNION SELECT i.id FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id AND t.target_mode='linked'
+UNION SELECT i.id FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id
 JOIN node_groups g ON g.id=gr.group_id JOIN user_node_group_grants a ON a.group_id=g.id
-JOIN inbounds i ON i.id=t.target_inbound_id JOIN nodes n ON n.id=i.node_id
+`+node.RuntimeRelayTarget+` JOIN nodes n ON n.id=i.node_id
 WHERE g.id IN (`+in+`) AND a.user_id=? `+eligible+` ORDER BY 1`, args...)
 		if err != nil {
 			return nil, err

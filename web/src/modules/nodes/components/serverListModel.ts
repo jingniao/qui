@@ -120,3 +120,22 @@ export function mergeLatestEditForm(
   // Tags are always replaced, never mutated, so an untouched list is the same array.
   if (current.tags === baseline.tags) current.tags = [...(latestMeta.tags ?? [])];
 }
+
+// Builds the saved metadata fields: a field the user changed since the drawer
+// opened comes from the form, any other keeps the latest stored value. Price,
+// currency and cycle are one value, because a legacy record keeps its currency
+// and cycle inside the price text; changing any of them saves all three.
+export function editedNodeMeta(form: ServerEditFormState, baseline: ServerEditFormState, latestMeta: Partial<NodeMeta>): Partial<NodeMeta> {
+  const price = String(form.renewPrice).trim();
+  const priceChanged = price !== String(baseline.renewPrice) || form.renewCurrency !== baseline.renewCurrency || form.renewCycle !== baseline.renewCycle;
+  return {
+    region: form.region.trim() !== baseline.region ? form.region.trim() : latestMeta.region,
+    remark: form.remark.trim() !== baseline.remark ? form.remark.trim() : latestMeta.remark,
+    renewDate: form.renewDate !== baseline.renewDate ? form.renewDate : latestMeta.renewDate,
+    ...(priceChanged
+      ? { renewPrice: price, renewCurrency: form.renewCurrency, renewCycle: form.renewCycle }
+      : { renewPrice: latestMeta.renewPrice, renewCurrency: latestMeta.renewCurrency, renewCycle: latestMeta.renewCycle }),
+    autoRenew: form.autoRenew !== baseline.autoRenew ? form.autoRenew : latestMeta.autoRenew,
+    tags: JSON.stringify(form.tags) !== JSON.stringify(baseline.tags) ? form.tags : latestMeta.tags
+  };
+}

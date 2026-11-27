@@ -48,10 +48,10 @@ export interface PublishPlan {
   conflicts: { nodeId: string; port: number; usedBy: string }[]; warnings: string[];
 }
 export interface PublishResult {
-  status: 'publishing' | 'success' | 'failed';
+  status: 'publishing' | 'success' | 'failed' | 'rollback_failed';
   gostRemovable?: { nodeId: string; name: string }[];
   batchId?: string;
-  servers: { nodeId: string; nodeName: string; revision: number | null; status: 'applied' | 'unchanged' | 'failed' | 'rolled_back' | 'skipped' | 'publishing'; message?: string }[];
+  servers: { nodeId: string; nodeName: string; revision: number | null; status: 'applied' | 'unchanged' | 'failed' | 'rolled_back' | 'rollback_failed' | 'skipped' | 'publishing'; message?: string }[];
 }
 export interface NodeRelay { rule: TunnelRule; shareLink: string | null }
 export interface NodeRelayInput { tunnelId: string; inboundId: string; portMode: 'auto' | 'manual'; listenPort?: number; subscriptionVisible: boolean; name?: string }

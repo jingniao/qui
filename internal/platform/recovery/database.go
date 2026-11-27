@@ -227,7 +227,7 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 		for index, step := range []func() error{
 			func() error { return (&auth.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&node.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
-			func() error { return (&user.Repository{}).PrepareRestoreTx(ctx, tx) },
+			func() error { return (&user.Repository{Vault: current.ConfigurationVault}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&portal.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&subscription.Repository{}).PrepareRestoreTx(ctx, tx, stamp) },
 			func() error { return (&rules.Store{}).PrepareRestoreTx(ctx, tx) },
@@ -236,6 +236,9 @@ func prepareDatabase(ctx context.Context, owner *panelstore.Ownership, current a
 			func() error { return (&user.Repository{}).PrepareGroupGrantsRestoreTx(ctx, tx) },
 			func() error { return (&proxy.Repository{}).PrepareClientRestoreTx(ctx, tx) },
 			func() error { return (&proxy.Repository{}).PrepareTunnelsRestoreTx(ctx, tx) },
+			func() error {
+				return (&proxy.Repository{Vault: current.ConfigurationVault}).PrepareServerEgressRestoreTx(ctx, tx)
+			},
 			func() error { return (&access.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&deployment.Repository{}).PrepareRestoreTx(ctx, tx) },
 			func() error { return (&system.Repository{}).PrepareRestoreTx(ctx, tx, stamp, plan.Source.ID) },

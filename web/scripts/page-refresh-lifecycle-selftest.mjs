@@ -14,8 +14,8 @@ const loader = access.slice(access.indexOf('let generation = 0;'), access.indexO
 const reads = [];
 const readAPI = kind => (...args) => { const pending = deferred(); reads.push({ kind, args, ...pending }); return pending.promise; };
 const state = { readTogether, retainedQuery, selected: ref(null), drawer: ref(false), activeTab: ref('all'), page: ref(1), loading: ref(false), error: ref(''), records: ref([]), domains: ref([]), total: ref(0), summary: ref(null), accountSummary: ref(null) };
-const load = new Function('accessAPI', 'selectedFilter', ...Object.keys(state), compile(loader + '\nreturn load;'))(
-  { list: readAPI('list'), domains: readAPI('domains'), summary: readAPI('summary'), accounts: readAPI('accounts') }, () => ({ domain: 'example.com' }), ...Object.values(state));
+const load = new Function('accessAPI', 'selectedFilter', 'ref', ...Object.keys(state), compile(loader + '\nreturn load;'))(
+  { list: readAPI('list'), domains: readAPI('domains'), summary: readAPI('summary'), accounts: readAPI('accounts') }, () => ({ domain: 'example.com' }), ref, ...Object.values(state));
 const first = load(); assert.equal(reads.length, 3, 'list and both summaries start together');
 state.activeTab.value = 'stats'; state.page.value = 2;
 const second = load(); assert.equal(reads.length, 6, 'a pending request must not drop a new filter/tab');

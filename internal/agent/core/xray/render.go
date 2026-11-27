@@ -203,6 +203,40 @@ func compileRouting(document *configDocument, state, original desiredstate.State
 	if err != nil {
 		return err
 	}
+	appendRule := func(rule route) error {
+		if !options.Access {
+			document.Routing.Rules = append(document.Routing.Rules, rule)
+			return nil
+		}
+		selected := target{Outbound: rule.OutboundTag, Balancer: rule.BalancerTag}
+		rules, err := accessAccountRules(document, rule, selected, original)
+		if err != nil {
+			return err
+		}
+		document.Routing.Rules = append(document.Routing.Rules, rules...)
+		return nil
+	}
+	hostNetwork := state.HostNetworkOutbounds()
+	var defaults []route
+	for _, inbound := range state.Inbounds {
+		if !inbound.Enabled {
+			continue
+		}
+		key := normalizedTarget(inbound.DefaultOutbound)
+		selected, ok := targets[key]
+		if !ok {
+			return errors.New("default target unavailable")
+		}
+		rule := route{Type: "field", InboundTag: []string{inbound.ID}}
+		assignTarget(&rule, selected)
+		if inbound.InternalRelay && hostNetwork[key] {
+			if err := appendRule(rule); err != nil {
+				return err
+			}
+		} else {
+			defaults = append(defaults, rule)
+		}
+	}
 	compiledPolicies, err := compilePolicies(state, at)
 	if err != nil {
 		return err
@@ -216,34 +250,13 @@ func compileRouting(document *configDocument, state, original desiredstate.State
 		assignTarget(&compiledPolicies[index], selected)
 	}
 	for _, rule := range compiledPolicies {
-		if options.Access {
-			selected := target{Outbound: rule.OutboundTag, Balancer: rule.BalancerTag}
-			rules, err := accessAccountRules(document, rule, selected, original)
-			if err != nil {
-				return err
-			}
-			document.Routing.Rules = append(document.Routing.Rules, rules...)
-		} else {
-			document.Routing.Rules = append(document.Routing.Rules, rule)
+		if err := appendRule(rule); err != nil {
+			return err
 		}
 	}
-	for _, inbound := range state.Inbounds {
-		if inbound.Enabled {
-			selected, ok := targets[normalizedTarget(inbound.DefaultOutbound)]
-			if !ok {
-				return errors.New("default target unavailable")
-			}
-			rule := route{Type: "field", InboundTag: []string{inbound.ID}}
-			assignTarget(&rule, selected)
-			if options.Access {
-				rules, err := accessAccountRules(document, rule, selected, original)
-				if err != nil {
-					return err
-				}
-				document.Routing.Rules = append(document.Routing.Rules, rules...)
-			} else {
-				document.Routing.Rules = append(document.Routing.Rules, rule)
-			}
+	for _, rule := range defaults {
+		if err := appendRule(rule); err != nil {
+			return err
 		}
 	}
 	return nil

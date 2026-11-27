@@ -659,7 +659,10 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 	// fresh render is used only as the current user/credential view, so an Owner
 	// edit that is saved but not yet published can never ride along on a quota
 	// transition (AGENTS.md §22).
-	published, intent, err := d.deployments.PublishedWithIntent(ctx, nodeID)
+	published, intent, err := d.deployments.QuotaBaseline(ctx, nodeID)
+	if errors.Is(err, deployment.ErrNodeBusy) {
+		return quotaWait
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// Nothing published yet: there is no reviewed state to adjust.
 		return quotaDone
@@ -718,7 +721,11 @@ func (d *quotaDeployer) reconcile(ctx context.Context, nodeID string, entry *quo
 		}
 		entry.revision = revision.ID
 	}
-	if err := d.deployments.Deploy(ctx, entry.revision); err != nil {
+	if err := d.deployments.DeployFromBaseline(ctx, entry.revision, published.Revision); err != nil {
+		if errors.Is(err, deployment.ErrPublishedBaselineChanged) {
+			entry.revision = 0
+			return quotaWait
+		}
 		if errors.Is(err, deployment.ErrNodeBusy) {
 			// Another deployment owns the node; the revision stays a draft and
 			// the next window queues it.

@@ -26,7 +26,7 @@ type relayDeletionPlan struct {
 // inside the write transaction. No telemetry/history tables participate.
 func (s *Service) relayDeletionGuards(ctx context.Context) ([]canvasRemovalRow, error) {
 	guards := []canvasRemovalRow{}
-	for _, table := range []string{"inbounds", "outbounds", "outbound_groups", "outbound_group_members", "proxy_chains", "proxy_chain_hops", "canvas_schemes", "canvas_entry_bindings", "canvas_tunnels", "canvas_tunnel_objects", "canvas_tunnel_publications", "tunnels", "tunnel_hops", "tunnel_rules", "tunnel_objects", "port_claims", "policies", "deployment_batches", "deployment_batch_items"} {
+	for _, table := range []string{"inbounds", "outbounds", "outbound_groups", "outbound_group_members", "proxy_chains", "proxy_chain_hops", "canvas_schemes", "canvas_entry_bindings", "canvas_tunnels", "canvas_tunnel_objects", "canvas_tunnel_publications", "tunnels", "tunnel_hops", "tunnel_rules", "tunnel_objects", "port_claims", "policies", "deployment_batches", "deployment_batch_items", "server_egress_relays", "server_egress_groups", "node_runtime_state"} {
 		query := "SELECT * FROM " + table + " WHERE ?='' ORDER BY rowid"
 		values, err := readCanvasRemovalRows(ctx, s.Repository.Database, query, "")
 		if err != nil {
@@ -67,6 +67,11 @@ func (s *Service) prepareRelayDeletion(ctx context.Context, inboundID, nodeID st
 		p.removed["inbound:"+inboundID] = true
 	}
 	if nodeID != "" {
+		refs, e := s.Repository.publishedServerEgressReferences(ctx, nodeID)
+		if e != nil {
+			return p, e
+		}
+		p.preview.Blockers = append(p.preview.Blockers, refs...)
 		if err = addIDs("SELECT id FROM inbounds WHERE node_id=?", []any{nodeID}, func(id string) { p.removed["inbound:"+id] = true }); err != nil {
 			return p, err
 		}

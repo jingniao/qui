@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"proxycontrol/internal/panel/node"
 	"sort"
+	"strings"
 )
 
 // ErrNoRelayRelationships reports a node that no enabled relay outbound joins
@@ -100,7 +101,9 @@ func (s *Service) RelaySnapshots(ctx context.Context, root string, users AccessR
 			if outbound.Protocol != "direct" && outbound.Protocol != "block" && !supports(n, outbound.Protocol, false, outbound.SupportTCP, outbound.SupportUDP) {
 				return nil, errors.New("associated node does not support an enabled outbound capability")
 			}
-			if outbound.TargetNodeID != "" {
+			// These virtual relationships are checked against the captured or
+			// published target by the deployment dependency validator.
+			if outbound.TargetNodeID != "" && !strings.HasPrefix(outbound.ID, serverEgressOutboundPrefix) {
 				actual[outbound.TargetNodeID] = true
 			}
 		}

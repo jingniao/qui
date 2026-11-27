@@ -351,6 +351,22 @@ func (m *MultiRuntime) Close() error {
 	return err
 }
 
+// Reset discards the running baseline while retaining explicit rollback history.
+func (m *MultiRuntime) Reset() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var err error
+	for _, name := range m.names {
+		err = errors.Join(err, ResetAdapter(m.runtimes[name]))
+	}
+	if err == nil {
+		clear(m.current)
+		clear(m.expected)
+		m.initialized = false
+	}
+	return err
+}
+
 // CoreHealth is one core's reported status together with the adapter error behind
 // an unhealthy result. The status carries the stable code the panel receives; the
 // error is the reason the Agent logs when it restores that core.

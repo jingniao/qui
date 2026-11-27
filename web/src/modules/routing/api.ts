@@ -9,6 +9,7 @@ export interface Scope {
 export interface Match {
   domains?: string[];
   suffixes?: string[];
+  keywords?: string[];
   cidrs?: string[];
   ports?: string[];
   network?: string;
@@ -128,6 +129,25 @@ export const policyAPI = {
     request<ExternalSource>(`/service-sets/${id}/sources/${sourceId}/refresh`, 'POST')
 };
 
+export interface ServerEgressGroupInput {
+  name: string;
+  serverIds: string[];
+  namePattern: string;
+}
+
+export interface ServerEgressGroup extends ServerEgressGroupInput {
+  id: string;
+}
+
+export const serverEgressGroupAPI = {
+  list: () => request<ServerEgressGroup[]>('/server-egress-groups'),
+  preview: (value: ServerEgressGroupInput) =>
+    request<{ id: string; name: string }[]>('/server-egress-groups/preview', 'POST', value),
+  save: (id: string | null, value: ServerEgressGroupInput) =>
+    request<ServerEgressGroup>(id ? `/server-egress-groups/${encodeURIComponent(id)}` : '/server-egress-groups', id ? 'PUT' : 'POST', value),
+  delete: (id: string) => request<void>(`/server-egress-groups/${encodeURIComponent(id)}`, 'DELETE')
+};
+
 export function input(record: PolicyRecord): PolicyInput {
   return {
     name: record.name,
@@ -141,6 +161,7 @@ export function input(record: PolicyRecord): PolicyInput {
     match: {
       domains: [...(record.match.domains || [])],
       suffixes: [...(record.match.suffixes || [])],
+      keywords: [...(record.match.keywords || [])],
       cidrs: [...(record.match.cidrs || [])],
       ports: [...(record.match.ports || [])],
       network: record.match.network || 'all',
@@ -174,7 +195,9 @@ export const actionNames: Record<string, string> = {
   Block: '服务器阻断 (Block)',
   Outbound: '指定出站',
   OutboundGroup: '指定出口组',
-  ProxyChain: '指定多跳代理链'
+  ProxyChain: '指定多跳代理链',
+  ServerEgress: '指定服务器出站',
+  ServerEgressGroup: '指定服务器组出站'
 };
 
 // ==========================================

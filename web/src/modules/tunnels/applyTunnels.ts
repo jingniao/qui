@@ -70,6 +70,11 @@ export function applyProblem(result: PublishResult): string {
   return bad.map(s => `${s.nodeName}：${s.message || resultLabels[s.status]}`).join('；');
 }
 
+export function rollbackFailure(result: PublishResult): string {
+  const nodes = result.servers.filter(s => s.status === 'rollback_failed' || s.status === 'applied');
+  return `自动回滚失败，以下服务器可能仍运行新配置：${nodes.map(s => s.nodeName).join('、')}。`;
+}
+
 /** Drops a message's own closing punctuation so the banner can append its own sentence. */
 export function clause(text: string): string {
   return text.replace(/[。．.！!]+$/u, '');

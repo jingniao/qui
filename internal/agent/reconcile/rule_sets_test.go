@@ -42,7 +42,7 @@ func TestApplyReportsRuleSetUnavailableWithoutRenderingOrCaching(t *testing.T) {
 	if adapter.renderCalls != 0 || adapter.applyCalls != 0 {
 		t.Fatal("a revision with unavailable rule sets was rendered or applied")
 	}
-	if permanentFailure(result.Code) {
+	if permanentFailure(result.Code, err) {
 		t.Fatal("rule_set_unavailable must stay retryable")
 	}
 	// The same revision applies once the files exist.

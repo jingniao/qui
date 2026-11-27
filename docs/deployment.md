@@ -364,7 +364,7 @@ deploy/linux/uninstall.sh panel     # 或 agent
 | `/etc/init.d/proxy-agent*`、`/usr/local/lib/proxy-agent/*-watch` | root:root 0755 | 仅 OpenRC：Agent、强制出站、调优与更新服务及 watcher |
 | `/etc/machine-id` | root:root 0444 | 仅 OpenRC 缺失时由 `install.sh --node` 创建 |
 
-主 systemd 单元以专用非 root 账号运行，启用 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp`、`ProtectHome`，仅保留 `CAP_NET_BIND_SERVICE`。强制出站 helper 单元（`proxy-agent-host-network.{service,path}`）以 `User=proxy-agent` + `CAP_NET_ADMIN` 运行，仅放开 `/var/lib/proxy-agent/host-network` 写入。
+主 systemd 单元以专用非 root 账号运行，启用 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp`、`ProtectHome`，保留 `CAP_NET_BIND_SERVICE` 和用于受管强制出站标记的 `CAP_NET_RAW`。强制出站 helper 单元（`proxy-agent-host-network.{service,path}`）以 `User=proxy-agent` + `CAP_NET_ADMIN` 运行，仅放开 `/var/lib/proxy-agent/host-network` 写入。
 
 ## 8. 排错入口
 

@@ -19,3 +19,25 @@ func TestQuotaMergeDoesNotRetainBindingToRemovedInbound(t *testing.T) {
 		t.Fatal("removed inbound kept a shared credential", next.Inbounds)
 	}
 }
+
+func TestPublishedFallbackKeepsRelayOnlyCredential(t *testing.T) {
+	f := newQuotaFixture(t)
+	_, credential := f.addUser(t, "relay_only", "")
+	state := f.state(t, f.publish(t))
+	inbound := state.Inbounds[0].ID
+	if _, err := f.app.Database.ExecContext(f.ctx, `INSERT INTO tunnel_rules
+		(id,name,entry_node_id,listen_port,port_mode,network,target_mode,target_host,target_port,subscription_visible,enabled,status,published_version,created_at,updated_at,published_snapshot)
+		VALUES('relay-fallback','Relay',?,34567,'manual','tcp','manual','example.com',443,0,1,'modified',1,'now','now',json_object('InboundID',?))`, f.nodeID, inbound); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.Database.ExecContext(f.ctx, "INSERT INTO node_group_relays(group_id,rule_id) VALUES(?,'relay-fallback')", f.groupID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.Database.ExecContext(f.ctx, "DELETE FROM node_group_inbounds WHERE group_id=?", f.groupID); err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.app.quotaDeployer.filterPublishedGroupAccess(f.ctx, state)
+	if err != nil || !stateHasCredential(next, credential) || !next.Inbounds[0].Enabled {
+		t.Fatalf("fallback removed the published relay credential: %v", err)
+	}
+}

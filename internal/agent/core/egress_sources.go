@@ -68,7 +68,7 @@ func ProbeFingerprint(state desiredstate.State, probe Probe) (string, error) {
 		return "", errors.New("probe outbound missing")
 	}
 	network := state.OutboundNetwork(entry.ID)
-	if probe.SourceIP != "" {
+	if probe.SourceIP != "" && !entry.UseHostNetwork {
 		network = desiredstate.Network{OutboundSourceIP: probe.SourceIP}
 	}
 	credentialIDs := map[string]bool{entry.CredentialID: true}

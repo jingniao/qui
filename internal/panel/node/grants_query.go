@@ -1,16 +1,29 @@
 package node
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
+
+// RuntimeRelayTarget joins a rule aliased as t to its effective inbound, i.
+// The bind parameter contains the targets captured for the current publication.
+// An empty value removes a target. Other rules use their last successful one.
+const RuntimeRelayTarget = `LEFT JOIN json_each(?) relay_override ON relay_override.key=t.id
+JOIN inbounds i ON i.id=coalesce(relay_override.value,json_extract(t.published_snapshot,'$.InboundID'))`
 
 // SubscriptionGroups lists the subscription groups whose users may hold a
 // credential on this node: groups with a member on it, and groups granting a
 // tunnel rule whose target inbound runs here (the rule's clients authenticate
 // at that inbound).
-func (r *Repository) SubscriptionGroups(ctx context.Context, nodeID string) ([]string, error) {
+func (r *Repository) SubscriptionGroups(ctx context.Context, nodeID string, relayTargets map[string]string) ([]string, error) {
+	targets, err := json.Marshal(relayTargets)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.Database.QueryContext(ctx, `SELECT g.id FROM node_groups g WHERE g.enabled=1 AND g.subscription_visible=1 AND g.purpose IN ('subscription','mixed') AND (
 EXISTS(SELECT 1 FROM node_group_members m WHERE m.group_id=g.id AND m.node_id=?) OR
-EXISTS(SELECT 1 FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id AND t.target_mode='linked' JOIN inbounds i ON i.id=t.target_inbound_id WHERE gr.group_id=g.id AND i.node_id=?))
-ORDER BY g.id`, nodeID, nodeID)
+EXISTS(SELECT 1 FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id `+RuntimeRelayTarget+` WHERE gr.group_id=g.id AND i.node_id=?))
+ORDER BY g.id`, nodeID, string(targets), nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -29,8 +42,8 @@ ORDER BY g.id`, nodeID, nodeID)
 // relayTargetNodes lists the servers running the target inbounds of a group's
 // tunnel rule members.
 func (r *Repository) relayTargetNodes(ctx context.Context, groupID string) ([]string, error) {
-	rows, err := r.Database.QueryContext(ctx, `SELECT DISTINCT i.node_id FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id AND t.target_mode='linked'
-JOIN inbounds i ON i.id=t.target_inbound_id WHERE gr.group_id=? ORDER BY i.node_id`, groupID)
+	rows, err := r.Database.QueryContext(ctx, `SELECT DISTINCT i.node_id FROM node_group_relays gr JOIN tunnel_rules t ON t.id=gr.rule_id
+JOIN inbounds i ON i.id=json_extract(t.published_snapshot,'$.InboundID') WHERE gr.group_id=? ORDER BY i.node_id`, groupID)
 	if err != nil {
 		return nil, err
 	}

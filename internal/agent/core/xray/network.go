@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"proxycontrol/internal/agent/hostnet"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
 
@@ -18,8 +19,16 @@ import (
 // family (or a loopback address) cannot be reached from the pinned source
 // address and fails to connect.
 func applyOutboundSource(document *configDocument, state desiredstate.State) error {
+	hostNetwork := state.HostNetworkOutbounds()
+	forced := state.NeedsForcedEgress()
 	for index := range document.Outbounds {
 		outbound := &document.Outbounds[index]
+		if hostNetwork[outbound.sourceID] {
+			if forced {
+				sockopt(outbound).Mark = hostnet.ForcedEgressMark
+			}
+			continue
+		}
 		network := state.OutboundNetwork(outbound.sourceID)
 		if outbound.egressSourceIP != "" {
 			network = desiredstate.Network{OutboundSourceIP: outbound.egressSourceIP}

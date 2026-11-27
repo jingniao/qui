@@ -116,6 +116,10 @@ func nodeBlockers(ctx context.Context, q rowQuery, id string) ([]Blocker, error)
 		{"outbound_group", "SELECT id,name FROM outbound_groups WHERE node_id=? ORDER BY created_at,id", []any{id}},
 		{"proxy_chain", "SELECT id,name FROM proxy_chains WHERE EXISTS(SELECT 1 FROM json_each(proxy_chains.node_ids_json) WHERE json_each.value=?) OR EXISTS(SELECT 1 FROM proxy_chain_hops h WHERE h.chain_id=proxy_chains.id AND (h.source_node_id=? OR h.target_node_id=?)) ORDER BY id", []any{id, id, id}},
 		{"policy", "SELECT id,name FROM policies WHERE EXISTS(SELECT 1 FROM json_each(policies.scope_json,'$.node_ids') WHERE json_each.value=?) ORDER BY priority,id", []any{id}},
+		{"server_egress_policy", `SELECT id,name FROM policies WHERE json_extract(action_json,'$.type')='ServerEgress'
+			AND json_extract(action_json,'$.target_id')=? ORDER BY id`, []any{id}},
+		{"server_egress_group", `SELECT id,name FROM server_egress_groups WHERE EXISTS
+			(SELECT 1 FROM json_each(server_ids_json) WHERE value=?) ORDER BY id`, []any{id}},
 		{"deployment_batch", "SELECT DISTINCT b.id,b.name FROM deployment_batches b JOIN deployment_batch_items i ON i.batch_id=b.id WHERE i.node_id=? AND b.status IN ('deploying','rolling_back','rollback_failed') ORDER BY b.id", []any{id}},
 	} {
 		rows, err := q.QueryContext(ctx, item.Query, item.Args...)

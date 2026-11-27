@@ -43,18 +43,19 @@ confirm_update_receipts() {
     attempt=${tracked##*/}; attempt=${attempt%.request.json}
     result=/var/lib/proxycontrol-install/agent-system-updates/$attempt/result.json
     [[ -f $result ]] || { printf 'legacy state reset requires a durable update result: %s\n' "$attempt" >&2; return 1; }
-    result_status=$(sed -n 's/.*"status":"\([a-z_]*\)","phase".*/\1/p' "$result")
+    result_status=$(sed -n 's/.*"status":"\([a-z_]*\)","phase".*/\1/p' "$result") || return
     case $result_status in
       success|failed) ;;
       *) printf 'legacy state reset requires a confirmed update outcome: %s\n' "$attempt" >&2; return 1;;
     esac
-    result_digest=$(sha256sum "$result"); result_digest=${result_digest%% *}
+    result_digest=$(sha256sum "$result") || return
+    result_digest=${result_digest%% *}
     expected_ack="\"resultSha256\":\"$result_digest\""
     ack=/var/lib/proxy-agent/system-update/$attempt.ack.json
     waiting=false
     while :; do
       if [[ -f $ack ]]; then
-        acknowledgement=$(cat "$ack")
+        acknowledgement=$(cat "$ack") || return
         if [[ $acknowledgement == *"$expected_ack"* ]]; then break; fi
       fi
       if ! $wait_for_ack; then
@@ -84,6 +85,17 @@ start_agent_services() {
     rc-service proxy-agent start 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
   fi
 }
+stop_agent_services() {
+  if [[ -d /run/systemd/system ]]; then
+    systemctl stop proxy-agent.service &&
+      systemctl stop proxy-agent-host-network.path proxy-agent-tuning.path &&
+      systemctl stop proxy-agent-host-network.service proxy-agent-tuning.service
+  else
+    rc-service proxy-agent stop &&
+      rc-service proxy-agent-host-network stop &&
+      rc-service proxy-agent-tuning stop
+  fi
+}
 phase=$(/usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state status)
 case $phase in
   pending|prepared) confirm_update_receipts true;;
@@ -99,19 +111,21 @@ fi
 if [[ $phase != rebuilt && $phase != complete ]]; then
   # seal takes the supervisor/worker lifecycle locks and retires the old identity;
   # stop its users first. A failed stop or seal must never reach deletion.
-  if [[ -d /run/systemd/system ]]; then
-    systemctl stop proxy-agent.service
-    systemctl stop proxy-agent-host-network.path proxy-agent-tuning.path
-    systemctl stop proxy-agent-host-network.service proxy-agent-tuning.service
-  else
-    rc-service proxy-agent stop
-    rc-service proxy-agent-host-network stop
-    rc-service proxy-agent-tuning stop
+  if ! stop_agent_services; then
+    printf 'legacy state reset could not stop all Agent services; restarting the previous Agent\n' >&2
+    start_agent_services
+    exit 1
   fi
   # Recheck after quiescing the writer: a newly submitted task cannot disappear
   # between the acknowledgement scan and the identity seal.
   case $phase in
-    pending|prepared) confirm_update_receipts false;;
+    pending|prepared)
+      if ! confirm_update_receipts false; then
+        printf 'legacy state reset could not confirm update receipts; restarting the previous Agent\n' >&2
+        start_agent_services
+        exit 1
+      fi
+      ;;
   esac
   if ! /usr/local/bin/proxy-agent --config /etc/proxy-agent/config.yaml --reset-legacy-state seal --reset-target-sha256 "$target"; then
     # Nothing has been deleted. Unless the panel committed and only its reply

@@ -29,17 +29,27 @@ const identityOrder = "EXISTS(SELECT 1 FROM subscription_tokens t WHERE t.device
 // GrantAllProtocols sets protocols_json to AllProtocols for every user whose list differs and
 // returns their IDs. EnsureAllAccessIdentities then issues the missing credentials.
 func (r *Repository) GrantAllProtocols(ctx context.Context) ([]string, error) {
-	allBytes, err := json.Marshal(AllProtocols)
-	if err != nil {
-		return nil, err
-	}
-	allJSON := string(allBytes)
-
 	tx, err := r.Database.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	ids, err := grantAllProtocolsTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func grantAllProtocolsTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	allBytes, err := json.Marshal(AllProtocols)
+	if err != nil {
+		return nil, err
+	}
+	allJSON := string(allBytes)
 
 	rows, err := tx.QueryContext(ctx, "SELECT id FROM users WHERE protocols_json <> ? OR protocols_json IS NULL ORDER BY id", allJSON)
 	if err != nil {
@@ -54,7 +64,9 @@ func (r *Repository) GrantAllProtocols(ctx context.Context) ([]string, error) {
 		}
 		ids = append(ids, id)
 	}
-	if err := rows.Close(); err != nil {
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return nil, err
 	}
 
@@ -64,9 +76,6 @@ func (r *Repository) GrantAllProtocols(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return ids, nil
 }
 
@@ -222,20 +231,8 @@ func (r *Repository) ResetCredentials(ctx context.Context, userID string) error 
 // calls it at startup, which also covers a restored database (a restore
 // restarts the service instance). It returns the users whose identity changed.
 func (r *Repository) EnsureAllAccessIdentities(ctx context.Context) ([]string, error) {
-	rows, err := r.Database.QueryContext(ctx, "SELECT id FROM users ORDER BY id")
+	ids, err := accessIdentityUserIDs(ctx, r.Database)
 	if err != nil {
-		return nil, err
-	}
-	ids := []string{}
-	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, userID)
-	}
-	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	changed := []string{}
@@ -249,4 +246,25 @@ func (r *Repository) EnsureAllAccessIdentities(ctx context.Context) ([]string, e
 		}
 	}
 	return changed, nil
+}
+
+func accessIdentityUserIDs(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}) ([]string, error) {
+	rows, err := queryer.QueryContext(ctx, "SELECT id FROM users ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, userID)
+	}
+	err = rows.Err()
+	rows.Close()
+	return ids, err
 }

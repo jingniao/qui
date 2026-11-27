@@ -289,7 +289,7 @@ func (a *Adapter) Validate(ctx context.Context, configuration core.RenderedConfi
 	command.Stdout = io.Discard
 	command.Stderr = io.Discard
 	if err := command.Run(); err != nil {
-		return errors.New("sing-box native configuration validation failed")
+		return core.NativeValidationError(timeout, fmt.Errorf("sing-box native configuration validation failed: %w", err))
 	}
 	return nil
 }
@@ -526,6 +526,20 @@ func (a *Adapter) UnconfirmedStop() bool {
 func (a *Adapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.closeLocked()
+}
+
+func (a *Adapter) Reset() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.closeLocked(); err != nil {
+		return err
+	}
+	a.current = core.RenderedConfig{}
+	return nil
+}
+
+func (a *Adapter) closeLocked() error {
 	if err := a.stopLocked(); err != nil {
 		if errors.Is(err, core.ErrCoreStopUnconfirmed) {
 			return err

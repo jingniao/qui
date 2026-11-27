@@ -168,7 +168,7 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &portalNodes) != nil || len(portalNodes.Items) != 1 || portalNodes.Items[0].Name != "Quota Node 经 HK to US" {
 		t.Fatal(response.Code, response.Body.String())
 	}
-	access, err := f.app.connectionObserver.Repository.AccessForGroups(f.ctx, []string{f.groupID})
+	access, err := f.app.connectionObserver.Repository.AccessForGroups(f.ctx, []string{f.groupID}, nil)
 	if err != nil || len(access) != 2 {
 		t.Fatal(access, err)
 	}
@@ -177,7 +177,7 @@ func TestNodeRelayRealCredentialShareAndPortal(t *testing.T) {
 			t.Fatal("rule-only grant lost the target inbound credential", entry.InboundIDs)
 		}
 	}
-	if groups, err := f.app.nodeRepository.SubscriptionGroups(f.ctx, f.nodeID); err != nil || !slices.Contains(groups, f.groupID) {
+	if groups, err := f.app.nodeRepository.SubscriptionGroups(f.ctx, f.nodeID, nil); err != nil || !slices.Contains(groups, f.groupID) {
 		t.Fatal(groups, err)
 	}
 	saveGroup(group.InboundIDs, []string{relay.Rule.ID})

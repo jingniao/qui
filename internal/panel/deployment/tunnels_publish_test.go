@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
+	"proxycontrol/internal/panel/node"
 	"proxycontrol/internal/panel/proxy"
+	"proxycontrol/internal/panel/user"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
 )
@@ -45,7 +48,7 @@ func managedTunnelFixture(t *testing.T, middle bool) (*gostHosts, proxy.Tunnel, 
 
 // Drive the actual deployment repository as Agents do, including rollback
 // receipts. Tests assert the queue order rather than simulating batch statuses.
-func driveTunnelPublish(t *testing.T, h *gostHosts, selection proxy.PublishSelection, failNode string) (proxy.PublishResult, []string) {
+func driveTunnelPublish(t *testing.T, h *gostHosts, selection proxy.PublishSelection, failNode string, failedRollback ...string) (proxy.PublishResult, []string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
@@ -91,13 +94,132 @@ func driveTunnelPublish(t *testing.T, h *gostHosts, selection proxy.PublishSelec
 				}
 				if command != nil {
 					order = append(order, "rollback:"+nodeID)
-					if err = h.repository.CommandResult(ctx, nodeID, &pb.ApplyResult{CommandId: command.CommandId, Revision: command.Revision, Success: true}); err != nil {
+					result := &pb.ApplyResult{CommandId: command.CommandId, Revision: command.Revision, Success: true}
+					if len(failedRollback) > 0 && nodeID == failedRollback[0] {
+						result.Success, result.Code = false, "rollback_failed"
+					}
+					if err = h.repository.CommandResult(ctx, nodeID, result); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 		}
 	}
+}
+
+func TestTunnelPublishPreservesRollbackFailure(t *testing.T) {
+	h, tunnel, _ := managedTunnelFixture(t, true)
+	selection := proxy.PublishSelection{TunnelIDs: []string{tunnel.ID}}
+	driveTunnelPublish(t, h, selection, "")
+	stored, err := h.service.Repository.Tunnel(h.ctx, tunnel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.RotateTunnelCredentials(h.ctx, stored.ID, stored.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	result, _ := driveTunnelPublish(t, h, selection, h.alpine, h.uk)
+	if result.Status != "rollback_failed" {
+		t.Errorf("batch rollback outcome lost: %+v", result)
+	}
+	for _, item := range result.Servers {
+		if item.NodeID == h.uk && item.Status != "rollback_failed" {
+			t.Errorf("node rollback outcome lost: %+v", item)
+		}
+	}
+	if err := h.repository.RollbackBatch(h.ctx, result.BatchID); err != nil {
+		t.Fatalf("existing batch rollback must accept the failed batch: %v", err)
+	}
+}
+
+func TestLinkedTunnelPublicationMovesRelayOnlyCredentials(t *testing.T) {
+	h := newGostHosts(t)
+	createTarget := func(nodeID string) proxy.Inbound {
+		t.Helper()
+		inbound, err := h.service.SaveInbound(h.ctx, "", proxy.InboundInput{
+			Name: "Relay destination", NodeID: nodeID, Protocol: "shadowsocks", Listen: "0.0.0.0", Port: 30801,
+			Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct",
+			Settings: desiredstate.ProtocolSettings{Method: "chacha20-ietf-poly1305"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inbound
+	}
+	oldTarget, newTarget := createTarget(h.uk), createTarget(h.us2)
+	rule, err := h.service.SaveTunnelRule(h.ctx, "", proxy.TunnelRuleInput{
+		Name: "Linked relay", EntryNodeID: h.alpine, ListenPort: portValue(30701), PortMode: "manual", Network: "both",
+		Target: proxy.TunnelTarget{Mode: "linked", InboundID: oldTarget.ID}, Enabled: true, SubscriptionVisible: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := (&node.Repository{Database: h.database}).SaveGroup(h.ctx, "", node.GroupInput{
+		Name: "Relay only", Purpose: "subscription", Enabled: true, SubscriptionVisible: true, RelayIDs: []string{rule.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.users.Save(h.ctx, "", user.Input{Username: "relay-user", DisplayName: "Relay User", Status: "active", NodeGroupIDs: []string{group.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	assertAccess := func(state desiredstate.State, target proxy.Inbound, want bool) {
+		t.Helper()
+		for _, inbound := range state.Inbounds {
+			if inbound.ID == target.ID {
+				if got := inbound.Enabled && len(inbound.CredentialIDs) == 1; got != want {
+					t.Errorf("%s: has credentials = %t, want %t", target.NodeID, got, want)
+				}
+				return
+			}
+		}
+		t.Fatalf("target %s is missing from the state", target.ID)
+	}
+	assertPublished := func(target proxy.Inbound, want bool) {
+		t.Helper()
+		state, err := h.repository.Published(h.ctx, target.NodeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAccess(state, target, want)
+	}
+	// Establish a previously deployed configuration on both destination servers.
+	for _, target := range []proxy.Inbound{oldTarget, newTarget} {
+		state, intent, err := h.service.SnapshotIntent(h.ctx, target.NodeID, h.users)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.publish("target baseline", []proxy.NodeSnapshot{{State: state, InboundIntent: intent}})
+	}
+	selection := proxy.PublishSelection{RuleIDs: []string{rule.ID}}
+	if result, _ := driveTunnelPublish(t, h, selection, ""); result.Status != "success" {
+		t.Fatal(result)
+	}
+	assertPublished(oldTarget, true)
+	input := rule.TunnelRuleInput
+	input.Target.InboundID = newTarget.ID
+	if _, err := h.service.SaveTunnelRule(h.ctx, rule.ID, input); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []proxy.Inbound{oldTarget, newTarget} {
+		state, err := h.service.Snapshot(h.ctx, target.NodeID, h.users)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertAccess(state, target, target.ID == oldTarget.ID)
+	}
+	failed, order := driveTunnelPublish(t, h, selection, h.alpine)
+	if failed.Status != "failed" || !slices.Contains(order, "rollback:"+h.us2) {
+		t.Errorf("new destination should be rolled back when the entry fails: %+v, %v", failed, order)
+	}
+	assertPublished(oldTarget, true)
+	assertPublished(newTarget, false)
+	result, order := driveTunnelPublish(t, h, selection, "")
+	if result.Status != "success" || !slices.Equal(order, []string{h.us2, h.alpine, h.uk}) {
+		t.Errorf("expected new target, entry, old target in one batch: %+v, %v", result, order)
+	}
+	assertPublished(oldTarget, false)
+	assertPublished(newTarget, true)
 }
 
 func TestManagedTunnelPlanPublishNoopRotationAndRemoval(t *testing.T) {

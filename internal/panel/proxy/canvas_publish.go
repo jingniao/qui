@@ -41,6 +41,7 @@ type CanvasPublishNode struct {
 // CanvasPublishResult is what the canvas shows after publishing: the batch (or
 // the single revision) and each node's revision and status.
 type CanvasPublishResult struct {
+	Status   string              `json:"status,omitempty"`
 	Entries  []CanvasPlanEntry   `json:"entries,omitempty"`
 	BatchID  string              `json:"batchId,omitempty"`
 	Nodes    []CanvasPublishNode `json:"nodes"`

@@ -96,6 +96,7 @@ func (p *CanvasPublisher) tunnelPublicationResult(ctx context.Context, batchID s
 		return result, false, err
 	}
 	done := batch.Status == "success" || batch.Status == "failed" || batch.Status == "rolled_back" || batch.Status == "rollback_failed"
+	result.Status = batch.Status
 	for _, item := range batch.Items {
 		n := proxy.CanvasPublishNode{NodeID: item.NodeID, Revision: item.Revision, Status: item.Status}
 		if !done {
@@ -111,7 +112,7 @@ func (p *CanvasPublisher) tunnelPublicationResult(ctx context.Context, batchID s
 			if targetStatus == "failed" || targetStatus == "rollback" {
 				n.FailureCode = code
 			}
-			if targetStatus == "rollback" {
+			if targetStatus == "rollback" && n.Status != "rollback_failed" {
 				n.AutomaticRollback = true
 				n.Status = "rollback"
 			}
@@ -121,8 +122,6 @@ func (p *CanvasPublisher) tunnelPublicationResult(ctx context.Context, batchID s
 			n.Status = "applied"
 		case "waiting":
 			n.Status = "skipped"
-		case "rollback_failed":
-			n.Status = "failed"
 		case "rollback":
 			n.Status = "rolled_back"
 		}

@@ -67,6 +67,7 @@ type Reconciler struct {
 	componentHoldsInvalid  map[string]bool
 	controlOnly            bool
 	startupErr             error
+	restoreErr             error
 	// sourceDigest and sourceTargets cache the source bindings MissingSources
 	// checks, keyed by the digest of the running revision they were read from.
 	sourceDigest  string
@@ -203,8 +204,7 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 		if original == nil && r.manifest.requiresSuccessReceipt(state.Revision) {
 			return result, errors.New("required original successful apply receipt is missing")
 		}
-		health, err := r.Adapter.Health(ctx)
-		if err == nil && health.Healthy {
+		if health, err := r.healthLocked(ctx); err == nil && health.Healthy {
 			if original != nil {
 				return *original, nil
 			}
@@ -275,9 +275,9 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 	if err := r.Adapter.Validate(ctx, rendered); err != nil {
 		result.Code = "validation_failed"
 		result.Message = err.Error()
-		if !retainedRevision && !update.Changed() {
+		if !retainedRevision && !update.Changed() && permanentFailure(result.Code, err) {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
-				return result, saveErr
+				return result, errors.Join(err, saveErr)
 			}
 		}
 		return result, err
@@ -313,8 +313,30 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 	if err := writeFile(filepath.Join(revisionDir, "core.json.enc"), sealedCore); err != nil {
 		return early(revisionStoreFailedCode, err)
 	}
+	// Marked sockets depend on the nft rule to override source exemptions.
+	// Install and confirm it before any such core can accept traffic.
+	hostNetworkApplied := state.NeedsForcedEgress()
+	if hostNetworkApplied {
+		if err := r.applyHostNetwork(ctx, state); err != nil {
+			code := hostNetworkFailedCode
+			if restoreErr := r.restoreCurrentHostNetwork(ctx); restoreErr != nil {
+				code, err = "rollback_failed", errors.Join(err, restoreErr)
+			}
+			if !retainedRevision {
+				err = errors.Join(err, os.RemoveAll(revisionDir))
+			}
+			return early(code, err)
+		}
+	}
 	result, err = r.Adapter.Apply(ctx, rendered)
 	if err != nil {
+		if hostNetworkApplied {
+			if restoreErr := r.restoreCurrentHostNetwork(ctx); restoreErr != nil {
+				result.Code = "rollback_failed"
+				result.RolledBack = false
+				err = errors.Join(err, restoreErr)
+			}
+		}
 		// The retained revision is the only copy a later startup can restore,
 		// so re-applying it reports the failure without touching its directory:
 		// a removed directory, or one holding only a failure receipt, would turn
@@ -322,9 +344,9 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 		if retainedRevision {
 			return result, err
 		}
-		if permanentFailure(result.Code) && !update.Changed() {
+		if permanentFailure(result.Code, err) && !update.Changed() {
 			if saveErr := recordPermanentFailure(revisionDir, hash, result); saveErr != nil {
-				return result, saveErr
+				return result, errors.Join(err, saveErr)
 			}
 			return result, err
 		}
@@ -332,7 +354,7 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 		// is not cached. Remove the whole revision directory: its sealed desired
 		// and core snapshots must not linger after a failed apply.
 		if removeErr := os.RemoveAll(revisionDir); removeErr != nil {
-			return result, removeErr
+			return result, errors.Join(err, removeErr)
 		}
 		return result, err
 	}
@@ -340,22 +362,26 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 	// be committed, so the helper is driven before the manifest: a failure
 	// restores the previous runtime and the previous rules on the host and is
 	// retried like any other temporary failure.
-	if err := r.applyHostNetwork(ctx, state); err != nil {
-		if restoreErr := update.Rollback(); restoreErr != nil {
-			result.Success = false
-			result.Code = "rollback_failed"
-			return result, errors.Join(err, restoreErr)
-		}
+	var hostNetworkErr error
+	if !hostNetworkApplied {
+		hostNetworkErr = r.applyHostNetwork(ctx, state)
+	}
+	if err := hostNetworkErr; err != nil {
 		result.Success = false
 		result.Code = hostNetworkFailedCode
 		result.Message = err.Error()
-		if r.manifest.Revision > 0 {
-			if rollbackErr := r.restoreRuntimeLocked(ctx, r.manifest.Revision); rollbackErr != nil {
-				result.Code = "rollback_failed"
-				return result, errors.Join(err, rollbackErr)
-			}
-			result.RolledBack = true
+		if r.manifest.Revision == 0 {
+			return r.compensateFirstApply(ctx, update, revisionDir, result, err)
 		}
+		if restoreErr := update.Rollback(); restoreErr != nil {
+			result.Code = "rollback_failed"
+			return result, errors.Join(err, restoreErr)
+		}
+		if rollbackErr := r.restoreRuntimeLocked(ctx, r.manifest.Revision); rollbackErr != nil {
+			result.Code = "rollback_failed"
+			return result, errors.Join(err, rollbackErr)
+		}
+		result.RolledBack = true
 		// The retained revision keeps its directory here too, for the same
 		// reason as a failed apply above.
 		if !retainedRevision {
@@ -400,20 +426,19 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 	if err != nil {
 		result.Success = false
 		result.Code = "persistence_failed"
+		result.Message = "could not persist successful revision"
+		if previous.Revision == 0 {
+			return r.compensateFirstApply(ctx, update, revisionDir, result, err)
+		}
 		if restoreErr := update.Rollback(); restoreErr != nil {
 			result.Code = "rollback_failed"
 			return result, errors.Join(err, restoreErr)
 		}
-		result.Message = "could not persist successful revision"
-		if previous.Revision > 0 {
-			rollbackErr := r.restoreRevision(ctx, previous.Revision)
-			if rollbackErr != nil {
-				result.Code = "rollback_failed"
-				return result, fmt.Errorf("persist successful revision and rollback failed")
-			}
-			result.Success = false
-			result.RolledBack = true
+		if rollbackErr := r.restoreRevision(ctx, previous.Revision); rollbackErr != nil {
+			result.Code = "rollback_failed"
+			return result, errors.Join(err, rollbackErr)
 		}
+		result.RolledBack = true
 		receipt, encodeErr := json.Marshal(Receipt{Digest: hash, Result: result})
 		if encodeErr != nil {
 			return result, encodeErr
@@ -424,6 +449,7 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 		return result, errors.New("could not persist successful revision")
 	}
 	r.manifest = next
+	r.restoreErr = nil
 	committed = true
 	if err := update.Commit(); err != nil {
 		// The runtime, success receipt and manifest are already committed.
@@ -445,6 +471,17 @@ func (r *Reconciler) apply(ctx context.Context, state desiredstate.State, update
 		}
 	}
 	return result, resultErr
+}
+
+func (r *Reconciler) compensateFirstApply(ctx context.Context, update *rulesets.Update, revisionDir string, result core.ApplyResult, applyErr error) (core.ApplyResult, error) {
+	undoCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	err := errors.Join(update.Rollback(), r.restoreRuntimeLocked(undoCtx, 0), os.RemoveAll(revisionDir))
+	result.RolledBack = err == nil
+	if err != nil {
+		result.Code = "rollback_failed"
+	}
+	return result, errors.Join(applyErr, err)
 }
 
 // cleanupRuleSets removes rule set files that neither the new revision nor any
@@ -473,12 +510,10 @@ func (r *Reconciler) cleanupRuleSets(state desiredstate.State, successful []int6
 	preparer.CleanupRuleSets(states...)
 }
 
-// permanentFailure reports whether a failed apply is cached. A rendered or
-// validated configuration will not change when the same revision is sent again,
-// so it is permanent; stop, start, health and rollback failures are temporary
-// and are retried.
-func permanentFailure(code string) bool {
-	return code == "render_failed" || code == "validation_failed"
+// Cache render failures and explicit native rejections of immutable revisions.
+func permanentFailure(code string, err error) bool {
+	var rejected *core.ValidationRejectedError
+	return code == "render_failed" || code == "validation_failed" && errors.As(err, &rejected)
 }
 
 // recordPermanentFailure stores a permanent failure receipt. The revision
@@ -524,14 +559,25 @@ func (r *Reconciler) restoreRevision(ctx context.Context, revision int64) error 
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
 	}
+	hostNetworkApplied := state.NeedsForcedEgress()
+	if hostNetworkApplied {
+		if err := r.applyHostNetwork(ctx, state); err != nil {
+			return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
+		}
+	}
 	if _, err := r.Adapter.Apply(ctx, rendered); err != nil {
 		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
 	}
-	r.renderedDigest = digest(rendered.Data)
 	// A failure rollback, a manual rollback and a startup restore all end here,
 	// so the helper is driven to the restored revision as well.
-	if err := r.applyHostNetwork(ctx, state); err != nil {
-		return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
+	if !hostNetworkApplied {
+		if err := r.applyHostNetwork(ctx, state); err != nil {
+			return fmt.Errorf("%w: %w", ErrRuntimeRestore, err)
+		}
+	}
+	r.renderedDigest = digest(rendered.Data)
+	if revision == r.manifest.Revision {
+		r.restoreErr = nil
 	}
 	return nil
 }
@@ -552,7 +598,31 @@ func (r *Reconciler) Restore(ctx context.Context) error {
 	if digest(data) != r.manifest.Digest {
 		return errors.New("current revision checksum mismatch")
 	}
-	return r.restoreRevision(ctx, r.manifest.Revision)
+	err = r.restoreRevision(ctx, r.manifest.Revision)
+	if errors.Is(err, ErrRuntimeRestore) {
+		r.restoreErr = err
+	}
+	return err
+}
+
+// RuntimeRestoreError reports a failed restore that a new revision can repair.
+func (r *Reconciler) RuntimeRestoreError() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.restoreErr
+}
+
+func (r *Reconciler) Health(ctx context.Context) (core.HealthStatus, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.healthLocked(ctx)
+}
+
+func (r *Reconciler) healthLocked(ctx context.Context) (core.HealthStatus, error) {
+	if err := errors.Join(r.startupErr, r.restoreErr); err != nil {
+		return core.HealthStatus{CheckedAt: time.Now()}, err
+	}
+	return r.Adapter.Health(ctx)
 }
 func (r *Reconciler) Rollback(ctx context.Context, revision int64) error {
 	r.mu.Lock()
@@ -615,6 +685,7 @@ func (r *Reconciler) rollbackLocked(ctx context.Context, revision int64) error {
 		return err
 	}
 	r.manifest = next
+	r.restoreErr = nil
 	return nil
 }
 
@@ -622,14 +693,11 @@ func (r *Reconciler) restoreRuntimeLocked(ctx context.Context, revision int64) e
 	if revision > 0 {
 		return r.restoreRevision(ctx, revision)
 	}
-	closer, ok := r.Adapter.(interface{ Close() error })
-	if !ok {
-		return errors.New("core cannot restore empty state")
-	}
-	if err := closer.Close(); err != nil {
+	// The empty state enforces nothing, so the helper clears the table. A core
+	// that did not stop keeps serving its configuration and still needs its rules.
+	if err := core.ResetAdapter(r.Adapter); err != nil {
 		return err
 	}
-	// The empty state enforces nothing, so the helper clears the table.
 	return r.applyHostNetwork(ctx, desiredstate.State{})
 }
 func (r *Reconciler) readRevision(revision int64) ([]byte, error) {

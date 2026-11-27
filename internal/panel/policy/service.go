@@ -88,6 +88,11 @@ func (s *Service) Save(ctx context.Context, ruleID string, input Input) (Record,
 	if input.Action.Failover == "" {
 		input.Action.Failover = "Block"
 	}
+	if isServerEgress(input.Action.Type) {
+		if _, err := s.ServerEgressTargets(ctx, input.Action.Type, input.Action.TargetID); err != nil {
+			return Record{}, err
+		}
+	}
 	if input.Action.Type == "Outbound" || input.Action.Type == "OutboundGroup" || input.Action.Type == "ProxyChain" {
 		owner, err := s.validateTarget(ctx, input.Action.Type, input.Action.TargetID, input.Match.Network)
 		if err != nil {
@@ -281,7 +286,8 @@ func (s *Service) resolve(ctx context.Context, rule desiredstate.Policy, native 
 	if count := shared.MatcherCount(rule); count > shared.MaxExpandedMatchers {
 		return rule, fmt.Errorf("%w: 策略「%s」展开规则集后有 %d 条匹配，超过上限 %d 条，请减少引用的规则集", shared.ErrMatcherLimit, rule.Name, count, shared.MaxExpandedMatchers)
 	}
-	return rule, shared.ValidateExpanded(&rule)
+	err := validateNodePolicy(&rule, shared.ValidateExpanded)
+	return rule, err
 }
 func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Policy, error) {
 	if n, err := s.Nodes.Get(ctx, nodeID); err != nil {
@@ -317,7 +323,7 @@ func (s *Service) ForNode(ctx context.Context, nodeID string) ([]desiredstate.Po
 		}
 		rule.Scope.NodeIDs = []string{nodeID}
 		rule.Scope.GroupIDs = nil
-		if rule.Enabled && rule.Action.Type != "Direct" && rule.Action.Type != "Block" {
+		if rule.Enabled && rule.Action.Type != "Direct" && rule.Action.Type != "Block" && !isServerEgress(rule.Action.Type) {
 			owner, err := s.validateTarget(ctx, rule.Action.Type, rule.Action.TargetID, rule.Match.Network)
 			if err != nil || owner != nodeID {
 				return nil, errors.New("policy target unavailable or transport capability changed; update the policy before publication")

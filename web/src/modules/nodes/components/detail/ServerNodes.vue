@@ -73,6 +73,7 @@ import { ref, watch, onUnmounted, type Ref } from 'vue';
 import type { NodeView } from '../../api';
 import { proxyAPI, choices, strategyNames, type Inbound, type Outbound, type OutboundGroup } from '../../../proxy/api';
 import { invalidatesRead } from '../../../../app/apiClient';
+import { showToast } from '../../../../app/api';
 import { isOwner } from '../../../../app/auth';
 import { listenNetworks } from '../../../proxy/components/node-editor/nodeEditorModel';
 import { coreLabel, isCoreName } from '../../coreSummary';
@@ -90,13 +91,20 @@ function inboundCoreName(item: Inbound): string {
 }
 async function toggle(item: Inbound) {
   if (busy.value || !isOwner.value || props.node.deletedAt) return;
+  const enabled = !item.enabled;
   busy.value = true; error.value = '';
   try {
-    const latest = (await choices((p, s) => proxyAPI.inbounds(props.node.id, p, s))).find(i => i.id === item.id);
+    const items = await choices((p, s) => proxyAPI.inbounds(props.node.id, p, s));
+    const latest = items.find(i => i.id === item.id);
     if (!latest) throw new Error('节点已删除，请重新读取');
+    if (latest.enabled === enabled) {
+      inbounds.value = items;
+      showToast('状态已被其他页面修改', 'info');
+      return;
+    }
     // The API rejects unknown fields, so send only the input fields of the record.
     const { name, nodeId, protocol, core, listen, port, subscriptionVisible, internalRelay, egressSourceIp, defaultOutbound, allowedUserIds, settings } = latest;
-    await proxyAPI.saveInbound(latest.id, { name, nodeId, protocol, core, listen, port, enabled: !latest.enabled, subscriptionVisible, internalRelay, egressSourceIp, defaultOutbound, allowedUserIds, settings });
+    await proxyAPI.saveInbound(latest.id, { name, nodeId, protocol, core, listen, port, enabled, subscriptionVisible, internalRelay, egressSourceIp, defaultOutbound, allowedUserIds, settings });
     emit('saved');
   } catch (e) { error.value = (e as Error).message; }
   finally { busy.value = false; }

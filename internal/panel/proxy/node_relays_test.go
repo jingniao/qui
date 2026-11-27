@@ -258,7 +258,9 @@ func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
 	}}
 	p.service.Deploy = receipt
 	result, err := p.service.PublishTunnels(p.ctx, PublishSelection{RuleIDs: []string{rule.ID}}, "owner", p.users)
-	if err != nil || len(result.Servers) != 1 || result.Servers[0].Status != "applied" {
+	if err != nil || len(result.Servers) != 2 ||
+		result.Servers[0].NodeID != p.inbound.NodeID || result.Servers[0].Status != "applied" ||
+		result.Servers[1].NodeID != p.nodeB || result.Servers[1].Status != "applied" {
 		t.Fatal(result, err)
 	}
 	store := &published.RelayStore{Database: p.database}
@@ -283,6 +285,43 @@ func TestRelaySnapshotCapturedBeforeApplyAndRetainedOnFailure(t *testing.T) {
 	after, err := store.Relays(p.ctx)
 	if err != nil || len(after) != 1 || !reflect.DeepEqual(after[0], before[0]) {
 		t.Fatal(after, err)
+	}
+}
+
+func TestCrossTargetRulesPublishWithoutOrderingCycle(t *testing.T) {
+	p := newPublishPanel(t)
+	caps, _ := json.Marshal(&pb.Capabilities{CoreName: "xray", ForwardInboundSupported: true})
+	if _, err := p.database.Exec("UPDATE nodes SET capabilities_json=? WHERE id IN (?,?)", string(caps), p.nodeA, p.nodeB); err != nil {
+		t.Fatal(err)
+	}
+	inboundB, err := p.service.SaveInbound(p.ctx, "", InboundInput{Name: "B user", NodeID: p.nodeB, Protocol: "socks5", Listen: "0.0.0.0", Port: 1081, Enabled: true, SubscriptionVisible: true, DefaultOutbound: "direct"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toA, err := p.service.SaveTunnelRule(p.ctx, "", TunnelRuleInput{Name: "to-a", EntryNodeID: p.nodeB, ListenPort: canvasTestPort(31000), PortMode: "manual", Network: "tcp", Target: TunnelTarget{Mode: "linked", InboundID: p.inbound.ID}, Enabled: true, SubscriptionVisible: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toB, err := p.service.SaveTunnelRule(p.ctx, "", TunnelRuleInput{Name: "to-b", EntryNodeID: p.nodeA, ListenPort: canvasTestPort(31001), PortMode: "manual", Network: "tcp", Target: TunnelTarget{Mode: "linked", InboundID: inboundB.ID}, Enabled: true, SubscriptionVisible: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := p.service.PlanTunnels(p.ctx, PublishSelection{RuleIDs: []string{toA.ID, toB.ID}})
+	if err != nil || !plan.OK || len(plan.Servers) != 2 {
+		t.Fatalf("cross-target rules could not be planned: %+v %v", plan, err)
+	}
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("dropped switch-over order not reported once: %q", plan.Warnings)
+	}
+	// The other rule keeps its order: its target precedes its entry.
+	first := p.nodeA
+	if strings.Contains(plan.Warnings[0], "to-a") {
+		first = p.nodeB
+	} else if !strings.Contains(plan.Warnings[0], "to-b") {
+		t.Fatalf("warning does not name a rule: %q", plan.Warnings[0])
+	}
+	if plan.Servers[0].NodeID != first {
+		t.Fatalf("kept rule's target is not published first: %s, %s", plan.Servers[0].NodeID, plan.Servers[1].NodeID)
 	}
 }
 

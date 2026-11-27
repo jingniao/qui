@@ -22,6 +22,7 @@ type streamSettings struct {
 	Sockopt  *sockoptSettings            `json:"sockopt,omitempty"`
 }
 type sockoptSettings struct {
+	Mark           int    `json:"mark,omitempty"`
 	Interface      string `json:"interface,omitempty"`
 	DomainStrategy string `json:"domainStrategy,omitempty"`
 }

@@ -7,16 +7,18 @@ import (
 	"proxycontrol/internal/agent/core"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"proxycontrol/pkg/contracts/scheduler"
 )
 
 // fakeCoreAdapter is a core.Adapter that never runs a process. Tests use it to
 // exercise Reconciler retry and scheduled-refresh logic without a real core.
 type fakeCoreAdapter struct {
-	renderCalls   int
-	validateCalls int
-	applyCalls    int
-	failRender    bool
-	failValidate  bool
+	renderCalls        int
+	validateCalls      int
+	applyCalls         int
+	failRender         bool
+	validationErr      error
+	applyValidationErr error
 	// failRenderRevision fails only that revision's render, the way a core the
 	// operator installed cannot start a retained revision built for another one.
 	failRenderRevision int64
@@ -26,6 +28,7 @@ type fakeCoreAdapter struct {
 	renderVariant string
 	applyCodes    []string // one per Apply call; an empty entry means success
 	closed        bool
+	closeErr      error
 	applied       []core.RenderedConfig
 }
 
@@ -47,12 +50,12 @@ func (a *fakeCoreAdapter) Render(_ context.Context, state desiredstate.State) (c
 }
 func (a *fakeCoreAdapter) Validate(context.Context, core.RenderedConfig) error {
 	a.validateCalls++
-	if a.failValidate {
-		return errors.New("validation failed")
-	}
-	return nil
+	return a.validationErr
 }
 func (a *fakeCoreAdapter) Apply(_ context.Context, configuration core.RenderedConfig) (core.ApplyResult, error) {
+	if a.applyValidationErr != nil {
+		return core.ApplyResult{Revision: configuration.Revision, Code: "validation_failed"}, a.applyValidationErr
+	}
 	code := ""
 	if a.applyCalls < len(a.applyCodes) {
 		code = a.applyCodes[a.applyCalls]
@@ -71,4 +74,12 @@ func (a *fakeCoreAdapter) Health(context.Context) (core.HealthStatus, error) {
 func (a *fakeCoreAdapter) CollectStats(context.Context) (core.StatsBatch, error) {
 	return core.StatsBatch{}, nil
 }
-func (a *fakeCoreAdapter) Close() error { a.closed = true; return nil }
+func (a *fakeCoreAdapter) Close() error { a.closed = true; return a.closeErr }
+
+type fakeXrayRuntime struct{ fakeCoreAdapter }
+
+func (*fakeXrayRuntime) Name() string                                { return "xray" }
+func (*fakeXrayRuntime) ConfigureRuntime(core.RuntimeHooks)          {}
+func (*fakeXrayRuntime) SampleTraffic(context.Context) error         { return nil }
+func (*fakeXrayRuntime) SupportsAccountTelemetry() bool              { return false }
+func (*fakeXrayRuntime) OutboundHealth() map[string]scheduler.Health { return nil }

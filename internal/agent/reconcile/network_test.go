@@ -92,7 +92,7 @@ func TestNetworkAvailabilityCheckCases(t *testing.T) {
 // feature depends on: the failure is reported under its own code, and it is not
 // cached, so the same revision succeeds once the address appears.
 func TestNetworkUnavailableIsTemporaryAndRetried(t *testing.T) {
-	if permanentFailure(networkUnavailableCode) {
+	if permanentFailure(networkUnavailableCode, nil) {
 		t.Fatal("network_unavailable must not be cached as a permanent failure")
 	}
 	ctx := context.Background()

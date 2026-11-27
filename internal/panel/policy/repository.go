@@ -187,7 +187,7 @@ func (r *Repository) Save(ctx context.Context, ruleID string, input Input) (Reco
 	if rule.Name == "" || len(input.Remark) > 1024 {
 		return Record{}, errors.New("policy name required or remark too long")
 	}
-	if err := shared.Validate(&rule); err != nil {
+	if err := validateNodePolicy(&rule, shared.Validate); err != nil {
 		return Record{}, err
 	}
 	scope, _ := json.Marshal(rule.Scope)
@@ -453,14 +453,11 @@ func (r *Repository) DeleteService(ctx context.Context, serviceID string) error 
 		return err
 	}
 	defer tx.Rollback()
-	var builtin bool
-	if err := tx.QueryRowContext(ctx, "SELECT builtin FROM service_sets WHERE id=?", serviceID).Scan(&builtin); errors.Is(err, sql.ErrNoRows) {
+	var existingID string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM service_sets WHERE id=?", serviceID).Scan(&existingID); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
-	}
-	if builtin {
-		return errors.New("builtin service sets cannot be deleted")
 	}
 	refs, err := r.serviceReferences(ctx, tx, serviceID)
 	if err != nil {

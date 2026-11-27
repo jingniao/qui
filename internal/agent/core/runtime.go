@@ -57,6 +57,17 @@ type Runtime interface {
 	OutboundHealth() map[string]scheduler.Health
 }
 
+// ResetAdapter stops an adapter and discards its active rollback baseline.
+func ResetAdapter(adapter Adapter) error {
+	if resetter, ok := adapter.(interface{ Reset() error }); ok {
+		return resetter.Reset()
+	}
+	if closer, ok := adapter.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return errors.New("core cannot restore empty state")
+}
+
 // BinaryRuntime selects only the fixed adapter's executable after its process
 // has stopped. Reconciler serializes the entire update against publication,
 // policy refresh and ordinary rollback.

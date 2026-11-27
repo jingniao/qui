@@ -47,7 +47,7 @@ agent_cli() {
 systemctl() {
   echo "$*" >> "$root/ops"
   case $1 in
-    stop) [[ $scenario != stop-fails ]] || return 1; stop_agent;;
+    stop) [[ $scenario != stop-fails || $2 == proxy-agent.service ]] || return 1; stop_agent;;
     start) if [[ $2 == proxy-agent.service ]]; then start_agent; fi;;
     restart) if [[ $2 == proxy-agent-update.path ]]; then touch "$root/watcher"; fi;;
     *) return 1;;
@@ -56,7 +56,7 @@ systemctl() {
 rc-service() {
   echo "$*" >> "$root/ops"
   case $2 in
-    stop) [[ $scenario != stop-fails ]] || return 1; stop_agent;;
+    stop) [[ $scenario != stop-fails || $1 == proxy-agent ]] || return 1; stop_agent;;
     start|restart)
       if [[ $1 == proxy-agent-update ]]; then touch "$root/watcher"; fi
       start_agent
@@ -128,8 +128,12 @@ for scenario in pending prepared sealed deleting deleted rebuilt seal-fails stop
   if [[ $scenario == seal-fails || $scenario == stop-fails || $scenario == rollback-pending || $scenario == missing-result || $scenario == new-unconfirmed ]]; then
     check test "$code" -eq 1
     check bash -c '! grep -Eq "^(rebuild|complete)$" "$root/ops"'
-    # Nothing was deleted: a failed seal restores the previous Agent.
-    if [[ $scenario == seal-fails ]]; then check test -e "$root/started"; fi
+    case $scenario in
+      seal-fails|stop-fails|new-unconfirmed)
+        check test -e "$root/stopped"
+        check test -e "$root/started"
+        ;;
+    esac
   else
     check test "$code" -eq 0
     check test "$(cat "$root/phase")" = complete

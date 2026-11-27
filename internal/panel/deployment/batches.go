@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"proxycontrol/internal/panel/proxy"
 	"proxycontrol/internal/panel/subscription/availability"
-	"proxycontrol/internal/platform/id"
 	"proxycontrol/internal/platform/agentidentity"
+	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
+	"proxycontrol/pkg/contracts/desiredstate"
 )
 
 type Batch struct {
@@ -155,6 +156,9 @@ func (r *Repository) createBatch(ctx context.Context, batchID, chainID, name, au
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return Batch{}, err
 		}
+		if snapshot.ExpectedPreviousRevision != nil && previous != *snapshot.ExpectedPreviousRevision {
+			return Batch{}, fmt.Errorf("%w: %s", ErrPublishedBaselineChanged, state.NodeID)
+		}
 		intent, err := encodeInboundIntent(snapshot.InboundIntent)
 		if err != nil {
 			return Batch{}, err
@@ -185,7 +189,7 @@ func (r *Repository) createBatch(ctx context.Context, batchID, chainID, name, au
 		if _, err := tx.ExecContext(ctx, "UPDATE config_revisions SET encrypted_state=? WHERE id=?", sealed, revision); err != nil {
 			return Batch{}, err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_batch_items(batch_id,position,node_id,revision,previous_revision,status) VALUES(?,?,?,?,?,'waiting')", batchID, position, state.NodeID, revision, previous); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_batch_items(batch_id,position,node_id,revision,previous_revision,status,expected_previous_revision) VALUES(?,?,?,?,?,'waiting',?)", batchID, position, state.NodeID, revision, previous, snapshot.ExpectedPreviousRevision); err != nil {
 			return Batch{}, err
 		}
 	}
@@ -256,6 +260,13 @@ func (r *Repository) StartBatch(ctx context.Context, batchID string) error {
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		var expected sql.NullInt64
+		if err := tx.QueryRowContext(ctx, "SELECT expected_previous_revision FROM deployment_batch_items WHERE batch_id=? AND position=?", batchID, item.Position).Scan(&expected); err != nil {
+			return err
+		}
+		if expected.Valid && expected.Int64 != previous {
+			return fmt.Errorf("%w: %s", ErrPublishedBaselineChanged, item.NodeID)
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE deployment_batch_items SET previous_revision=? WHERE batch_id=? AND position=?", previous, batchID, item.Position); err != nil {
 			return err
 		}
@@ -315,7 +326,7 @@ func (r *Repository) advanceBatch(ctx context.Context, tx *sql.Tx, revision int6
 		if _, err := tx.ExecContext(ctx, "UPDATE deployment_batches SET status='rolling_back' WHERE id=?", batchID); err != nil {
 			return err
 		}
-		return queueRollback(ctx, tx, batchID)
+		return r.queueRollback(ctx, tx, batchID)
 	}
 	var next BatchItem
 	err = tx.QueryRowContext(ctx, "SELECT position,node_id,revision,previous_revision,status,rollback_command_id FROM deployment_batch_items WHERE batch_id=? AND status='waiting' ORDER BY position LIMIT 1", batchID).Scan(&next.Position, &next.NodeID, &next.Revision, &next.PreviousRevision, &next.Status, &next.RollbackCommandID)
@@ -344,11 +355,11 @@ func (r *Repository) advanceBatch(ctx context.Context, tx *sql.Tx, revision int6
 		if _, updateErr := tx.ExecContext(ctx, "UPDATE deployment_batches SET status='rolling_back' WHERE id=?", batchID); updateErr != nil {
 			return updateErr
 		}
-		return queueRollback(ctx, tx, batchID)
+		return r.queueRollback(ctx, tx, batchID)
 	}
 	return nil
 }
-func queueRollback(ctx context.Context, tx *sql.Tx, batchID string) error {
+func (r *Repository) queueRollback(ctx context.Context, tx *sql.Tx, batchID string) error {
 	var item BatchItem
 	err := tx.QueryRowContext(ctx, "SELECT position,node_id,revision,previous_revision FROM deployment_batch_items WHERE batch_id=? AND status='success' ORDER BY position DESC LIMIT 1", batchID).Scan(&item.Position, &item.NodeID, &item.Revision, &item.PreviousRevision)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -362,10 +373,28 @@ func queueRollback(ctx context.Context, tx *sql.Tx, batchID string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_commands(id,node_id,revision,operation,status,created_at) VALUES(?,?,?,'rollback','pending',?)", commandID, item.NodeID, item.PreviousRevision, now()); err != nil {
+	proposed := desiredstate.State{NodeID: item.NodeID}
+	if item.PreviousRevision != 0 {
+		proposed, err = r.stateInTransaction(ctx, tx, item.PreviousRevision)
+		if err != nil {
+			return err
+		}
+	}
+	commandStatus, itemStatus, resultCode := "pending", "rollback_pending", ""
+	if err := r.keepReferencedServerEgressListener(ctx, tx, proposed); errors.Is(err, ErrDependency) {
+		// Preserve the preceding Agent acknowledgement while recording that
+		// this node's rollback cannot be dispatched safely.
+		commandStatus, itemStatus, resultCode = "failed", "rollback_failed", "dependency_not_ready"
+		if _, err := tx.ExecContext(ctx, "UPDATE deployment_batches SET status='rollback_failed' WHERE id=?", batchID); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE deployment_batch_items SET status='rollback_pending',rollback_command_id=? WHERE batch_id=? AND position=?", commandID, batchID, item.Position)
+	if _, err := tx.ExecContext(ctx, "INSERT INTO deployment_commands(id,node_id,revision,operation,status,result_code,created_at) VALUES(?,?,?,'rollback',?,?,?)", commandID, item.NodeID, item.PreviousRevision, commandStatus, resultCode, now()); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE deployment_batch_items SET status=?,rollback_command_id=? WHERE batch_id=? AND position=?", itemStatus, commandID, batchID, item.Position)
 	return err
 }
 func (r *Repository) RollbackBatch(ctx context.Context, batchID string) error {
@@ -414,7 +443,7 @@ func (r *Repository) RollbackBatch(ctx context.Context, batchID string) error {
 	if _, err := tx.ExecContext(ctx, "UPDATE deployment_batches SET status='rolling_back' WHERE id=?", batchID); err != nil {
 		return err
 	}
-	if err := queueRollback(ctx, tx, batchID); err != nil {
+	if err := r.queueRollback(ctx, tx, batchID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -497,7 +526,7 @@ func (r *Repository) CommandResult(ctx context.Context, nodeID string, result *p
 			if _, err := tx.ExecContext(ctx, "UPDATE deployment_batches SET status='rollback_failed' WHERE id=?", batchID); err != nil {
 				return err
 			}
-		} else if err := queueRollback(ctx, tx, batchID); err != nil {
+		} else if err := r.queueRollback(ctx, tx, batchID); err != nil {
 			return err
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {

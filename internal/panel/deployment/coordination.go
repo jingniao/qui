@@ -10,6 +10,7 @@ import (
 	"proxycontrol/internal/platform/id"
 	pb "proxycontrol/pkg/contracts/agentpb"
 	"proxycontrol/pkg/contracts/desiredstate"
+	"slices"
 	"time"
 )
 
@@ -84,6 +85,9 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 	if !enabled {
 		return fmt.Errorf("%w: source node is disabled", ErrDependency)
 	}
+	if err := r.keepReferencedServerEgressListener(ctx, tx, state); err != nil {
+		return err
+	}
 	for _, outbound := range state.ReachableOutbounds() {
 		if !outbound.Enabled || outbound.TargetNodeID == "" {
 			continue
@@ -104,6 +108,56 @@ func (r *Repository) relayTargetsInTransaction(ctx context.Context, tx *sql.Tx, 
 		if reason := relayDependency(outbound, target); reason != "matched" {
 			return relayDependencyError(outbound, "目标节点运行中的内部监听不匹配", reason)
 		}
+		listener := relayListener(outbound, target)
+		if listener != nil && listener.InternalRelay {
+			var ownBatch string
+			if err := tx.QueryRowContext(ctx, "SELECT coalesce((SELECT batch_id FROM deployment_batch_items WHERE revision=?),'')", state.Revision).Scan(&ownBatch); err != nil {
+				return err
+			}
+			if err := nodeAvailable(ctx, tx, target.NodeID, ownBatch); errors.Is(err, ErrNodeBusy) {
+				return relayDependencyError(outbound, "目标服务器有尚未完成的发布或回滚", "target_node_busy")
+			} else if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (r *Repository) keepReferencedServerEgressListener(ctx context.Context, tx *sql.Tx, state desiredstate.State) error {
+	var listenerID string
+	err := tx.QueryRowContext(ctx, "SELECT inbound_id FROM server_egress_relays WHERE node_id=?", state.NodeID).Scan(&listenerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	current, err := r.publishedStateInTransaction(ctx, tx, state.NodeID)
+	if errors.Is(err, ErrDependency) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, listener := range current.Inbounds {
+		if listener.ID != listenerID || !listener.Enabled || !listener.InternalRelay {
+			continue
+		}
+		if slices.ContainsFunc(state.Inbounds, func(in desiredstate.Inbound) bool {
+			return in.ID == listener.ID && in.Enabled && in.InternalRelay && in.Listen == listener.Listen &&
+				in.Port == listener.Port && in.Protocol == listener.Protocol && in.DefaultOutbound == listener.DefaultOutbound &&
+				slices.Equal(in.CredentialIDs, listener.CredentialIDs)
+		}) {
+			return nil
+		}
+		p := proxy.Repository{Vault: r.Vault}
+		if err := p.RequireUnusedServerEgressListener(ctx, tx, state.NodeID); errors.Is(err, proxy.ErrServerEgressListenerInUse) {
+			return fmt.Errorf("%w: %w", ErrDependency, err)
+		} else if err != nil {
+			return err
+		}
+		break
 	}
 	return nil
 }

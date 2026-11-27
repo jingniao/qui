@@ -56,6 +56,7 @@ const messages: Record<string, string> = {
   unauthorized: '登录已过期，请重新登录。',
   forbidden: '当前账号没有执行此操作的权限。',
   csrf_failed: '会话校验失败，请刷新页面后重试。',
+  group_grant_ineligible: '仅订阅入口或混合用途的节点组可以新增用户授权。',
   rate_limited: '登录尝试次数过多，请在 15 分钟后重试。',
   owner_protected: 'Owner 账号受保护，不能禁用、删除或由其他账号重置。',
   conflict: '系统已初始化，或该用户名已经存在。',

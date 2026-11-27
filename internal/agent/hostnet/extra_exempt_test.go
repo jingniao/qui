@@ -97,7 +97,7 @@ func TestLegacyDesiredAndFeatureReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := ReadStatus(dir)
-	if err != nil || !reflect.DeepEqual(status.Features, []string{FeatureExtraExempt, FeaturePanelExempt}) {
+	if err != nil || !reflect.DeepEqual(status.Features, []string{FeatureExtraExempt, FeaturePanelExempt, FeatureForcedEgress}) {
 		t.Fatalf("receipt: %+v, %v", status, err)
 	}
 }

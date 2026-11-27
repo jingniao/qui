@@ -29,7 +29,7 @@ import { ref, reactive } from 'vue';
 import { nodeAPI, type MachineTrafficSettings, type NodeView } from '../api';
 import { formFromSettings, payloadFromForm, type MachineTrafficForm } from '../machineTrafficModel';
 import { getNodeMeta, loadNodeMeta, saveNodeMeta, parseRenewPrice } from '../nodeMeta';
-import { mergeLatestEditForm, type ServerEditFormState } from './serverListModel';
+import { editedNodeMeta, mergeLatestEditForm, type ServerEditFormState } from './serverListModel';
 import { addressChanges } from '../nodeAddress';
 import { showToast } from '../../../app/api';
 import { APIError } from '../../../app/apiClient';
@@ -61,6 +61,7 @@ const editForm = reactive<ServerEditFormState>({
   autoRenew: false,
   tags: []
 });
+let editBaseline = { ...editForm };
 let loadToken = 0;
 
 async function openEditDrawer(node: NodeView) {
@@ -113,6 +114,8 @@ async function openEditDrawer(node: NodeView) {
     }
     editTarget.value = latest;
     mergeLatestEditForm(editForm, baseline, latest, meta);
+    editBaseline = { ...baseline };
+    mergeLatestEditForm(editBaseline, baseline, latest, meta);
     const incomingConnection = {
       connectHost: latest.connectHost,
       portRange: meta.portRangeStart ? `${meta.portRangeStart}-${meta.portRangeEnd}` : ''
@@ -175,24 +178,17 @@ async function saveEdit() {
     // Only submit a changed client address; leave public IP and network settings untouched.
     await nodeAPI.save({
       id: targetID,
-      name: form.name,
+      name: form.name !== editBaseline.name ? form.name : latest.name,
       enabled: latest.enabled,
       allowSubscription: latest.allowSubscription,
-      maintenance: form.maintenance,
+      maintenance: form.maintenance !== editBaseline.maintenance ? form.maintenance : latest.maintenance,
       ...addressChanges({ connectHost: connectionBaseline.connectHost }, { connectHost: connection.connectHost })
     });
 
     await saveNodeMeta(targetID, {
       ...meta,
       ...(rangeChanged ? { portRangeStart, portRangeEnd } : {}),
-      region: form.region.trim(),
-      remark: form.remark.trim(),
-      renewDate: form.renewDate,
-      renewCurrency: form.renewCurrency,
-      renewPrice: String(form.renewPrice).trim(),
-      renewCycle: form.renewCycle,
-      autoRenew: form.autoRenew,
-      tags: form.tags
+      ...editedNodeMeta(form, editBaseline, meta)
     });
 
     if (latestTraffic) {

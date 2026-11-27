@@ -42,7 +42,8 @@ func NetworkOrNil(outboundSourceIP, outboundInterface, hostSourceIPv4, hostSourc
 
 // OutboundNetwork is the source binding one outbound dials from (v1.5.5 item
 // 17): its own source IP and interface, each falling back to the node's core
-// outbound settings. An unknown ID (an internal outbound) gets the node's.
+// outbound settings. Host-network outbounds leave both bindings to the OS.
+// An unknown ID (an internal outbound) gets the node's core settings.
 func (s State) OutboundNetwork(id string) Network {
 	var network Network
 	if s.Network != nil {
@@ -51,6 +52,11 @@ func (s State) OutboundNetwork(id string) Network {
 	for _, outbound := range s.Outbounds {
 		if outbound.ID != id {
 			continue
+		}
+		if outbound.UseHostNetwork {
+			network.OutboundSourceIP = ""
+			network.OutboundInterface = ""
+			break
 		}
 		if outbound.SourceIP != "" {
 			network.OutboundSourceIP = outbound.SourceIP
@@ -61,6 +67,33 @@ func (s State) OutboundNetwork(id string) Network {
 		break
 	}
 	return network
+}
+
+// HostNetworkOutbounds identifies enabled outbounds whose source is chosen by
+// the host. An internal relay bound to one of these leaves the server
+// immediately, without going through the server's ordinary user policies.
+func (s State) HostNetworkOutbounds() map[string]bool {
+	outbounds := make(map[string]bool)
+	for _, outbound := range s.Outbounds {
+		if outbound.Enabled && outbound.UseHostNetwork {
+			outbounds[outbound.ID] = true
+		}
+	}
+	return outbounds
+}
+
+// NeedsForcedEgress applies only when a host-network outbound may use a
+// configured enforced source. Strict enforcement is unnecessary otherwise.
+func (s State) NeedsForcedEgress() bool {
+	if s.Network == nil || s.Network.HostSourceIPv4 == "" && s.Network.HostSourceIPv6 == "" {
+		return false
+	}
+	for _, outbound := range s.Outbounds {
+		if outbound.Enabled && outbound.UseHostNetwork {
+			return true
+		}
+	}
+	return false
 }
 
 // Baseline is the state every published configuration starts from: no users,

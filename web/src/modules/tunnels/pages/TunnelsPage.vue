@@ -7,6 +7,7 @@
     <nav class="ios-segmented-container inline-flex" aria-label="隧道管理页签"><RouterLink to="/proxy/tunnels" class="ios-segmented-item" :class="{ active: !rulesTab }">隧道</RouterLink><RouterLink to="/proxy/tunnel-rules" class="ios-segmented-item" :class="{ active: rulesTab }">规则</RouterLink></nav>
     <p v-if="mockEnabled()" class="text-xs text-ios-orange">开发演示数据 · 刷新页面后重置</p>
     <p v-if="applyNote" :class="{ info: 'text-ios-secondary', error: 'text-ios-red', warn: 'text-ios-orange' }[applyNote.tone]" class="text-sm" role="status" aria-live="polite">{{ applyNote.text }}</p>
+    <button v-if="isOwner && applyNote?.rollbackBatchId" class="ios-btn-secondary" :disabled="mutating" @click="rollbackBatch(applyNote.rollbackBatchId)">回滚发布批次</button>
     <div v-if="rulesTab" class="flex flex-wrap gap-3">
       <select v-model="tunnelFilter" class="ios-filter-select" aria-label="按隧道筛选"><option value="">全部隧道</option><option value="direct">直接转发</option><option v-for="t in tunnels" :key="t.id" :value="t.id">{{ t.name }}</option></select>
       <select v-model="nodeFilter" class="ios-filter-select" aria-label="按入口节点筛选"><option value="">全部入口节点</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.name }}</option></select>
@@ -49,6 +50,7 @@ import { useRoute } from 'vue-router';
 import { isOwner } from '../../../app/auth';
 import { APIError, invalidatesRead } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
+import { deploymentAPI } from '../../system/deploymentApi';
 import PageHeader from '../../../components/PageHeader.vue';
 import DataTable from '../../../components/DataTable.vue';
 import ErrorState from '../../../components/ErrorState.vue';
@@ -60,7 +62,7 @@ import TunnelEditor from '../components/TunnelEditor.vue';
 import RuleEditor from '../components/RuleEditor.vue';
 import PublishBadge from '../components/PublishBadge.vue';
 import { loadTunnelChoices, mockEnabled, tunnelAPI, tunnelRuleAPI, tunnelError, type PublishSelection, type Tunnel, type TunnelRule } from '../api';
-import { applyProblem, applyTunnelChanges, clause } from '../applyTunnels';
+import { applyProblem, applyTunnelChanges, clause, rollbackFailure } from '../applyTunnels';
 import { ruleTargetLabel, endpoint, groupRules, routeLabel } from '../model';
 const route = useRoute(), rulesTab = computed(() => route.path === '/proxy/tunnel-rules');
 const tunnels = ref<Tunnel[]>([]), rules = ref<TunnelRule[]>([]);
@@ -74,7 +76,15 @@ const confirmAction = ref<Action | null>(null), confirmVisible = ref(false), blo
 const confirmMessage = computed(() => confirmAction.value?.kind === 'rotate' ? `轮换 ${confirmAction.value.tunnel.name} 的凭据？新凭据立即下发，切换期间隧道可能短暂中断。` : `删除 ${confirmAction.value?.kind === 'rule' ? confirmAction.value.rule.name : confirmAction.value?.tunnel.name || ''}？将立即从服务器移除运行配置并释放端口。`);
 function ask(action: Action) { confirmAction.value = action; confirmVisible.value = true; }
 // Every change is applied at once; a failed apply keeps the saved draft, shown with a 重试 action.
-const applyNote = ref<{ tone: 'info' | 'error' | 'warn'; text: string } | null>(null);
+const applyNote = ref<{ tone: 'info' | 'error' | 'warn'; text: string; rollbackBatchId?: string } | null>(null);
+async function rollbackBatch(batchId: string) {
+  mutating.value = true;
+  try {
+    await deploymentAPI.rollbackBatch(batchId);
+    applyNote.value = { tone: 'info', text: '已提交批次回滚，请在服务器配置版本中查看执行结果。' };
+  } catch (error) { showToast(tunnelError(error), 'error'); }
+  finally { mutating.value = false; }
+}
 async function apply(selection: PublishSelection, done: string) {
   if (mutating.value) return;
   mutating.value = true; applyNote.value = { tone: 'info', text: '正在应用…' };
@@ -82,6 +92,7 @@ async function apply(selection: PublishSelection, done: string) {
     const result = await applyTunnelChanges(selection, text => { applyNote.value = { tone: 'info', text }; });
     const problem = applyProblem(result);
     if (result.status === 'publishing') applyNote.value = { tone: 'warn', text: problem };
+    else if (result.status === 'rollback_failed') applyNote.value = { tone: 'error', text: rollbackFailure(result), rollbackBatchId: result.batchId };
     else if (problem) applyNote.value = { tone: 'error', text: `应用失败，已恢复原配置：${clause(problem)}。可修改后保存，或点「重试」。` };
     else {
       applyNote.value = result.gostRemovable?.length ? { tone: 'info', text: `以下服务器的 GOST 已不再使用，可在「版本与更新 → 代理核心」中移除：${result.gostRemovable.map(s => s.name).join('、')}` } : null;

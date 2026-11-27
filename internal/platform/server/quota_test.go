@@ -818,6 +818,67 @@ func TestQuotaStaleDraftDoesNotRevertOwnerRevision(t *testing.T) {
 	}
 }
 
+type quotaSnapshotHook struct {
+	quotaSnapshotter
+	onSnapshot func()
+}
+
+func (s quotaSnapshotHook) Snapshot(ctx context.Context, nodeID string, users proxy.AccessReader) (desiredstate.State, error) {
+	s.onSnapshot()
+	return s.quotaSnapshotter.Snapshot(ctx, nodeID, users)
+}
+
+func TestQuotaDoesNotQueueIfPublishedBaselineChangedDuringRender(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "quota_baseline_race", "")
+	base := f.publish(t)
+	deployer := f.app.quotaDeployer
+	deployer.window = time.Hour
+	ownerState := f.state(t, base)
+	ownerState.Outbounds = append(ownerState.Outbounds, desiredstate.Outbound{ID: "manual-direct", Protocol: "direct", Enabled: true})
+	revision, err := f.app.deployments.Create(f.ctx, ownerState, "owner", "concurrent publication")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := deployer.proxy
+	deployer.proxy = quotaSnapshotHook{original, func() {
+		if err := f.app.deployments.Deploy(f.ctx, revision.ID); err != nil {
+			t.Fatal(err)
+		}
+		f.apply(t, revision.ID)
+	}}
+	setQuota(t, f.ctx, f, account.ID, 50, 100)
+	entry := &quotaPending{}
+	if outcome := deployer.reconcile(f.ctx, f.nodeID, entry); outcome != quotaWait {
+		t.Errorf("baseline change should leave work waiting, got %v", outcome)
+	}
+	deployer.proxy = original
+	if pending, err := f.app.deployments.Pending(f.ctx, f.nodeID); err != nil || pending != nil {
+		t.Fatalf("revision from old baseline was queued: %v %v", pending, err)
+	}
+}
+
+func TestQuotaWaitsBeforeRenderingUnfinalizedTunnel(t *testing.T) {
+	f := newQuotaFixture(t)
+	account, _ := f.addUser(t, "quota_tunnel_finalize", "")
+	f.publish(t)
+	setQuota(t, f.ctx, f, account.ID, 50, 100)
+	if _, err := f.app.Database.ExecContext(f.ctx, `INSERT INTO deployment_batches
+		(id,chain_id,name,author,status,created_at,tunnel_publication_json,tunnel_finalized)
+		VALUES('unfinished-tunnel','','Tunnel','owner','success','now',json_object('nodes',json_array(?)),0)`, f.nodeID); err != nil {
+		t.Fatal(err)
+	}
+	deployer := f.app.quotaDeployer
+	original := deployer.proxy
+	deployer.proxy = quotaSnapshotHook{original, func() {
+		t.Error("quota rendered while the node revision was applied but its tunnel snapshot was still unfinalized")
+	}}
+	if outcome := deployer.reconcile(f.ctx, f.nodeID, &quotaPending{}); outcome != quotaWait {
+		t.Errorf("expected quota to wait for tunnel finalization, got %v", outcome)
+	}
+	deployer.proxy = original
+}
+
 // TestQuotaTransitionWhileRevisionPendingIsApplied proves a transition queued
 // while an automatic revision is still on its way is not lost: the successful
 // result makes the entry recompute and deploy what is still missing.

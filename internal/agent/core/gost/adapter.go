@@ -354,6 +354,20 @@ func (a *Adapter) forceStopLocked() error {
 func (a *Adapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.closeLocked()
+}
+
+func (a *Adapter) Reset() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.closeLocked(); err != nil {
+		return err
+	}
+	a.current = core.RenderedConfig{}
+	return nil
+}
+
+func (a *Adapter) closeLocked() error {
 	err := a.stopLocked()
 	// A failed final sample prevents configuration replacement, but an explicit
 	// Agent shutdown must still stop its child rather than orphan the process.

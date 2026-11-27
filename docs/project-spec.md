@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前正式版为 **[v1.12.2](releases/release-notes-1.12.2.md)**（tag `984f332`，迁移头 **0165**），最低兼容 **v1.7.5**，保留其有效面板数据与在途任务。版本变更与发布证据见[变更记录](changelog.md)。
+当前正式版为 **[v1.12.3](releases/release-notes-1.12.3.md)**（tag `9a6d731`，迁移头 **0165**），最低兼容 **v1.7.5**，保留其有效面板数据与在途任务。版本变更与发布证据见[变更记录](changelog.md)。
 
 生产状态见[运维手册「当前生产环境」](operations.md#当前生产环境)（管理员登录入口不写入文档），操作前须重新实机核实。
 
@@ -157,6 +157,8 @@ Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出�
 
 每用户唯一跨节点额度，无每节点预算、预算转移或核内字节配额（历史修订中的 `budget` 字段仅兼容读取）。面板累加 Agent 增量至 `used_traffic` 并同步隐藏身份用量。禁用、到期、超额、删除及提额、清零、续期、启用均触发自动额度版本（第 22.1 节）移除或恢复凭据。正常路径超额切断延迟最多为上报周期（15 秒）+ 合并窗口（60 秒）+ 发布耗时；Linux Xray 可 splice 的 TCP（Direct 转发、识别内层 TLS 后的 XTLS Vision 等）在连接关闭后才计下行，长连接相应延后。账户额度只计 Xray 与上报 `singbox_user_stats` 的 sing-box；无统计标签的官方 sing-box 仅报节点总量，用户未知。
 
+手动清零在同一事务中重置用户及其全部设备的用量，并记录清零时间。在当期定时边界之后手动清零时，本期定时清零不会重复执行，下一个周期按原计划触发。
+
 ## 9.2 用户接入身份与设备限制
 
 每用户唯一隐藏接入身份，沿用 `DeviceID` 与旧 Agent 合同并保留历史记录，系统不再提供设备管理界面或 API。
@@ -177,10 +179,10 @@ Xray、sing-box 承载用户接入、身份、分流、Direct/Block、代理出�
 
 ## 10.1 节点组授权
 
-Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）；仅 `subscription` 与 `mixed` 用途可新增授权，其他用途仅允许撤销已有授权。
+Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）。仅 `subscription` 与 `mixed` 用途可新增授权。保存用户资料时，其他用途的已有授权可以保留或撤销。
 
 用户接入来自三类具体成员：自建入站（`node_group_inbounds`）、关联目标入站或导入节点的隧道规则（`node_group_relays`）及导入成员（`node_group_imports`），不再由服务器成员隐式授权。
-- 隧道规则成员与入站直连成员互不连带，可分别授权；仅获隧道规则的用户也会在目标自建入站获得凭据（订阅不显示直连但不阻止自行直连）。新建规则不自动入组，删除规则随外键移出分组。目标为导入节点的 `import` 规则不贡献凭据下发节点。
+- 隧道规则成员与入站直连成员互不连带，可分别授权；仅获隧道规则的用户也会在目标自建入站获得凭据（订阅不显示直连但不阻止自行直连）。凭据下发按规则上次成功发布的目标入站计算。发布规则时，本批次按选中的新目标计算凭据，并把目标变更前后的服务器纳入发布与失败回滚；新目标先于入口生效。两条规则互以对方入口为目标且同批发布时，其中一条无法排序，发布照常进行，计划返回警告，该规则切换期间可能短暂中断。新建规则不自动入组，删除规则随外键移出分组。目标为导入节点的 `import` 规则不贡献凭据下发节点。
 - 导入成员上限 1000：单独导入（`Kind=content`）的 `proxy_key` 为稳定 `id:<id>`，拒绝整源成员（允许历史合法悬空精确成员）；订阅连接（`Kind=url`）支持 `''`（整个来源）与 `name|protocol`（单节点）。
 - `node_group_servers` 保存显式服务器（最多 100 个存在且未删除服务器；省略/null 保留，`[]` 清空），`node_group_members` 为显式服务器与入站所属服务器的只读去重并集（响应字段 `serverIds` 与只读派生 `nodeIds`），用于节点策略、筛选与批量操作，不授予凭据或订阅可见性。保存请求不接受 `nodeIds`。
 
@@ -194,6 +196,8 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 - `mixed`：混合用途
 
 纯中转或纯出口节点可设为不在用户订阅中显示。
+
+节点策略的「出站服务器组」独立管理。可在节点策略右上角手选服务器、按名称正则匹配，或同时使用两种来源。成员去重，手选顺序优先，正则匹配按名称与 ID 排序。策略引用中的组不能删除。成员变化在重新发布节点策略时生效。
 
 ## 10.3 订阅过滤
 
@@ -221,10 +225,12 @@ Owner 在节点组页维护授权账号与成员（原用户授权 API 保留）
 - 单独导入支持改名（1–200 UTF-8 字节、无控制字符、不重名、`expectedRevision` 防并发，保持 ID 与显式引用不变）与预览删除（画布草稿/客户端发布快照引用阻止，分组/客户端策略精确引用确认移除且不得删空策略组，删空最后节点连同删空来源）；订阅连接节点不可单独改名或删除。
 
 **客户端策略配置库**：`client_policy_profiles` 最多保存 50 个配置（名称 ≤64 字符、描述 ≤500 字符、`uiMetadata` ≤64 KiB JSON 对象不入订阅），`system_settings.client_policy_active` 存 `{profileId}`，`client_rules` 为活动快照（独立 `activeRevision`）。旧 `PUT /subscription-rules` 与浏览器旧卡片导入已撤除，创建配置保留 `importKey` 服务端幂等去重；`GET /api/v1/subscription-rules` 仍允许 Viewer。
+- 单条规则编辑器的匹配类型下拉框提供 `RULE-SET`、`GEOSITE`、`GEOIP` 和 `MATCH`。选择 `RULE-SET` 后，通过「统一规则集引用」下拉框选择系统规则集或外部规则集。编辑已有的域名、IP 网段或目标端口规则时，额外显示该规则的当前类型。
 - 内置预设（`GET /api/v1/subscription-rules/presets`）含经典分流、基础代理、分流+去广告、白名单与「精简/标准/完整分流 · 屏蔽回国」（`meta-lite`/`meta-standard`/`meta-full`，MetaCubeX mrs 规则集，国内域名与 IP 直接 REJECT）。单模板最多 256 个规则集，请求体上限 1 MiB。DNS 模板支持 `defaultNameservers`、`proxyServerNameservers`、`fakeIpFilter`、`fallbackFilter`（mihomo 输出）。
 - 成员支持 `@all`、`@nodeGroup:<id>`、`@source:<id>` 及精确引用 `@endpoint:inbound:<id>`、`@endpoint:relay:<rule id>`、`@endpoint:import:<src>:id:<id>`（单独导入）或 `@endpoint:import:<src>:<name|protocol>`（订阅连接）；每组最多 256 个 `excludeEndpoints`（仅排除动态展开）。`includeKeywords`/`excludeKeywords` 服务端 NFKC 不区分大小写字面子串筛选（排除优先）；`emptyPolicy=direct/reject` 统一作用于授权与格式过滤后的空组（新地区组默认 REJECT）。
 - `GET /api/v1/client-policy-candidates?userId=<id>` 与 `POST /api/v1/client-policy-profiles/preview`（Owner＋CSRF，草稿 `template` 与 `profileId+profileRevision` 互斥，版本过期 409 `stale_client_policy`）复用真实订阅展开管线；省略 `userId` 时按仓储顺序自动选取首个有授权的有效用户。
-- 共享规则集引用通过事务扫描全部已保存配置（含未启用）：`GET /api/v1/service-sets/{id}/references` 返回 `nodePolicies` 与 `clientProfiles/rules`，任一引用阻止删除（409 `service_set_in_use`）；启用的 RULE-SET 不得引用缺失或禁用的面板规则集，禁用后 `/sub/{token}/rules/{id}` 返回 404。
+- 规则集页统一分页展示全部规则集。
+- Owner 可删除内置或自建的共享规则集。删除前在事务内扫描全部已保存配置（含未启用）。`GET /api/v1/service-sets/{id}/references` 返回 `nodePolicies` 与 `clientProfiles/rules`，任一引用阻止删除（409 `service_set_in_use`）。启用的 RULE-SET 不得引用缺失或禁用的面板规则集，禁用后 `/sub/{token}/rules/{id}` 返回 404。
 
 # 11. 节点管理模块
 
@@ -299,6 +305,7 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 节点设置可配置出站网络，下一次发布配置生效，留空清除：
 - **核心出站源 IP / 网卡**：作用于代理核心拨号出站（Xray `sendThrough`/`sockopt.interface`，sing-box `inet4/inet6_bind_address`/`bind_interface`；出口组成员继承，sing-box 组节点与 WireGuard 入站不写）；指定源 IP 时固定地址族。
 - **服务器强制出站 IPv4 / IPv6**（仅 Linux）：通过 host-network helper 维护 nft 表 `inet proxy_agent_source` 对整机新建出站做 SNAT（核心出站源 IP 自动豁免；helper 声明 `panel_exempt` 时发往面板控制地址解析结果的连接也不改写，强制地址失效时 Agent 仍能连面板接收修正），失败自动回滚。应用后的自检：有面板豁免时从强制地址绑定源拨面板，否则不绑定拨面板。详见[运维手册](operations.md)。
+- **节点策略选服务器出站**：由最终服务器拨号，按目标地址族使用该服务器的强制出站 IP，未设置时由操作系统选源地址。专用直连跳过核心源 IP、网卡和入站出口 IP 继承。启用强制地址时需部署本版 Agent 服务及支持 `forced_egress_mark` 的 helper，Linux 内核需支持以 `CAP_NET_RAW` 设置 `SO_MARK`（上游 Linux 5.17 起支持）。缺少支持时拒绝应用配置。
 - **逐出站源绑定**：非 Block 出站可单独设置 `sourceIp`/`sourceInterface`，优先级「出站非空 ＞ 服务器级核心设置 ＞ 不绑定」，需全部启用 Xray/sing-box 核心上报 `outbound_source_supported`（否则拒绝 `outbound_source_unsupported`）。与服务器强制出站并用时，启用出站的额外源 IP 自动汇总为 `ExtraHostExemptions` 传入 helper（需 `host_source_extra_exempt_supported`，否则 `host_source_exempt_unsupported`）。Agent 应用前校验可达出站的有效源 IP/网卡在本机存在且匹配，失败返回 `network_unavailable` 并保留旧配置。
 - **出口 IP 缺失报警**：应用成功后地址仍可能被移除或更换。Agent 每次心跳按运行修订检查上述全部绑定（入站出口 IP、核心出站源 IP/网卡、服务器强制出站 IPv4/IPv6、逐出站源绑定），以 `Heartbeat.source_address_status`（39：`revision`、`missing[kind,owner_id,address,interface]`、检查本身失败时 `error=source_check_failed`）上报，仅在缺失集合变化时写 Agent 日志。只报警不降级：不改配置、不换地址，受影响流量继续失败直至地址恢复或重新发布。面板在服务器在线时于列表、卡片、详情与仪表盘显示「出口 IP 缺失」（检查失败为「出口 IP 检查失败」）；未上报该字段的旧 Agent 不显示。
 
@@ -354,6 +361,8 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 # 17. 分流模块
 
 统一处理网站分流、阻断、Direct、指定 Outbound、出口组与代理链。支持按用户、入口节点/节点组、域名、域名后缀、域名关键字、服务分类、IP/CIDR、端口、TCP/UDP 与时间段匹配；规则按优先级从高到低命中首条停止，每节点必有默认规则。
+
+新规则的转发目标可选「指定服务器出站」或「指定服务器组出站」。入口和目标服务器均需 Agent v1.12.4 或更新版本。同机目标使用专用直连。跨机目标使用内部 Shadowsocks 中继，目标服务器需要公网地址、可用端口范围及匹配的核心协议能力。面板先发布目标服务器，再发布入口，失败按批次反向回滚。选中多台服务器发布时，面板逐台等待前一个修订或批次结束，再提交下一台。确认超时或回滚失败时暂停后续提交。目标端保留已发布配置，首次发布时只下发中继及服务器出站网络设置。备份恢复保留运行中修订的监听分配和批次基线，有运行中或待确认的入口引用时，拒绝切换监听地址族或发布缺少该监听的版本。目标的中继入站直接拨号，组内以成员顺序主备切换，所有成员不可用时阻断。既有出站、出口组和代理链策略继续使用已保存的目标。
 
 - **展开上限**：单条策略手写条目 ≤2000 条；引用规则集展开后单条 ≤50000 条（超过 2000 条需逐核上报 `expanded_policy_supported`，否则快照与发布前拒绝）；整份期望状态上限 2 MiB。内置默认禁用的 `policy-block-china`（匹配 `service-cn` → Block）为普通策略，可编辑或删除。
 - **节点原生规则集**：规则集外部来源支持 `native` 格式，同时提供 sing-box `.srs` 与 Xray geosite/geoip 地址及标签（白名单限于 `testingcf.jsdelivr.net`/`cdn.jsdelivr.net`/`fastly.jsdelivr.net` 上的 MetaCubeX `meta-rules-dat`，面板与 Agent 双检）。节点所有启用 Xray/sing-box 核心均上报 `native_rule_sets_supported` 时，在期望状态 `match.rule_sets` 下发引用并跳过 yaml/text 展开（不计条数上限）；否则维持展开。Agent 在独立准备任务中下载候选文件至 `runtime/<core>/rulesets/`（单文件 ≤32 MiB、3 分钟、下载期间不阻塞心跳），失败沿用旧文件（首次缺失报 `rule_set_unavailable` 回滚），替换保留 `.prev` 以便校验或健康失败恢复，成功清理无引用旧文件。Xray 开启访问记录时仅对 WireGuard 与 HTTP/SOCKS5 按凭据复制策略规则，VLESS/Trojan/Shadowsocks 由访问日志 email 归属账户。
@@ -433,6 +442,7 @@ Linux Agent 更新仅有效本机更新授权允许保留核心：旧 Agent 最�
 - 启动先播种状态机再对已有发布状态的节点对账，仅不一致者排队；每次部署/回滚成功后排一次对账（一致不发版）。
 - 目标为当前授权节点 ∪ 已发布状态仍持凭据节点；删除用户亦排队清理凭据。
 - 忙碌等下窗口，失败按最新已发布状态重建，连续 3 次失败停止重试并触发 `user_access_failed` 系统告警（标题“自动额度发布失败”，正文含节点名称、次数与原因）及日志；草稿不可渲染时回退基线仅移除不活跃用户；组件添加/移除中返回 `core_pending` 不静默搬移凭据。自动版本仍重启节点全部核心。
+- 自动额度和证书版本入队时，在同一事务内核对渲染所用的已发布修订。若人工发布已推进该修订，本轮放弃入队，下轮按新基线重新生成。
 
 ## 22.2 核心更新与移除
 
@@ -458,6 +468,9 @@ Linux Agent 更新仅有效本机更新授权允许保留核心：旧 Agent 最�
 - **转发与 GOST 中继**：GOST 按序渲染 `forwarder.nodes`、限速（`<整数字节>B`）与连接上限；证书写入 `runtime/gost/tls/<入站>/<半边>/`（0700/0600）。GOST 上报契约 **4**（支持中间 relay 下一跳链，兼容两节点 ≥3；UDP 由 TLS/TCP 封装至出口转发）。
 
 **健康与恢复**：即时健康检查验证核心进程与本机监听（GOST 含 TCP 可拨；Linux UDP 按端口占用判断，不验证 socket 的 PID 归属）；巡检每 3 秒，仅 `ErrListenerUnavailable` 连续 3 次触发恢复，进程退出等立即恢复并退避，分核判断不因单次拨号失败重启健康核心。认领另行验证原核心进程身份，不能用监听可达代替。目标可达性不属核心健康。
+
+- 启动时无法打开流量队列，Agent 保持控制连接，阻止启动、认领或通过发布配置拉起代理核心。心跳用 `core_unhealthy` 报告核心不健康，队列状态为 `unavailable`，原因是 `queue_unavailable`。服务器详情显示代理因流量队列不可用而阻断。恢复队列后重新启动 Agent。
+- 旧修订无法用已安装的核心恢复时，节点和核心心跳显示 `core_unhealthy`。普通启动保留面板连接，可接收新修订。托管更新仅在 `AllowDegraded` 允许时接受降级就绪。恢复成功或成功发布可以运行的修订后，心跳恢复按核心实际健康状态报告。
 
 认领与 Prepare 期间暂停监督恢复；认领后单核崩溃仍只恢复该核。只有有效 armed 更新请求允许退出交接，授权窗口为 300 秒 CLOCK_BOOTTIME；受管 worker 接受 bootstrap 与 worker 两种作用域。SIGINT、普通 stop/restart、卸载、未授权 EOF 和非更新异常退出仍停核；崩溃遗留核心由停核屏障确认后正常恢复。
 
@@ -591,6 +604,8 @@ POST   /api/v1/users/{id}/node-groups/{groupId}
 DELETE /api/v1/users/{id}/node-groups/{groupId}
 ```
 
+保存用户或单独授权时，向纯中转或纯出口组新增授权返回 400 `group_grant_ineligible`。
+
 旧设备路由已删除（无 410 兼容）；订阅 Token 请求携带 `deviceId` 拒绝；用户 API 拒绝 `maxDevices`/`maxConnections`，统一使用 `deviceLimit`。
 
 ## 27.4 节点
@@ -658,7 +673,12 @@ GET/POST/PUT/DELETE /api/v1/policies
 GET/POST/PUT/DELETE /api/v1/service-sets
 GET                 /api/v1/service-sets/{id}/references
 POST                /api/v1/service-sets/{id}/sources/{sourceId}/refresh
+GET/POST            /api/v1/server-egress-groups
+PUT/DELETE          /api/v1/server-egress-groups/{id}
+POST                /api/v1/server-egress-groups/preview
 ```
+
+服务器出站动作使用 `ServerEgress` 或 `ServerEgressGroup`，`target_id` 分别填写服务器 ID 或出站服务器组 ID。组的保存与预览使用 `{name,serverIds,namePattern}`。关联发布通过节点发布 API 提交，返回入口修订号及关联批次的 `batchId`（如有）。
 
 ## 27.8 访问记录
 
@@ -784,11 +804,13 @@ GET    /portal/subscription                    POST   /portal/subscription/reset
 | `GET /nodes/{id}/ports/check?port=` | `{nodeId,port,free,usedBy?}`（含禁用入站提示） |
 | `POST /nodes/{id}/ports/allocate` | `{count?}` → `{ports:[]}`，仅建议不预留 |
 | `POST /tunnels/plan` | `{tunnelIds,ruleIds}` → `{ok,servers,conflicts,warnings,message?}`，只读 |
-| `POST /tunnels/publish` | 同一选择体 → `{batchId?,servers}`（`applied`/`unchanged`/`failed`/`rolled_back`/`skipped`） |
+| `POST /tunnels/publish` | 同一选择体 → `{status,batchId?,servers}`。批次状态 `publishing`/`success`/`failed`/`rollback_failed`，服务器状态 `publishing`/`applied`/`unchanged`/`failed`/`rolled_back`/`rollback_failed`/`skipped` |
 | `GET/POST /nodes/{id}/relays` | GET 返回 `{items:[{rule,shareLink}]}`；POST 创建本节点 `linked` 规则 |
 | `GET /nodes/relay-rules?nodeIds=id1,id2` | 批量按序读取中转规则，不生成 `shareLink` |
 
 端口错误码：`409 port_in_use`（含 `usedBy`）、`400 port_out_of_range`、`409 no_free_port`。`pending_delete` 只读并保留声明与引用。
+
+批次回滚失败时，页面列出可能仍在运行新配置的服务器。Owner 可从结果中提交原批次的回滚（`POST /api/v1/deployment-batches/{id}/rollback`）；相关服务器仍由原批次占用，等待回滚确认。
 
 ## 27.14 系统设置：节点安装连接地址
 

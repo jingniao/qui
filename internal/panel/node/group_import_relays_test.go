@@ -19,7 +19,7 @@ VALUES('import-rule','import relay',?,23001,'manual','both','import','stable-one
 	}
 	insert(t, r, ctx, `INSERT INTO users(id,username,display_name,status,max_devices,max_connections,protocols_json,created_at) VALUES('relay-user','relay-user','user','active',1,8,'["socks5"]','now')`)
 	insert(t, r, ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES('relay-user',?)", g.ID)
-	groups, err := r.SubscriptionGroups(ctx, n.ID)
+	groups, err := r.SubscriptionGroups(ctx, n.ID, nil)
 	if err != nil || len(groups) != 0 {
 		t.Fatalf("import relay granted a managed node: %v, %v", groups, err)
 	}

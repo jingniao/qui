@@ -127,12 +127,11 @@ func (r *Reconciler) resetLocked(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	closer, ok := r.Adapter.(interface{ Close() error })
-	if !ok {
-		return errors.New("core cannot reset")
-	}
-	if err := closer.Close(); err != nil {
-		return err
+	if err := r.restoreRuntimeLocked(ctx, 0); err != nil {
+		if r.stopUnconfirmed() {
+			return err
+		}
+		return errors.Join(err, r.restoreRuntimeLocked(ctx, r.manifest.Revision))
 	}
 	next := r.manifest
 	next.Revision = 0
@@ -149,6 +148,7 @@ func (r *Reconciler) resetLocked(ctx context.Context) error {
 	}
 	r.manifest = next
 	r.renderedDigest = ""
+	r.restoreErr = nil
 	return nil
 }
 

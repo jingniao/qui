@@ -1981,33 +1981,6 @@
           </div>
         </div>
 
-        <!-- 规则集快捷填入 (展示系统已有的规则集) -->
-        <div v-if="!editingRule && availableServiceRulePresets.length > 0" class="space-y-1.5">
-          <div class="flex items-center justify-between text-xs">
-            <span class="font-semibold text-neutral-700 flex items-center gap-1">
-              <span>📦</span> <span>可用规则集 (点击一键填入分流):</span>
-            </span>
-            <span class="text-xs text-neutral-400">共 {{ availableServiceRulePresets.length }} 个规则集</span>
-          </div>
-          <div class="flex flex-wrap items-center gap-1.5">
-            <button
-              v-for="preset in availableServiceRulePresets"
-              :key="preset.name + preset.payload"
-              type="button"
-              @click="applyRulePreset(preset)"
-              class="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all text-left flex items-center gap-1.5 hover:border-ios-blue"
-              :class="form.payload === preset.payload && form.type === preset.type
-                ? 'bg-blue-50 text-ios-blue border-ios-blue ring-1 ring-ios-blue/20 font-bold'
-                : 'bg-black/[0.02] text-neutral-700 border-black/[0.06] hover:bg-black/[0.04]'"
-              :title="preset.desc"
-            >
-              <span class="text-neutral-500">📦</span>
-              <span>{{ preset.name }}</span>
-              <span v-if="preset.count" class="text-xs text-neutral-400 font-mono">({{ preset.count }})</span>
-            </button>
-          </div>
-        </div>
-
         <!-- 规则匹配类型 (按业务清晰分组) -->
         <div>
           <label class="block text-xs font-semibold text-neutral-700 mb-1">
@@ -3443,18 +3416,20 @@ const editingRule = ref<ClientRule | null>(null);
 const ruleTargetGroupContext = ref<string | null>(null);
 const showAdvancedRuleSettings = ref(false);
 
-const ruleTypeOptions: SelectOption[] = [
-  { group: '🌐 常用域名匹配 (推荐)', value: 'DOMAIN-SUFFIX', label: 'DOMAIN-SUFFIX', badge: '最常用', desc: '域名后缀匹配 · 包含自身及所有子域名' },
-  { group: '🌐 常用域名匹配 (推荐)', value: 'DOMAIN', label: 'DOMAIN', desc: '完整域名精确匹配 · 仅匹配全等主机名' },
-  { group: '🌐 常用域名匹配 (推荐)', value: 'DOMAIN-KEYWORD', label: 'DOMAIN-KEYWORD', desc: '域名关键字匹配 · 包含特定关键词' },
+const selectableRuleTypes: SelectOption[] = [
   { group: '📦 规则集引用 (统一规则包)', value: 'RULE-SET', label: 'RULE-SET', badge: '规则集', desc: '引用系统统一服务规则集或外部订阅规则包' },
   { group: '🗺️ 地理与分类库 (GEO)', value: 'GEOSITE', label: 'GEOSITE', desc: '预设域名分类库，如 category-ads-all、cn 等' },
   { group: '🗺️ 地理与分类库 (GEO)', value: 'GEOIP', label: 'GEOIP', desc: 'IP 地理位置数据库，如 CN、LAN 等' },
-  { group: '⚙️ 网络与端口高级匹配', value: 'IP-CIDR', label: 'IP-CIDR', desc: '目标 IPv4 网段，如 192.168.0.0/16' },
-  { group: '⚙️ 网络与端口高级匹配', value: 'IP-CIDR6', label: 'IP-CIDR6', desc: '目标 IPv6 网段' },
-  { group: '⚙️ 网络与端口高级匹配', value: 'DST-PORT', label: 'DST-PORT', desc: '目标端口号或范围，如 80、443、8000-8100' },
-  { group: '⚙️ 网络与端口高级匹配', value: 'MATCH', label: 'MATCH', badge: '兜底', desc: '兜底终点规则 · 承接未被上述规则命中的所有流量' }
+  { value: 'MATCH', label: 'MATCH', badge: '兜底', desc: '兜底终点规则 · 承接未被上述规则命中的所有流量' }
 ];
+
+const ruleTypeOptions = computed<SelectOption[]>(() => {
+  const existingType = editingRule.value?.type;
+  if (existingType && ['DOMAIN-SUFFIX', 'DOMAIN', 'DOMAIN-KEYWORD', 'IP-CIDR', 'IP-CIDR6', 'DST-PORT'].includes(existingType)) {
+    return [{ value: existingType, label: existingType }, ...selectableRuleTypes];
+  }
+  return selectableRuleTypes;
+});
 
 const ruleTargetOptions = computed<SelectOption[]>(() => {
   const list: SelectOption[] = [];
@@ -3526,73 +3501,13 @@ const form = ref<{
   priority: number;
   description: string;
 }>({
-  type: 'DOMAIN-SUFFIX',
+  type: 'RULE-SET',
   payload: '',
   target: 'PROXY',
   noResolve: false,
   enabled: true,
   priority: 10,
   description: ''
-});
-
-interface RuleQuickPreset {
-  name: string;
-  type: ClientRuleType;
-  payload: string;
-  desc: string;
-  count?: string;
-}
-
-const availableServiceRulePresets = computed<RuleQuickPreset[]>(() => {
-  const target = (form.value.target || ruleTargetGroupContext.value || '').toLowerCase();
-  const presets: RuleQuickPreset[] = [];
-
-  // 优先排序与当前目标相关的服务规则集
-  const list = [...serviceSets.value].sort((a, b) => {
-    const aLower = a.name.toLowerCase();
-    const bLower = b.name.toLowerCase();
-    const aMatch =
-      target &&
-      (aLower.includes(target) ||
-        target.includes(aLower) ||
-        (target.includes('ai') && a.id.includes('openai')) ||
-        (target.includes('video') && a.id.includes('youtube')) ||
-        (target.includes('stream') && (a.id.includes('netflix') || a.id.includes('disney'))));
-    const bMatch =
-      target &&
-      (bLower.includes(target) ||
-        target.includes(bLower) ||
-        (target.includes('ai') && b.id.includes('openai')) ||
-        (target.includes('video') && b.id.includes('youtube')) ||
-        (target.includes('stream') && (b.id.includes('netflix') || b.id.includes('disney'))));
-    if (aMatch && !bMatch) return -1;
-    if (!aMatch && bMatch) return 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  for (const s of list) {
-    const totalCount = (s.domains?.length || 0) + (s.suffixes?.length || 0) + (s.cidrs?.length || 0);
-    presets.push({
-      name: s.name,
-      type: 'RULE-SET',
-      payload: 'service:' + s.id,
-      desc: s.description || `${s.name} 统一服务规则集`,
-      count: totalCount > 0 ? `${totalCount}项` : undefined
-    });
-  }
-
-  // 纳入已配置的外部规则提供者
-  for (const p of clientConfig.value.extra.providers || []) {
-    presets.push({
-      name: p.name,
-      type: 'RULE-SET',
-      payload: p.name,
-      desc: `外部订阅规则集 · ${p.behavior}`,
-      count: '外部'
-    });
-  }
-
-  return presets;
 });
 
 const selectedRuleSetDetail = computed(() => {
@@ -3603,12 +3518,6 @@ const selectedRuleSetDetail = computed(() => {
   }
   return null;
 });
-
-function applyRulePreset(preset: RuleQuickPreset) {
-  form.value.type = preset.type;
-  form.value.payload = preset.payload;
-  form.value.description = preset.name + ' 服务规则集分流';
-}
 
 const parsedPayloadItemsCount = computed(() => {
   if (!['DOMAIN-SUFFIX', 'DOMAIN'].includes(form.value.type)) return 1;
@@ -3649,7 +3558,7 @@ function openCreateRuleDrawer() {
     .filter(r => r.type !== 'MATCH')
     .reduce((max, r) => Math.max(max, r.priority), 0);
   form.value = {
-    type: 'DOMAIN-SUFFIX',
+    type: 'RULE-SET',
     payload: '',
     target: ruleTargetFilter.value || clientConfig.value.proxyGroups[0]?.name || 'PROXY',
     noResolve: false,

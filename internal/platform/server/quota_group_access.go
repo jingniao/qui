@@ -27,7 +27,13 @@ func (d *quotaDeployer) filterPublishedGroupAccess(ctx context.Context, state de
 					return state, err
 				}
 				if len(groups) == 0 {
-					continue
+					relayGroups, err := d.nodes.UserPublishedRelayGroups(ctx, inbound.ID, c.UserID)
+					if err != nil {
+						return state, err
+					}
+					if len(relayGroups) == 0 {
+						continue
+					}
 				}
 			}
 			ids = append(ids, id)

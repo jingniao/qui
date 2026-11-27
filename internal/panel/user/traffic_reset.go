@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -106,13 +107,18 @@ func (r *Repository) ResetDue(ctx context.Context, now time.Time, location *time
 	}
 	ids := []string{}
 	for _, item := range pending {
-		if _, err = tx.ExecContext(ctx, "UPDATE users SET used_traffic=0,traffic_reset_at=? WHERE id=?", item.at, item.id); err != nil {
-			return nil, err
-		}
-		if _, err = tx.ExecContext(ctx, "UPDATE devices SET used_traffic=0 WHERE user_id=?", item.id); err != nil {
+		if err := resetTrafficTx(ctx, tx, item.id, item.at); err != nil {
 			return nil, err
 		}
 		ids = append(ids, item.id)
 	}
 	return ids, tx.Commit()
+}
+
+func resetTrafficTx(ctx context.Context, tx *sql.Tx, userID, at string) error {
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET used_traffic=0,traffic_reset_at=? WHERE id=?", at, userID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE devices SET used_traffic=0 WHERE user_id=?", userID)
+	return err
 }

@@ -77,10 +77,12 @@ type Inbound struct {
 	Enabled             bool             `json:"enabled"`
 	CredentialIDs       []string         `json:"credential_ids"`
 	DefaultOutbound     string           `json:"default_outbound"`
+	InternalRelay       bool             `json:"internal_relay,omitempty"`
 	SubscriptionVisible bool             `json:"subscription_visible"`
 	Settings            ProtocolSettings `json:"settings"`
 }
 type Outbound struct {
+	UseHostNetwork  bool             `json:"use_host_network,omitempty"`
 	SourceIP        string           `json:"source_ip,omitempty"`
 	SourceInterface string           `json:"source_interface,omitempty"`
 	ID              string           `json:"id"`
@@ -388,6 +390,9 @@ func (s State) Validate() error {
 	}
 	outbounds := map[string]bool{}
 	for _, outbound := range s.Outbounds {
+		if outbound.UseHostNetwork && (outbound.Protocol != "direct" || outbound.SourceIP != "" || outbound.SourceInterface != "") {
+			return errors.New("host network mode requires a direct outbound without an explicit source binding")
+		}
 		if outbound.Protocol == "block" && (outbound.SourceIP != "" || outbound.SourceInterface != "") {
 			return errors.New("block outbound cannot bind a source")
 		}
@@ -432,7 +437,11 @@ func (s State) Validate() error {
 		}
 	}
 	ports := map[string]bool{}
+	hostNetwork := s.HostNetworkOutbounds()
 	for _, inbound := range s.Inbounds {
+		if inbound.InternalRelay && (inbound.Protocol == "forward" || inbound.SubscriptionVisible || inbound.EgressSourceIP != "" || len(inbound.CredentialIDs) == 0 || !hostNetwork[inbound.DefaultOutbound]) {
+			return errors.New("managed egress relay requires a private authenticated inbound and a host-network default outbound")
+		}
 		if canonical, err := CanonicalEgressSource(inbound.EgressSourceIP); err != nil {
 			return err
 		} else if canonical != inbound.EgressSourceIP {
@@ -499,6 +508,9 @@ func (s State) Validate() error {
 			}
 			if credential.Internal && inbound.SubscriptionVisible {
 				return errors.New("internal relay inbound cannot enter subscriptions")
+			}
+			if inbound.InternalRelay && (!credential.Internal || credential.UserID != "" || credential.DeviceID != "") {
+				return errors.New("managed egress relay requires a separate internal credential")
 			}
 		}
 		if err := ValidateSettings(inbound.Protocol, inbound.Settings, true); err != nil {

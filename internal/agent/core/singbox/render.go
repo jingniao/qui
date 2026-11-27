@@ -125,6 +125,7 @@ type inbound struct {
 }
 type outbound struct {
 	egressSourceIP    string
+	useHostNetwork    bool
 	Type              string            `json:"type"`
 	Tag               string            `json:"tag"`
 	Outbounds         []string          `json:"outbounds,omitempty"`
@@ -146,6 +147,7 @@ type outbound struct {
 	BindInterface     string            `json:"bind_interface,omitempty"`
 	Inet4BindAddress  string            `json:"inet4_bind_address,omitempty"`
 	Inet6BindAddress  string            `json:"inet6_bind_address,omitempty"`
+	RoutingMark       int               `json:"routing_mark,omitempty"`
 	DomainResolver    *domainResolver   `json:"domain_resolver,omitempty"`
 }
 type routeOptions struct {
@@ -402,7 +404,7 @@ func compileOutbounds(doc *document, state desiredstate.State, credentials map[s
 			doc.Endpoints = append(doc.Endpoints, endpoint)
 			continue
 		}
-		compiled := outbound{Type: entry.Protocol, Tag: entry.ID, Server: entry.Address, Port: entry.Port}
+		compiled := outbound{Type: entry.Protocol, Tag: entry.ID, Server: entry.Address, Port: entry.Port, useHostNetwork: entry.UseHostNetwork}
 		if entry.Protocol == "socks5" {
 			compiled.Type = "socks"
 		}
@@ -451,6 +453,25 @@ func compileRoutes(doc *document, state, original desiredstate.State, credential
 	targets, err := compileGroups(doc, state, original, at, options, aliases)
 	if err != nil {
 		return err
+	}
+	hostNetwork := state.HostNetworkOutbounds()
+	var defaults []route
+	for _, entry := range state.Inbounds {
+		if !entry.Enabled {
+			continue
+		}
+		key := normalizedTarget(entry.DefaultOutbound)
+		chosen, exists := targets[key]
+		if !exists {
+			return errors.New("sing-box default scheduler target unavailable")
+		}
+		rule := selectedRoute(chosen)
+		rule.Inbound = []string{entry.ID}
+		if entry.InternalRelay && hostNetwork[key] {
+			appendRoute(doc, rule)
+		} else {
+			defaults = append(defaults, rule)
+		}
 	}
 	for _, rule := range policy.Sort(state.Policies) {
 		if !rule.Enabled || !policy.TimeActive(rule, at) || len(rule.Scope.NodeIDs) > 0 && !contains(rule.Scope.NodeIDs, state.NodeID) {
@@ -580,16 +601,8 @@ func compileRoutes(doc *document, state, original desiredstate.State, credential
 			}
 		}
 	}
-	for _, entry := range state.Inbounds {
-		if entry.Enabled {
-			chosen, exists := targets[normalizedTarget(entry.DefaultOutbound)]
-			if !exists {
-				return errors.New("sing-box default scheduler target unavailable")
-			}
-			rule := selectedRoute(chosen)
-			rule.Inbound = []string{entry.ID}
-			appendRoute(doc, rule)
-		}
+	for _, rule := range defaults {
+		appendRoute(doc, rule)
 	}
 	return nil
 }

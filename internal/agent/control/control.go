@@ -189,6 +189,42 @@ func startupRestoreNonFatal(err error) bool {
 	return errors.Is(err, core.ErrReleaseRecovery) || errors.Is(err, core.ErrCoreStopUnconfirmed) || errors.Is(err, reconcile.ErrRuntimeRestore)
 }
 
+func restoreOrdinaryStartup(ctx context.Context, manager *reconcile.Reconciler, queueErr error, repair func() error, logger *slog.Logger) error {
+	if queueErr != nil {
+		logger.Error("telemetry queue unavailable; proxy remains blocked; control connection continues", "error", manager.BlockStartup(queueErr))
+		return nil
+	}
+	if err := repair(); err != nil {
+		return err
+	}
+	if err := manager.Restore(ctx); err != nil {
+		if !startupRestoreNonFatal(err) {
+			return fmt.Errorf("restore previous core configuration: %w", err)
+		}
+		if errors.Is(err, reconcile.ErrRuntimeRestore) {
+			logger.Error("retained revision could not be restored; control connection continues", "error", err)
+		} else {
+			logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
+		}
+	}
+	return nil
+}
+
+func managedStartupHealth(ctx context.Context, manager *reconcile.Reconciler, controlOnly, allowDegraded bool) (bool, error) {
+	startupErr := manager.StartupError()
+	healthy := !controlOnly && startupErr == nil
+	if manager.Current() > 0 {
+		health, err := manager.Health(ctx)
+		if err != nil || !health.Healthy {
+			healthy = false
+			if !allowDegraded && startupErr == nil {
+				return false, errors.Join(errors.New("managed Agent core is not ready"), err)
+			}
+		}
+	}
+	return healthy, nil
+}
+
 func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Startup, versions ...string) (resultErr error) {
 	if err := c.Validate(); err != nil {
 		return err
@@ -448,9 +484,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	}
 	hooks := core.RuntimeHooks{}
 	var collectorStatus func() *pb.CollectorStatus
-	if queueErr != nil {
-		logger.Error("telemetry queue unavailable; proxy remains blocked")
-	} else {
+	if queueErr == nil {
 		defer func() { resultErr = errors.Join(resultErr, telemetryQueue.Close()) }()
 		hooks.EnableStats = true
 		hooks.TrafficSink = telemetryQueue.SaveTraffic
@@ -485,7 +519,7 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 		if err := startupTransfer.restore(ctx, c, state.NodeID, manager); err != nil {
 			logger.Error("core handover blocked; control connection continues", "error", err)
 		}
-	} else {
+	} else if err := restoreOrdinaryStartup(ctx, manager, queueErr, func() error {
 		// Only a held release and an unconfirmed core exit survive here: on a
 		// refused restore RepairCoreRollback returns before releasing the hold, so
 		// exiting lets the respawn retry the repair and self-heal from the previous
@@ -502,16 +536,9 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 			}
 			installed.Close()
 		}
-		if err := manager.Restore(ctx); err != nil {
-			if !startupRestoreNonFatal(err) {
-				return fmt.Errorf("restore previous core configuration: %w", err)
-			}
-			if errors.Is(err, reconcile.ErrRuntimeRestore) {
-				logger.Error("retained revision cannot start with the installed core; proxy remains stopped; control connection continues", "error", err)
-			} else {
-				logger.Error("proxy remains stopped pending release recovery or core exit confirmation; control connection continues")
-			}
-		}
+		return nil
+	}, logger); err != nil {
+		return err
 	}
 	installation.Close()
 	supervisorCtx, supervisorCancel := context.WithCancel(ctx)
@@ -567,21 +594,15 @@ func run(ctx context.Context, c config.Agent, logger *slog.Logger, startup *Star
 	}
 	handoverExitReady = queueErr == nil && manager.StartupError() == nil
 	if startup != nil {
-		healthy := !controlOnly && manager.StartupError() == nil
-		if manager.Current() > 0 {
-			health, err := adapter.Health(ctx)
-			if err != nil || !health.Healthy {
-				healthy = false
-				if !startup.AllowDegraded && manager.StartupError() == nil {
-					return errors.Join(errors.New("managed Agent core is not ready"), err)
-				}
-			}
+		healthy, err := managedStartupHealth(ctx, manager, controlOnly, startup.AllowDegraded)
+		if err != nil {
+			return err
 		}
 		if err := startup.Ready(state.NodeID, manager.Current(), healthy); err != nil {
 			if manager.StartupError() == nil {
 				return err
 			}
-			logger.Error("handover worker readiness refused; control connection continues", "error", errors.Join(manager.StartupError(), err))
+			logger.Error("worker readiness refused; control connection continues", "error", errors.Join(manager.StartupError(), err))
 		}
 	}
 	sampler := capability.NewSampler(c.DataDirectory)
@@ -1196,32 +1217,10 @@ heartbeatLoop:
 		}
 		heartbeat := sampler.Heartbeat()
 		heartbeat.SpoolStatus = sampleSpoolStatus(ctx, telemetryQueue)
-		if source, ok := healthSource.(interface {
-			CoreStatuses(context.Context) []*pb.CoreStatus
-		}); ok {
-			heartbeat.Cores = source.CoreStatuses(ctx)
-		}
 		heartbeat.CurrentRevision = manager.Current()
 		heartbeat.SuccessfulRevision = manager.Current()
 		heartbeat.SourceAddressStatus = sources.status(manager)
-		if source, ok := healthSource.(interface {
-			Health(context.Context) (core.HealthStatus, error)
-		}); ok {
-			status, healthErr := source.Health(ctx)
-			if (manager.Current() > 0 && (len(heartbeat.Cores) > 0 || capabilities.Snapshot().CoreName != "")) || errors.Is(healthErr, core.ErrCoreStopUnconfirmed) {
-				healthy := healthErr == nil && status.Healthy
-				heartbeat.CoreHealthy = &healthy
-				if !healthy {
-					heartbeat.CoreError = "core_unhealthy"
-					if errors.Is(healthErr, core.ErrCoreStopUnconfirmed) {
-						heartbeat.CoreError = "core_lifecycle_unconfirmed"
-					}
-				}
-			}
-		}
-		if len(heartbeat.Cores) == 0 && capabilities.Snapshot().CoreName != "" {
-			heartbeat.Cores = []*pb.CoreStatus{{Name: capabilities.Snapshot().CoreName, Healthy: heartbeat.GetCoreHealthy(), Error: heartbeat.CoreError, TrafficSourceStatus: heartbeat.TrafficSourceStatus}}
-		}
+		reportCoreHealth(ctx, heartbeat, manager, capabilities.Snapshot().CoreName)
 		var connectionSample []byte
 		// The panel keeps live counts for its in-memory connection view only; the
 		// source is the core's own upstream statistics, so a core that is not

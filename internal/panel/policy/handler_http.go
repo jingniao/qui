@@ -16,6 +16,11 @@ type Handler struct {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.Handle("GET /api/v1/server-egress-groups", h.Auth.Require(http.HandlerFunc(h.serverEgressGroups), true))
+	mux.Handle("POST /api/v1/server-egress-groups", h.Auth.Require(http.HandlerFunc(h.createServerEgressGroup), true))
+	mux.Handle("PUT /api/v1/server-egress-groups/{id}", h.Auth.Require(http.HandlerFunc(h.createServerEgressGroup), true))
+	mux.Handle("DELETE /api/v1/server-egress-groups/{id}", h.Auth.Require(http.HandlerFunc(h.deleteServerEgressGroup), true))
+	mux.Handle("POST /api/v1/server-egress-groups/preview", h.Auth.Require(http.HandlerFunc(h.previewServerEgressGroup), true))
 	for pattern, handler := range map[string]http.HandlerFunc{"GET /api/v1/policies": h.list, "GET /api/v1/policies/{id}": h.get, "POST /api/v1/policies": h.save, "PUT /api/v1/policies/{id}": h.save, "DELETE /api/v1/policies/{id}": h.delete, "GET /api/v1/service-sets": h.services, "GET /api/v1/service-sets/{id}": h.getService, "GET /api/v1/service-sets/{id}/references": h.serviceReferences, "POST /api/v1/service-sets": h.saveService, "PUT /api/v1/service-sets/{id}": h.saveService, "DELETE /api/v1/service-sets/{id}": h.deleteService, "POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh": h.refreshSource} {
 		mux.Handle(pattern, h.Auth.Require(handler, true))
 	}

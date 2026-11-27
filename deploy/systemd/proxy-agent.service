@@ -25,15 +25,17 @@ ProtectHome=true
 PrivateTmp=true
 # No ProtectKernelTunables: in LXC it remounts /proc/sys and exposes the host
 # boot_id instead of the container's, so core handover authorization (bound to
-# the boot_id root observes) always fails. The unprivileged, capability-free
-# service account cannot write sysctls anyway.
+# the boot_id root observes) always fails. The service account has no
+# capability that allows it to write sysctls.
 # Keep module files readable for algorithm discovery; the syscall filter and
 # capability set block explicit loading, while kernel sysctl autoload uses modprobe outside this sandbox.
 SystemCallFilter=~@module
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Linux 5.17+ accepts SO_MARK with NET_RAW. Managed egress uses the mark to
+# select the forced source without granting the agent network administration.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 
 [Install]
 WantedBy=multi-user.target

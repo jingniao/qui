@@ -114,12 +114,13 @@ type managedInbound struct {
 	id    string
 }
 type tunnelPublication struct {
-	relays   map[string]published.Relay
-	view     PublishPlan
-	tunnels  []Tunnel
-	rules    []TunnelRule
-	desired  []managedInbound
-	previous []managedInbound
+	relays       map[string]published.Relay
+	view         PublishPlan
+	tunnels      []Tunnel
+	rules        []TunnelRule
+	desired      []managedInbound
+	previous     []managedInbound
+	relayTargets map[string]string
 }
 
 func (r *Repository) managedBy(ctx context.Context, inboundID string) (*PortOwner, error) {
@@ -134,6 +135,15 @@ func (r *Repository) managedBy(ctx context.Context, inboundID string) (*PortOwne
 	return &o, err
 }
 func (r *Repository) refuseManagedInbound(ctx context.Context, inboundID string) error {
+	if inboundID != "" {
+		var managed bool
+		if err := r.Database.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM server_egress_relays WHERE inbound_id=?)", inboundID).Scan(&managed); err != nil {
+			return err
+		}
+		if managed {
+			return tunnelFail("managed_by_tunnel", 409, "该入站由节点策略的服务器出站管理")
+		}
+	}
 	o, err := r.managedBy(ctx, inboundID)
 	if err != nil {
 		return err
@@ -394,6 +404,8 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		}
 		firstHops[t.ID] = *next
 	}
+	p.relayTargets = make(map[string]string, len(p.rules))
+	var previousTargets []string
 	for _, rule := range p.rules {
 		owner := PortOwner{Kind: "rule", ID: rule.ID, Name: rule.Name}
 		if err = loadOwner(owner); err != nil {
@@ -401,6 +413,36 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		}
 		if err = addNode(rule.EntryNodeID); err != nil {
 			return p, err
+		}
+		next := p.relays[rule.ID].InboundID
+		p.relayTargets[rule.ID] = next
+		var previousInbound, previousNode string
+		if err = r.Database.QueryRowContext(ctx, `SELECT coalesce(json_extract(t.published_snapshot,'$.InboundID'),''),coalesce(i.node_id,'')
+			FROM tunnel_rules t LEFT JOIN inbounds i ON i.id=json_extract(t.published_snapshot,'$.InboundID') WHERE t.id=?`, rule.ID).Scan(&previousInbound, &previousNode); err != nil {
+			return p, err
+		}
+		if next != previousInbound {
+			if next != "" {
+				targetNode := rule.Target.NodeID
+				if err = addNode(targetNode); err != nil {
+					return p, err
+				}
+				// The new target should accept the credential before its entry
+				// switches the forwarding rule. Unlike a tunnel hop this order is
+				// only about the switch-over: when the target already has to follow
+				// the entry (two rules targeting each other's entries), the rule is
+				// published without it and may be briefly interrupted.
+				if targetNode != rule.EntryNodeID {
+					if publishDependsOn(before, targetNode, rule.EntryNodeID) {
+						p.view.Warnings = append(p.view.Warnings, fmt.Sprintf("规则 %s 的入口与目标服务器在本次发布中互相依赖，无法先让目标生效，切换期间该规则可能短暂中断", rule.Name))
+					} else {
+						before[rule.EntryNodeID] = append(before[rule.EntryNodeID], targetNode)
+					}
+				}
+			}
+			if previousNode != "" {
+				previousTargets = append(previousTargets, previousNode)
+			}
 		}
 		if rule.Status == "pending_delete" {
 			continue
@@ -440,6 +482,13 @@ func (s *Service) buildTunnelPublication(ctx context.Context, selection PublishS
 		servers[rule.EntryNodeID].Routes = append(servers[rule.EntryNodeID].Routes, route)
 		in := InboundInput{Core: core, Name: "[隧道] " + rule.Name, NodeID: rule.EntryNodeID, Protocol: "forward", Listen: "0.0.0.0", Port: *rule.ListenPort, Enabled: rule.Enabled, DefaultOutbound: "direct", AllowedUserIDs: []string{}, Settings: desiredstate.ProtocolSettings{Forward: f}}
 		p.desired = append(p.desired, managedInbound{owner: owner, input: in})
+	}
+	// Targets no longer used by the rule can be cleaned up after forwarding
+	// switches, unless they already participate in the path above.
+	for _, targetNode := range previousTargets {
+		if err = addNode(targetNode); err != nil {
+			return p, err
+		}
 	}
 	used := map[string]bool{}
 	for i := range p.desired {
@@ -568,6 +617,8 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 	result.Status = "success"
 	if !finished {
 		result.Status = "publishing"
+	} else if deployed.Status == "rollback_failed" {
+		result.Status = "rollback_failed"
 	}
 	for _, server := range p.view.Servers {
 		item := PublishServerResult{NodeID: server.NodeID, NodeName: server.NodeName, Status: "unchanged"}
@@ -584,7 +635,9 @@ func (s *Service) PublishTunnels(ctx context.Context, selection PublishSelection
 			}
 		}
 		if finished && item.Status != "applied" && item.Status != "unchanged" {
-			result.Status = "failed"
+			if result.Status == "success" {
+				result.Status = "failed"
+			}
 			if item.Status == "skipped" {
 				item.Message = "发布中止，未下发"
 			}
@@ -672,6 +725,8 @@ func tunnelPublishFailureMessage(n CanvasPublishNode) string {
 		message = "配置应用失败，已自动回滚"
 	} else if n.Status == "rolled_back" {
 		return "后续服务器失败，已回滚"
+	} else if n.Status == "rollback_failed" {
+		return "自动回滚失败"
 	} else if n.Status == "failed" {
 		message = "服务器配置发布失败"
 	}
@@ -679,4 +734,24 @@ func tunnelPublishFailureMessage(n CanvasPublishNode) string {
 		message += "（" + n.FailureCode + "）"
 	}
 	return message
+}
+
+// publishDependsOn reports whether node is already ordered after dependency,
+// directly or through other nodes, in a before map for canvasPublishOrder.
+func publishDependsOn(before map[string][]string, node, dependency string) bool {
+	seen := map[string]bool{}
+	stack := []string{node}
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if current == dependency {
+			return true
+		}
+		if seen[current] {
+			continue
+		}
+		seen[current] = true
+		stack = append(stack, before[current]...)
+	}
+	return false
 }

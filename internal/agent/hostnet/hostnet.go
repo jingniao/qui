@@ -53,11 +53,18 @@ const FeatureExtraExempt = "extra_exempt"
 // enforced address disappears.
 const FeaturePanelExempt = "panel_exempt"
 
+// FeatureForcedEgress recognizes the dedicated socket mark used by managed
+// egress. The exact mark belongs to QUI; unmarked sockets keep existing rules.
+const FeatureForcedEgress = "forced_egress_mark"
+const ForcedEgressMark = 0x51554901
+
 // MaxPanelAddresses bounds the panel destinations per family.
 const MaxPanelAddresses = 16
 
 // helperFeatures is what this helper version reports in every status.
-func helperFeatures() []string { return []string{FeatureExtraExempt, FeaturePanelExempt} }
+func helperFeatures() []string {
+	return []string{FeatureExtraExempt, FeaturePanelExempt, FeatureForcedEgress}
+}
 
 // The helper protocol is two files in one directory. Their names and the field
 // set are fixed and minimal: an Agent that has updated itself writes
@@ -66,7 +73,8 @@ func helperFeatures() []string { return []string{FeatureExtraExempt, FeaturePane
 // only be sent when supported: extra_exempt_ipv4 and extra_exempt_ipv6 appear
 // only when needed. Old helpers decode strictly and reject them, so the Agent
 // writes them only after the helper receipt declares extra_exempt. panel_ipv4
-// and panel_ipv6 follow the same rule with panel_exempt.
+// and panel_ipv6 follow the same rule with panel_exempt, as does forced_egress
+// with forced_egress_mark.
 const (
 	DesiredFileName = "desired.json"
 	StatusFileName  = "status.json"
@@ -75,6 +83,7 @@ const (
 // Desired is the helper input: the addresses the whole server must use and the
 // address of the node's own core outbound (A), which must not be rewritten.
 type Desired struct {
+	ForcedEgress    bool      `json:"forced_egress,omitempty"`
 	ExtraExemptIPv4 []string  `json:"extra_exempt_ipv4,omitempty"`
 	ExtraExemptIPv6 []string  `json:"extra_exempt_ipv6,omitempty"`
 	ID              string    `json:"id"`
@@ -113,6 +122,9 @@ func (d Desired) Validate() error {
 	}
 	if err := (desiredstate.Network{HostSourceIPv4: d.IPv4, HostSourceIPv6: d.IPv6}).Validate(); err != nil {
 		return err
+	}
+	if d.ForcedEgress && d.IPv4 == "" && d.IPv6 == "" {
+		return errors.New("managed egress marking requires an enforced source address")
 	}
 	if d.ExemptIPv4 != "" {
 		if err := (desiredstate.Network{HostSourceIPv4: d.ExemptIPv4}).Validate(); err != nil {
@@ -240,6 +252,17 @@ func Render(desired Desired, interfaces InterfaceLookup) ([]byte, error) {
 		rules.WriteString("table inet " + Table + " {\n")
 		rules.WriteString("  chain postrouting {\n")
 		rules.WriteString("    type nat hook postrouting priority 90; # before Docker/other srcnat chains (100); first NAT binding wins\n")
+		// A marked dial must not escape through an exemption just because
+		// the kernel initially picked an exempt address. Leave loopback
+		// alone and select each forced source by the packet's own family.
+		if desired.ForcedEgress {
+			if ipv4 != "" {
+				fmt.Fprintf(&rules, "    oifname != \"lo\" meta nfproto ipv4 meta mark 0x%x snat ip to %s\n", ForcedEgressMark, ipv4)
+			}
+			if ipv6 != "" {
+				fmt.Fprintf(&rules, "    oifname != \"lo\" meta nfproto ipv6 meta mark 0x%x snat ip6 to %s\n", ForcedEgressMark, ipv6)
+			}
+		}
 		if ipv4 != "" {
 			name, err := interfaces(ipv4)
 			if err != nil {

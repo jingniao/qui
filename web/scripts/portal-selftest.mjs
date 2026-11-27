@@ -92,14 +92,18 @@ try {
     assert.ok(!call.url.includes('userId='));
   }
   assert.equal(api.portalState.session, null);
-  globalThis.fetch = async () => new Response('{"error":{"code":"unauthorized"}}', { status: 401 });
+  let activeSession;
+  globalThis.fetch = async url => url.endsWith('/auth/session') && activeSession
+    ? new Response(JSON.stringify(activeSession), { status: 200 })
+    : new Response('{"error":{"code":"unauthorized"}}', { status: 401 });
   await assert.rejects(api.portalAPI.me());
   assert.deepEqual(redirects, ['/']);
   // The session probe itself never redirects (the login page at "/" calls it).
   await assert.rejects(api.portalAPI.session());
   assert.deepEqual(redirects, ['/']);
   // A wrong current password is a 401 from a live session: report it, stay signed in.
-  api.portalState.session = { isAuthenticated: true, csrfToken: 'portal-csrf' };
+  activeSession = { isAuthenticated: true, csrfToken: 'portal-csrf', currentUser: { id: 'self' } };
+  api.portalState.session = activeSession;
   await assert.rejects(api.portalAPI.password('wrong-test-only', 'changed-test-only'), /当前密码错误/);
   assert.deepEqual(redirects, ['/']);
   assert.ok(api.portalState.session);

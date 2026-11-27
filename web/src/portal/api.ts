@@ -26,10 +26,12 @@ async function request<T>(path: `/api/v1/portal/${string}`, method = 'GET', body
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
+    const sessionChanged = method !== 'GET' && !path.endsWith('/auth/login') &&
+      (response.status === 401 || response.status === 403) && await refreshPortalSession();
     // A wrong current password is a 401 from a still-valid session.
     const credentialCheck = path.endsWith('/auth/login') || path.endsWith('/auth/password');
     // The session probe (guard and the login page at "/") must not redirect, or "/" would reload forever.
-    if (response.status === 401 && !credentialCheck && !path.endsWith('/auth/session')) {
+    if (response.status === 401 && !sessionChanged && !credentialCheck && !path.endsWith('/auth/session')) {
       portalState.session = null;
       window.location.assign('/');
     }
@@ -41,6 +43,33 @@ async function request<T>(path: `/api/v1/portal/${string}`, method = 'GET', body
       data.error?.code === 'subscription_unavailable' ? '账号已禁用、到期或额度已用完，暂时无法重置订阅。' : '请求失败，请稍后重试。'), { status: response.status });
   }
   return response.status === 204 ? undefined as T : response.json();
+}
+
+let sessionRefresh: Promise<boolean> | null = null;
+export async function refreshPortalSession(): Promise<boolean> {
+  const previous = portalState.session;
+  if (!previous?.isAuthenticated) return false;
+  if (sessionRefresh) return sessionRefresh;
+  sessionRefresh = (async () => {
+    try {
+      const current = await request<Session>('/api/v1/portal/auth/session');
+      if (portalState.session !== previous) return false;
+      if (current.currentUser.id !== previous.currentUser.id) {
+        window.location.reload();
+        return true;
+      }
+      portalState.session = current;
+      return false;
+    } catch (error) {
+      if ((error as { status?: number }).status !== 401) throw error;
+      if (portalState.session !== previous) return false;
+      portalState.session = null;
+      window.location.assign('/');
+      return true;
+    }
+  })();
+  try { return await sessionRefresh; }
+  finally { sessionRefresh = null; }
 }
 
 export const portalAPI = {

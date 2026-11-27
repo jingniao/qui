@@ -462,8 +462,9 @@ latest_version() {
   release=$(curl --no-insecure -fsSL --proto '=https' --tlsv1.2 \
     "https://api.github.com/repos/$repository/releases/latest") \
     || fail '无法查询 GitHub 最新发布；请检查网络，或用 --version 指定版本。'
-  tag=$(printf '%s\n' "$release" | grep -m1 '"tag_name"' \
-    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//') || tag=''
+  [[ $release =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] \
+    || fail 'GitHub 返回的内容里没有 tag_name。'
+  tag=${BASH_REMATCH[1]}
   [[ $tag == v* ]] && is_version "${tag#v}" \
     || fail "GitHub 返回的最新发布标签不是 vX.Y.Z 或 vX.Y.Z-rc.N：$tag"
   printf '%s\n' "${tag#v}"

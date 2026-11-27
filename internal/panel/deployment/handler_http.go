@@ -25,6 +25,7 @@ type Handler struct {
 func (h *Handler) Register(mux *http.ServeMux, reads *Handler) {
 	mux.Handle("GET /api/v1/task-records", h.Auth.Require(http.HandlerFunc(reads.taskHistory), true))
 	mux.Handle("GET /api/v1/nodes/inbound-states", h.Auth.Require(http.HandlerFunc(reads.inboundStatesBatch), false))
+	mux.Handle("GET /api/v1/nodes/publish-preview", h.Auth.Require(http.HandlerFunc(reads.previewNodePublish), true))
 	mux.Handle("GET /api/v1/runtime-topology", h.Auth.Require(http.HandlerFunc(h.publishedTopology), true))
 	mux.Handle("POST /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartNode), true))
 	mux.Handle("GET /api/v1/nodes/{id}/restart-core", h.Auth.Require(http.HandlerFunc(h.restartTasks), true))
@@ -138,7 +139,8 @@ func (h *Handler) deploy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) publishNode(w http.ResponseWriter, r *http.Request) {
 	nodeID := r.PathValue("id")
 	var body struct {
-		Summary string `json:"summary"`
+		Summary     string `json:"summary"`
+		OnlyChanged bool   `json:"onlyChanged"`
 	}
 	if err := httpapi.Decode(w, r, &body); err != nil {
 		httpapi.Error(w, 400, "invalid_request", err.Error())
@@ -147,6 +149,17 @@ func (h *Handler) publishNode(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(body.Summary) == "" || len(body.Summary) > 512 {
 		httpapi.Error(w, 400, "invalid_request", "Revision summary required")
 		return
+	}
+	if body.OnlyChanged {
+		changed, err := h.nodePublicationChanged(r.Context(), nodeID)
+		if err != nil {
+			h.fail(w, &apiFailure{Status: 409, Code: "node_publish_preview_failed", Message: err.Error()})
+			return
+		}
+		if !changed {
+			httpapi.JSON(w, http.StatusOK, map[string]string{"status": "unchanged"})
+			return
+		}
 	}
 	actor := auth.Actor(r.Context()).Username
 	if planner, ok := h.Proxy.(interface {

@@ -362,15 +362,16 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		default:
 		}
 	}
-	policyService := &policy.Service{Repository: &policy.Repository{Database: database, Vault: configurationVault, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository,
-		NodeCapabilities: func(ctx context.Context, nodeID string) ([]desiredstate.CoreKeywordCapability, error) {
-			n, err := nodeRepository.Get(ctx, nodeID)
+	nodePolicyCapabilities := func(nodes *node.Repository) func(context.Context, string) ([]desiredstate.CoreKeywordCapability, error) {
+		return func(ctx context.Context, nodeID string) ([]desiredstate.CoreKeywordCapability, error) {
+			n, err := nodes.Get(ctx, nodeID)
 			if err != nil {
 				return nil, err
 			}
 			return node.KeywordCapabilities(node.EnabledCores(n.Capabilities)), nil
-		},
+		}
 	}
+	policyService := &policy.Service{Repository: &policy.Repository{Database: database, Vault: configurationVault, ClientReferences: clientServiceReferences{}}, Nodes: nodeRepository, Users: users, Proxies: proxyService.Repository, Settings: systemRepository, NodeCapabilities: nodePolicyCapabilities(nodeRepository)}
 	proxyService.Policies = policyService
 	s.statistics = statistics.New(s.readPool, displayNodes)
 	(&dashboard.Handler{Service: &dashboard.Service{Repository: &dashboard.Repository{Liveness: liveness, Database: s.readPool, Connections: s.connectionStore}, Nodes: displayNodes, Deployments: displayDeployments, Proxies: &proxy.Repository{Database: s.readPool, Vault: configurationVault}, Settings: systemRepository, Statistics: s.statistics}, ExchangeRates: &dashboard.ExchangeRateService{}, Auth: authHandler}).Register(mux)
@@ -500,8 +501,15 @@ func newServer(c config.Panel, database *sql.DB, files fs.FS, logger *slog.Logge
 		return endpoint.Host, endpoint.HTTPPort
 	}}).Register(mux)
 	displayCertificates := certificate.NewService(&certificate.Repository{Database: s.readPool, Vault: configurationVault})
-	displayProxy := &proxy.Service{Repository: &proxy.Repository{Database: s.readPool, Vault: configurationVault, Certificates: displayCertificates}, Nodes: displayNodes}
-	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux, &deployment.Handler{Repository: displayDeployments, Nodes: displayNodes, Proxy: displayProxy, Auth: authHandler})
+	displayProxyRepository := &proxy.Repository{Database: s.readPool, Vault: configurationVault, Certificates: displayCertificates}
+	displayPolicy := &policy.Service{
+		Repository:       &policy.Repository{Database: s.readPool, Vault: configurationVault},
+		Nodes:            displayNodes,
+		Proxies:          displayProxyRepository,
+		NodeCapabilities: nodePolicyCapabilities(displayNodes),
+	}
+	displayProxy := &proxy.Service{Repository: displayProxyRepository, Nodes: displayNodes, Policies: displayPolicy}
+	(&deployment.Handler{Repository: deployments, Nodes: nodeRepository, Auth: authHandler, Audit: systemRepository, Users: users, Proxy: proxyService}).Register(mux, &deployment.Handler{Repository: displayDeployments, Nodes: displayNodes, Users: displayUsers, Proxy: displayProxy, Auth: authHandler})
 	notificationRepo := &notification.Repository{Database: database, Vault: configurationVault}
 	s.notificationWorker = &notification.Worker{
 		Repository: notificationRepo,

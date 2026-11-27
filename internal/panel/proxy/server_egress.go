@@ -64,8 +64,8 @@ func (r *Repository) serverEgressInboundID(ctx context.Context, nodeID string) (
 	return inboundID, err
 }
 
-func (r *Repository) ensureServerEgressInbound(ctx context.Context, target node.Node) error {
-	tx, err := r.Database.BeginTx(ctx, nil)
+func (r *Repository) prepareServerEgressInbound(ctx context.Context, target node.Node, preview bool) error {
+	tx, err := r.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: preview})
 	if err != nil {
 		return err
 	}
@@ -88,10 +88,16 @@ func (r *Repository) ensureServerEgressInbound(ctx context.Context, target node.
 			if err := r.RequireUnusedServerEgressListener(ctx, tx, target.ID); err != nil {
 				return err
 			}
+			if preview {
+				return ErrPublicationAllocationNeeded
+			}
 			if _, err = tx.ExecContext(ctx, "UPDATE inbounds SET listen=? WHERE id=?", listen, inboundID); err != nil {
 				return err
 			}
 			return r.commitDraft(tx)
+		}
+		if preview {
+			return nil
 		}
 		return tx.Commit()
 	}
@@ -105,6 +111,9 @@ func (r *Repository) ensureServerEgressInbound(ctx context.Context, target node.
 	ports, err := allocatePorts(ctx, tx, target.ID, 1, occupied, nil)
 	if err != nil {
 		return err
+	}
+	if preview {
+		return ErrPublicationAllocationNeeded
 	}
 	inboundID, err = id.New()
 	if err != nil {
@@ -341,6 +350,28 @@ func (r *Repository) serverEgressReferences(ctx context.Context, q serverEgressQ
 func (s *Service) ServerEgressSnapshots(ctx context.Context, entryID string, users AccessReader,
 	published func(context.Context, string) (desiredstate.State, []string, error),
 ) ([]NodeSnapshot, error) {
+	return s.serverEgressSnapshots(ctx, entryID, users, published, false)
+}
+
+// PreviewNodePublication renders through the publication pipeline without
+// allocating ports, relay credentials, or WireGuard addresses.
+func (s *Service) PreviewNodePublication(ctx context.Context, nodeID string, users AccessReader,
+	published func(context.Context, string) (desiredstate.State, []string, error),
+) ([]NodeSnapshot, error) {
+	snapshots, err := s.serverEgressSnapshots(ctx, nodeID, users, published, true)
+	if err != nil || len(snapshots) != 0 {
+		return snapshots, err
+	}
+	state, intent, err := s.snapshotIntent(ctx, nodeID, users, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	return []NodeSnapshot{{State: state, InboundIntent: intent}}, nil
+}
+
+func (s *Service) serverEgressSnapshots(ctx context.Context, entryID string, users AccessReader,
+	published func(context.Context, string) (desiredstate.State, []string, error), preview bool,
+) ([]NodeSnapshot, error) {
 	policies, ok := s.Policies.(serverEgressPolicies)
 	if !ok {
 		return nil, nil
@@ -385,10 +416,16 @@ func (s *Service) ServerEgressSnapshots(ctx context.Context, entryID string, use
 			return nil, err
 		}
 	}
+	needsAllocation := false
 	for _, target := range targets {
-		if err := s.Repository.ensureServerEgressInbound(ctx, target); err != nil {
+		if err := s.Repository.prepareServerEgressInbound(ctx, target, preview); errors.Is(err, ErrPublicationAllocationNeeded) {
+			needsAllocation = true
+		} else if err != nil {
 			return nil, fmt.Errorf("准备出站服务器 %s：%w", target.Name, err)
 		}
+	}
+	if needsAllocation {
+		return nil, ErrPublicationAllocationNeeded
 	}
 	snapshots := make([]NodeSnapshot, 0, len(targets)+1)
 	for _, target := range targets {
@@ -412,7 +449,7 @@ func (s *Service) ServerEgressSnapshots(ctx context.Context, entryID string, use
 		}
 		snapshots = append(snapshots, NodeSnapshot{State: state, InboundIntent: intent, ExpandedOnly: true, ExpectedPreviousRevision: &expected})
 	}
-	state, intent, err := s.SnapshotIntent(ctx, entryID, users)
+	state, intent, err := s.snapshotIntent(ctx, entryID, users, nil, preview)
 	if err != nil {
 		return nil, err
 	}

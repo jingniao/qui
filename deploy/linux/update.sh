@@ -2089,8 +2089,9 @@ main() {
     printf '查询 GitHub 最新发布 ...\n'
     release=$(curl --no-insecure -fsSL --proto '=https' --tlsv1.2 "https://api.github.com/repos/$repository/releases/latest") \
       || fail '无法查询 GitHub 最新发布；请检查网络，或用 --version 指定版本。'
-    tag=$(printf '%s\n' "$release" | grep -m1 '"tag_name"' | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//' -e 's/".*//') \
+    [[ $release =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] \
       || fail 'GitHub 返回的内容里没有 tag_name。'
+    tag=${BASH_REMATCH[1]}
     [[ $tag == v* ]] && qui_valid_release_version "${tag#v}" || fail "最新发布的标签不是 vX.Y.Z 或 vX.Y.Z-rc.N：$tag"
     version=${tag#v}
   fi

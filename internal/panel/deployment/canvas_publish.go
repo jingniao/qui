@@ -162,6 +162,11 @@ func canonicalState(state desiredstate.State) desiredstate.State {
 	state.Revision = 0
 	state.Users = canonicalSet(state.Users, func(a, b desiredstate.User) int { return strings.Compare(a.ID, b.ID) })
 	state.Credentials = canonicalSet(state.Credentials, func(a, b desiredstate.Credential) int { return strings.Compare(a.ID, b.ID) })
+	// Relay-only baselines store an empty policy array, while rendering a node
+	// with no matching policies can produce nil. Both run without policies.
+	if len(state.Policies) == 0 {
+		state.Policies = nil
+	}
 	state.Inbounds = slices.Clone(state.Inbounds)
 	for index := range state.Inbounds {
 		inbound := &state.Inbounds[index]

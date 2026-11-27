@@ -16,6 +16,8 @@ export interface NodePublication {
   status: string;
   batchId?: string;
 }
+export interface NodePublishCandidate { id: string; name: string; }
+export interface NodePublishPreviewFailure extends NodePublishCandidate { error: string; }
 
 export type InboundPublishState = 'effective' | 'modified' | 'pending' | 'unpublished';
 export interface InboundStateItem { inboundId: string; state: InboundPublishState; code?: string; revision?: number; }
@@ -30,6 +32,9 @@ export const deploymentAPI = {
   // Creates the node's revision from its business data and publishes it in one
   // step; a refused deploy still leaves the draft and names it in the error.
   publishNode: (nodeId: string, summary: string) => request<NodePublication>(`/nodes/${encodeURIComponent(nodeId)}/publish`, 'POST', { summary }),
+  nodePublishPreview: () => request<{ items: NodePublishCandidate[]; unavailable: NodePublishPreviewFailure[] }>('/nodes/publish-preview'),
+  publishChangedNode: (nodeId: string, summary: string) =>
+    request<NodePublication | { status: 'unchanged' }>(`/nodes/${encodeURIComponent(nodeId)}/publish`, 'POST', { summary, onlyChanged: true }),
   deployRevision: (id: number) => request(`/revisions/${id}/deploy`, 'POST'),
   // Publishes an empty baseline to an online node that never ran a configuration,
   // so web upgrades (bound to a confirmed revision) can start (v1.5.5 item 11).

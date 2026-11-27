@@ -128,7 +128,11 @@ func wireguardAddressPair(primary, additional string) []string {
 }
 
 func (r *Repository) DeviceAddresses(ctx context.Context, inboundID, deviceID string, settings desiredstate.ProtocolSettings) ([]string, error) {
-	tx, err := r.Database.BeginTx(ctx, nil)
+	return r.deviceAddresses(ctx, inboundID, deviceID, settings, false)
+}
+
+func (r *Repository) deviceAddresses(ctx context.Context, inboundID, deviceID string, settings desiredstate.ProtocolSettings, preview bool) ([]string, error) {
+	tx, err := r.Database.BeginTx(ctx, &sql.TxOptions{ReadOnly: preview})
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +156,9 @@ func (r *Repository) DeviceAddresses(ctx context.Context, inboundID, deviceID st
 	}
 	if !create && primary == addresses[0] && additional == newAdditional {
 		return addresses, nil
+	}
+	if preview {
+		return nil, ErrPublicationAllocationNeeded
 	}
 	primary = addresses[0]
 	additional = newAdditional

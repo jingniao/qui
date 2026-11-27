@@ -14,6 +14,10 @@ type AccessReader interface {
 	AccessForGroups(context.Context, []string, map[string]string) ([]user.Access, error)
 }
 
+// ErrPublicationAllocationNeeded means a read-only preview found a resource
+// that a real publication needs to allocate or update.
+var ErrPublicationAllocationNeeded = errors.New("publication requires a new or updated allocation")
+
 func snapshotList[T any](read func(int, int) ([]T, int, error)) ([]T, error) {
 	all := []T{}
 	expectedTotal := -1
@@ -67,10 +71,10 @@ func (s *Service) Snapshot(ctx context.Context, nodeID string, users AccessReade
 // as the revision's inbound intent, so an automatic quota revision can tell an
 // inbound the Owner disabled from one that merely has no users at the moment.
 func (s *Service) SnapshotIntent(ctx context.Context, nodeID string, users AccessReader) (desiredstate.State, []string, error) {
-	return s.snapshotIntent(ctx, nodeID, users, nil)
+	return s.snapshotIntent(ctx, nodeID, users, nil, false)
 }
 
-func (s *Service) snapshotIntent(ctx context.Context, nodeID string, users AccessReader, relayTargets map[string]string) (desiredstate.State, []string, error) {
+func (s *Service) snapshotIntent(ctx context.Context, nodeID string, users AccessReader, relayTargets map[string]string, preview bool) (desiredstate.State, []string, error) {
 	enabled := []string{}
 	n, err := s.Nodes.Get(ctx, nodeID)
 	if err != nil || !n.Enabled {
@@ -215,7 +219,7 @@ func (s *Service) snapshotIntent(ctx context.Context, nodeID string, users Acces
 					if credential.Protocol == "wireguard" {
 						desired.Secret = ""
 						desired.PublicKey = credential.PublicKey
-						addresses, err := s.Repository.DeviceAddresses(ctx, record.ID, credential.DeviceID, record.Settings)
+						addresses, err := s.Repository.deviceAddresses(ctx, record.ID, credential.DeviceID, record.Settings, preview)
 						if err != nil {
 							return state, enabled, err
 						}

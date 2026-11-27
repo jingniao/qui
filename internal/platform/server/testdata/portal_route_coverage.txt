@@ -69,6 +69,7 @@ GET /api/v1/nodes/choices
 GET /api/v1/nodes/inbound-states
 GET /api/v1/nodes/machine-traffic
 GET /api/v1/nodes/meta
+GET /api/v1/nodes/publish-preview
 GET /api/v1/nodes/relay-rules
 GET /api/v1/nodes/runtime
 GET /api/v1/nodes/{id}

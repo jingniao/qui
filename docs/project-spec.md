@@ -362,7 +362,9 @@ Owner 创建节点并签发一次性注册码 → 节点运行 `deploy/linux/nod
 
 统一处理网站分流、阻断、Direct、指定 Outbound、出口组与代理链。支持按用户、入口节点/节点组、域名、域名后缀、域名关键字、服务分类、IP/CIDR、端口、TCP/UDP 与时间段匹配；规则按优先级从高到低命中首条停止，每节点必有默认规则。
 
-新规则的转发目标可选「指定服务器出站」或「指定服务器组出站」。入口和目标服务器均需 Agent v1.12.4 或更新版本。同机目标使用专用直连。跨机目标使用内部 Shadowsocks 中继，目标服务器需要公网地址、可用端口范围及匹配的核心协议能力。面板先发布目标服务器，再发布入口，失败按批次反向回滚。选中多台服务器发布时，面板逐台等待前一个修订或批次结束，再提交下一台。确认超时或回滚失败时暂停后续提交。目标端保留已发布配置，首次发布时只下发中继及服务器出站网络设置。备份恢复保留运行中修订的监听分配和批次基线，有运行中或待确认的入口引用时，拒绝切换监听地址族或发布缺少该监听的版本。目标的中继入站直接拨号，组内以成员顺序主备切换，所有成员不可用时阻断。既有出站、出口组和代理链策略继续使用已保存的目标。
+「发布到节点」用当前已保存的配置生成发布预览，与节点最后一次生效的配置和入站启用意图比对。弹窗只列出有差异的发布入口，关联的出站目标随批次处理。检查失败时显示节点及原因。提交时重新检查，跳过配置已生效的节点。
+
+新规则的转发目标可选「指定服务器出站」或「指定服务器组出站」。入口和目标服务器均需 Agent v1.12.4 或更新版本。同机目标使用专用直连。跨机目标使用内部 Shadowsocks 中继，目标服务器需要公网地址、可用端口范围及匹配的核心协议能力。目标防火墙须允许入口访问分配给中继的端口。面板先发布目标服务器，再发布入口，失败按批次反向回滚。选中多台服务器发布时，面板逐台等待前一个修订或批次结束，再提交下一台。确认超时或回滚失败时暂停后续提交。目标端保留已发布配置，首次发布时只下发中继及服务器出站网络设置。备份恢复保留运行中修订的监听分配和批次基线，有运行中或待确认的入口引用时，拒绝切换监听地址族或发布缺少该监听的版本。目标的中继入站直接拨号，组内以成员顺序主备切换，所有成员不可用时阻断。既有出站、出口组和代理链策略继续使用已保存的目标。
 
 - **展开上限**：单条策略手写条目 ≤2000 条；引用规则集展开后单条 ≤50000 条（超过 2000 条需逐核上报 `expanded_policy_supported`，否则快照与发布前拒绝）；整份期望状态上限 2 MiB。内置默认禁用的 `policy-block-china`（匹配 `service-cn` → Block）为普通策略，可编辑或删除。
 - **节点原生规则集**：规则集外部来源支持 `native` 格式，同时提供 sing-box `.srs` 与 Xray geosite/geoip 地址及标签（白名单限于 `testingcf.jsdelivr.net`/`cdn.jsdelivr.net`/`fastly.jsdelivr.net` 上的 MetaCubeX `meta-rules-dat`，面板与 Agent 双检）。节点所有启用 Xray/sing-box 核心均上报 `native_rule_sets_supported` 时，在期望状态 `match.rule_sets` 下发引用并跳过 yaml/text 展开（不计条数上限）；否则维持展开。Agent 在独立准备任务中下载候选文件至 `runtime/<core>/rulesets/`（单文件 ≤32 MiB、3 分钟、下载期间不阻塞心跳），失败沿用旧文件（首次缺失报 `rule_set_unavailable` 回滚），替换保留 `.prev` 以便校验或健康失败恢复，成功清理无引用旧文件。Xray 开启访问记录时仅对 WireGuard 与 HTTP/SOCKS5 按凭据复制策略规则，VLESS/Trojan/Shadowsocks 由访问日志 email 归属账户。
@@ -768,6 +770,7 @@ PUT/DELETE     /imported-proxies/{id}          GET    /imported-proxies/{id}/del
 GET/POST       /probe-targets                  PUT/DELETE     /probe-targets/{target}
 GET/POST       /nodes/{id}/tcp-probes          GET    /nodes/{id}/latency?hours=24
 GET/PUT        /nodes/{id}/latency-targets     POST   /inbounds/{id}/reachability
+GET    /nodes/publish-preview
 POST   /nodes/{id}/publish                     GET    /revisions?nodeId={id}
 GET/POST       /canvas-tunnels                 PUT/DELETE     /canvas-tunnels/{id}
 GET/POST       /canvas-schemes                 PUT/DELETE     /canvas-schemes/{id}
@@ -781,6 +784,8 @@ GET    /portal/me                              GET    /portal/traffic
 GET    /portal/nodes                           GET    /portal/devices-online
 GET    /portal/subscription                    POST   /portal/subscription/reset
 ```
+
+`GET /nodes/publish-preview` 供 Owner 只读检查待发布的节点，返回待选节点 `items` 和检查失败的节点 `unavailable`。`POST /nodes/{id}/publish` 接收可选的 `onlyChanged`，设为 `true` 时重新比对，配置已生效则返回 200 和 `status: "unchanged"`。
 
 `POST /inbounds/{id}/reachability` 只检查面板到入站的 TCP 连接或可信 TLS 握手，返回 `supported=true`、`transport=tcp|tls` 与布尔 `reachable`；通过不代表代理认证和转发成功。Hysteria2、TUIC、WireGuard、纯 UDP 转发不执行 TCP 检查，返回 `supported=false`、`transport=udp`、`reachable=null`、`code=udp_probe_unsupported`；页面提示「未检测，暂不支持 UDP/QUIC 协议探测」，须用客户端验证，不显示连接失败。
 

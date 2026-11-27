@@ -181,13 +181,15 @@
     <AppDialog
       v-model="publishVisible"
       title="发布到节点"
-      description="按当前已保存的配置和节点策略生成版本。涉及远端出站时，先向目标服务器发布，入口服务器确认后生效。"
-      confirm-text="开始发布"
-      :loading="publishLoading"
+      description="只列出有待发布更改的节点。远端出站目标随关联批次发布。"
+      :confirm-text="publishNodes.length ? '开始发布' : ''"
+      :loading="publishLoading || !publishNodes.some(item => item.checked)"
       @confirm="runPublish"
     >
-      <p v-if="!publishNodes.length" class="text-sm text-ios-tertiary">没有可发布的已启用节点。</p>
-      <div v-else class="space-y-2">
+      <p v-if="publishChecking" class="text-sm text-ios-tertiary" role="status">正在检查待发布更改…</p>
+      <ErrorState v-else-if="publishPreviewError" :message="publishPreviewError" @retry="openPublish" />
+      <p v-else-if="!publishNodes.length && !publishUnavailable.length" class="text-sm text-ios-tertiary">没有待发布的更改。</p>
+      <div v-if="publishNodes.length" class="space-y-2">
         <label
           v-for="item in publishNodes"
           :key="item.id"
@@ -197,10 +199,14 @@
           <span class="text-ios-label">{{ item.name }}</span>
         </label>
       </div>
+      <div v-if="publishUnavailable.length" class="space-y-1 text-sm" role="alert">
+        <p class="font-medium text-ios-label">以下节点暂时无法检查</p>
+        <p v-for="item in publishUnavailable" :key="item.id" class="text-ios-red">{{ item.name }} · {{ item.error }}</p>
+      </div>
       <div v-if="publishResults.length" class="space-y-1.5 border-t border-black/[0.06] pt-3">
         <p v-for="result in publishResults" :key="result.nodeId" class="text-xs">
           <span class="font-medium text-ios-label">{{ result.name }}</span>
-          <span class="ml-2" :class="{ pending: 'text-ios-secondary', success: 'text-ios-green', failed: 'text-ios-red', unconfirmed: 'text-ios-orange' }[result.status]">{{ result.message }}</span>
+          <span class="ml-2" :class="{ pending: 'text-ios-secondary', success: 'text-ios-green', unchanged: 'text-ios-secondary', failed: 'text-ios-red', unconfirmed: 'text-ios-orange' }[result.status]">{{ result.message }}</span>
         </p>
       </div>
     </AppDialog>
@@ -215,7 +221,7 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { policyAPI, serverEgressGroupAPI, input, actionNames, type PolicyRecord, type ServerEgressGroup, type ServiceSet } from '../api';
 import { proxyAPI, type Outbound, type OutboundGroup, type ProxyChain, choices } from '../../proxy/api';
 import { nodeAPI, type NodeView } from '../../nodes/api';
-import { deploymentAPI, type NodePublication } from '../../system/deploymentApi';
+import { deploymentAPI, type NodePublication, type NodePublishCandidate, type NodePublishPreviewFailure } from '../../system/deploymentApi';
 import { publishWatchTimeout } from '../../system/publishProgress';
 import { revisionResult } from '../../system/revisionResult';
 import { showToast } from '../../../app/api';
@@ -403,8 +409,8 @@ async function execute() {
 }
 
 // ----------------- Publish to nodes -----------------
-interface PublishChoice { id: string; name: string; checked: boolean; }
-interface PublishOutcome { status: 'pending' | 'success' | 'failed' | 'unconfirmed'; message: string; }
+interface PublishChoice extends NodePublishCandidate { checked: boolean; }
+interface PublishOutcome { status: 'pending' | 'success' | 'unchanged' | 'failed' | 'unconfirmed'; message: string; }
 interface PublishResult extends PublishOutcome { nodeId: string; name: string; }
 
 const egressGroupVisible = ref(false);
@@ -456,28 +462,31 @@ async function deleteEgressGroup() {
 
 const publishVisible = ref(false);
 const publishLoading = ref(false);
+const publishChecking = ref(false);
+const publishPreviewError = ref('');
 const publishNodes = ref<PublishChoice[]>([]);
+const publishUnavailable = ref<NodePublishPreviewFailure[]>([]);
 const publishResults = ref<PublishResult[]>([]);
 let mounted = true;
 
 async function openPublish() {
   publishVisible.value = true;
-  if (publishLoading.value) return;
+  if (publishLoading.value || publishChecking.value) return;
+  publishChecking.value = true;
+  publishPreviewError.value = '';
   publishResults.value = [];
   publishNodes.value = [];
+  publishUnavailable.value = [];
   try {
-    const choices: PublishChoice[] = [];
-    for (let current = 1; ; current++) {
-      const result = await nodeAPI.list(current, '');
-      choices.push(...result.items
-        .filter(item => item.enabled && !item.deletedAt)
-        .map(item => ({ id: item.id, name: item.name, checked: true })));
-      if (current * 20 >= result.total) break;
+    const preview = await deploymentAPI.nodePublishPreview();
+    if (mounted) {
+      publishNodes.value = preview.items.map(item => ({ ...item, checked: true }));
+      publishUnavailable.value = preview.unavailable;
     }
-    publishNodes.value = choices;
-    if (!choices.length) showToast('没有可发布的已启用节点', 'error');
   } catch (e) {
-    showToast((e as Error).message, 'error');
+    if (mounted) publishPreviewError.value = (e as Error).message;
+  } finally {
+    publishChecking.value = false;
   }
 }
 
@@ -533,15 +542,25 @@ async function runPublish() {
       publishResults.value.push(feedback);
       let publication: NodePublication | undefined;
       try {
-        publication = await deploymentAPI.publishNode(item.id, '发布节点策略');
+        const result = await deploymentAPI.publishChangedNode(item.id, '发布节点策略');
+        if (!('revision' in result)) {
+          feedback.status = 'unchanged';
+          feedback.message = '配置已是最新';
+          publishNodes.value = publishNodes.value.filter(node => node.id !== item.id);
+          continue;
+        }
+        publication = result;
         feedback.message = `配置 #${publication.revision} 已提交，等待服务器确认`;
         // A submitted batch can reserve the next selected server as a target.
         // Continue only after a terminal outcome that releases its reservations.
         if (selected.length > 1) {
           Object.assign(feedback, await waitForPublication(item.id, publication));
+          if (feedback.status === 'success') {
+            publishNodes.value = publishNodes.value.filter(node => node.id !== item.id);
+          }
         }
       } catch (e) {
-        if (!publication && e instanceof APIError && e.code === 'server_egress_preflight_failed') {
+        if (!publication && e instanceof APIError && ['server_egress_preflight_failed', 'node_publish_preview_failed'].includes(e.code)) {
           feedback.status = 'failed';
           feedback.message = `发布未提交：${e.message}`;
         } else {
@@ -553,13 +572,17 @@ async function runPublish() {
     }
     if (!mounted) return;
     const succeeded = publishResults.value.filter(result => result.status === 'success').length;
+    const unchanged = publishResults.value.filter(result => result.status === 'unchanged').length;
     if (publishResults.value.some(result => result.status === 'unconfirmed')) {
       const remaining = selected.length - publishResults.value.length;
       showToast(remaining ? `发布已暂停，后续 ${remaining} 个节点未提交。请先确认当前发布结果` : '发布结果未确认，请查看配置记录', 'error');
     } else if (selected.length === 1 && publishResults.value[0]?.status === 'pending') {
       showToast('已提交发布，等待服务器确认');
+    } else if (unchanged === selected.length) {
+      showToast('没有待发布的更改');
     } else {
-      showToast(`已确认生效 ${succeeded}/${selected.length} 个节点`, succeeded === selected.length ? 'success' : 'error');
+      const summary = unchanged ? `，${unchanged} 个节点无变化` : '';
+      showToast(`已确认生效 ${succeeded} 个节点${summary}`, succeeded + unchanged === selected.length ? 'success' : 'error');
     }
   } finally {
     publishLoading.value = false;

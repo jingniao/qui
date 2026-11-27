@@ -23,10 +23,10 @@ ProtectSystem=strict
 ReadWritePaths=-/run/proxy-agent-handover
 ProtectHome=true
 PrivateTmp=true
-# No ProtectKernelTunables: in LXC it remounts /proc/sys and exposes the host
-# boot_id instead of the container's, so core handover authorization (bound to
-# the boot_id root observes) always fails. The service account has no
-# capability that allows it to write sysctls.
+# In LXC the private mount view can lose the container's boot_id bind mount.
+# Keep the updater and service on the same boot identity while retaining the
+# rest of the service sandbox.
+BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id
 # Keep module files readable for algorithm discovery; the syscall filter and
 # capability set block explicit loading, while kernel sysctl autoload uses modprobe outside this sandbox.
 SystemCallFilter=~@module

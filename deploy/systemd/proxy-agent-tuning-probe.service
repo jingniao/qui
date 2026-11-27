@@ -14,6 +14,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# Match the boot identity the Agent uses to validate the probe receipt.
+BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id
 # This operation writes sysctls; ProtectKernelTunables=true would prevent it.
 ProtectKernelTunables=false
 # Keep module files readable for algorithm discovery; the syscall filter and

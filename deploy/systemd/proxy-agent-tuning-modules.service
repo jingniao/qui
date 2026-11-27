@@ -13,6 +13,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+# Match the boot identity in the Agent request and the tuning probe receipt.
+BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK

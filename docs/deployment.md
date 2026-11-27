@@ -174,7 +174,7 @@ curl --no-insecure -fsSL https://github.com/jingniao/qui/releases/download/v1.7.
 | 开机启动 | `systemctl enable` | `rc-update add … default` |
 
 - 均以 `proxy-agent` 运行（`no_new_privs`、`umask=077`）；OpenRC 无 systemd 的 `ProtectSystem`/`PrivateTmp` 等文件系统隔离。
-- 在 Proxmox LXC 上，systemd 的服务挂载隔离可能让 Agent 读到宿主的 `boot_id`，导致核心交接回滚为「核心未确认 detached：armed」。Agent 单元从 PID 1 的挂载视图只读绑定 `boot_id`，与 root 更新器保持一致。如果旧单元上的 Agent 已遇到此问题，先在 `proxy-agent.service` 的 `[Service]` drop-in 添加 `BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id`，执行 `systemctl daemon-reload`，再重启一次 Agent 后升级。
+- 在 Proxmox LXC 上，systemd 的服务挂载隔离可能让 Agent 读到宿主的 `boot_id`，导致核心交接回滚为「核心未确认 detached：armed」。Agent 和调优助手单元从 PID 1 的挂载视图只读绑定 `boot_id`，与 root 更新器保持一致。旧单元遇到此问题时，先在 `proxy-agent.service`、`proxy-agent-tuning-probe.service`、`proxy-agent-tuning.service` 以及已安装的 `proxy-agent-tuning-modules.service` 的 `[Service]` drop-in 添加 `BindReadOnlyPaths=/proc/1/root/proc/sys/kernel/random/boot_id:/proc/sys/kernel/random/boot_id`，执行 `systemctl daemon-reload`，重跑调优探针并重启一次 Agent 后升级。
 - Linux 核心独立于 Agent 存活，服务停止后由同一屏障确认 worker 退出并检查授权。仅有效更新授权及交接回执允许保留核心；普通 stop/restart、卸载、非更新崩溃仍停核，停核未确认须报失败。
 - Linux 核心以 `Setsid` 启动，不设 `Pdeathsig`；退出清理由上述授权检查与停核屏障负责。OpenRC 自动 respawn 不执行 `stop_post`，新 worker 因而在 lifecycle 锁内先执行同一已认证停核屏障，再恢复保留配置；有效 detached/adopting 交接仍走授权认领。
 - OpenRC 缺失有效 `/etc/machine-id` 时由 `install.sh --node` 自动补写（root 0444）；`agent.manifest` 第 10 行记为 `openrc`。服务命令对照见[运维手册](operations.md)第 1 节。

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,6 +112,8 @@ func newV14Fixture(t *testing.T, path, primary string) *v14Fixture {
 		}
 	} else if strings.HasPrefix(path, "P4") {
 		publishDirect()
+		direct, e := h.repository.Published(h.ctx, h.us2)
+		v14Must(t, e)
 		hops := []proxy.TunnelHop{{Role: "entry", NodeID: h.alpine, PortMode: "auto"}}
 		exitNode := h.uk
 		if strings.Contains(path, "three") {
@@ -127,9 +130,27 @@ func newV14Fixture(t *testing.T, path, primary string) *v14Fixture {
 		_, e = nodes.SaveGroup(h.ctx, group.ID, node.GroupInput{Name: group.Name, Purpose: group.Purpose, Enabled: true, SubscriptionVisible: true, InboundIDs: []string{entry.ID}, RelayIDs: []string{rule.ID}})
 		v14Must(t, e)
 		selection := proxy.PublishSelection{RuleIDs: []string{rule.ID}}
-		result, _ := driveTunnelPublish(t, h, selection, "")
+		result, order := driveTunnelPublish(t, h, selection, "")
+		if result.Status != "success" || len(result.Servers) != 3 {
+			t.Fatal(result)
+		}
+		wantOrder := []string{h.us2, h.uk, h.alpine}
+		if path == "P4" {
+			// The linked rule uses the same inbound and credentials already
+			// published on US. Only the two hosts gaining tunnel listeners apply.
+			wantOrder = []string{h.uk, h.alpine}
+		}
+		if !slices.Equal(order, wantOrder) {
+			t.Fatalf("tunnel apply order = %v, want %v", order, wantOrder)
+		}
 		for _, s := range result.Servers {
-			if s.Status != "applied" {
+			if path == "P4" && s.NodeID == h.us2 {
+				current, e := h.repository.Published(h.ctx, h.us2)
+				v14Must(t, e)
+				if s.Status != "unchanged" || s.Revision != nil || current.Revision != direct.Revision {
+					t.Fatalf("target must keep its existing revision %d: %+v", direct.Revision, s)
+				}
+			} else if s.Status != "applied" || s.Revision == nil {
 				t.Fatal(result)
 			}
 		}

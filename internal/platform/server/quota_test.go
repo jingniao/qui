@@ -1473,7 +1473,8 @@ func TestQuotaDeletedUserRevokedOnNode(t *testing.T) {
 		t.Fatalf("delete user: %d %s", response.Code, response.Body.String())
 	}
 	flowWait(t, "one automatic revision removing the deleted credential", func() bool {
-		return len(f.autoRevisions(t)) == 1
+		revisions := f.autoRevisions(t)
+		return len(revisions) == 1 && revisions[0].Status == "pending"
 	})
 	automatic := f.autoRevisions(t)[0]
 	if automatic.NodeID != f.nodeID {

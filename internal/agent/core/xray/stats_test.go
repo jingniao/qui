@@ -35,22 +35,41 @@ func TestRealCumulativeUserCountersAndManagementPortIsolation(t *testing.T) {
 	if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
 		t.Fatal(result, err)
 	}
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, strings.Repeat("counter-data", 1000)) }))
+	payload := strings.Repeat("counter-data", 1000)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, payload) }))
 	defer origin.Close()
 	proxyURL, _ := url.Parse("socks5://127.0.0.1:" + strconv.Itoa(state.Inbounds[0].Port))
 	proxyURL.User = url.UserPassword("device-account", "stats-test-password")
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
-	for index := 0; index < 2; index++ {
+	request := func() {
 		response, err := client.Get(origin.URL)
 		if err != nil {
-			t.Fatal("statistics instrumentation broke forwarding")
+			t.Fatal("statistics instrumentation broke forwarding", err)
 		}
-		io.Copy(io.Discard, response.Body)
+		size, err := io.Copy(io.Discard, response.Body)
 		response.Body.Close()
+		if err != nil || size != int64(len(payload)) {
+			t.Fatal("proxied response incomplete", size, err)
+		}
 	}
-	counters, err := adapter.TrafficCounters(ctx)
+	// Xray accounts the downlink of a spliced connection when its socket
+	// copy exits. Reading the complete HTTP response can precede that update.
+	finishedCounters := func(minDownload int64) ([]traffic.Counter, error) {
+		origin.CloseClientConnections()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			counters, err := adapter.TrafficCounters(ctx)
+			if err != nil || len(counters) == 1 && counters[0].DownloadBytes >= minDownload || time.Now().After(deadline) {
+				return counters, err
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	request()
+	request()
+	counters, err := finishedCounters(24000)
 	if err != nil || len(counters) != 1 || counters[0].UserID != "user" || counters[0].DeviceID != "device" || counters[0].UploadBytes <= 0 || counters[0].DownloadBytes < 24000 {
 		t.Fatal("native counters missing", counters, err)
 	}
@@ -70,14 +89,9 @@ func TestRealCumulativeUserCountersAndManagementPortIsolation(t *testing.T) {
 	if result, err := adapter.Apply(ctx, rendered); err != nil || !result.Success {
 		t.Fatal(result, err)
 	}
-	response, err := client.Get(origin.URL)
-	if err != nil {
-		t.Fatal("restarted proxy failed")
-	}
-	io.Copy(io.Discard, response.Body)
-	response.Body.Close()
-	restarted, err := adapter.TrafficCounters(ctx)
-	if err != nil || len(restarted) != 1 || restarted[0].CoreEpoch == oldEpoch || restarted[0].DownloadBytes >= counters[0].DownloadBytes {
+	request()
+	restarted, err := finishedCounters(int64(len(payload)))
+	if err != nil || len(restarted) != 1 || restarted[0].CoreEpoch == oldEpoch || restarted[0].DownloadBytes < int64(len(payload)) || restarted[0].DownloadBytes >= counters[0].DownloadBytes {
 		t.Fatal("new process epoch not separated", restarted, err)
 	}
 }

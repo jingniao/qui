@@ -227,9 +227,9 @@ func (r *Repository) ResetCredentials(ctx context.Context, userID string) error 
 	return tx.Commit()
 }
 
-// EnsureAllAccessIdentities runs EnsureAccessIdentity for every user. The panel
-// calls it at startup, which also covers a restored database (a restore
-// restarts the service instance). It returns the users whose identity changed.
+// EnsureAllAccessIdentities repairs identities at startup and returns the
+// users whose identity changed. Disabled identities retained by a restore
+// remain disabled until an Owner edits or enables the account.
 func (r *Repository) EnsureAllAccessIdentities(ctx context.Context) ([]string, error) {
 	ids, err := accessIdentityUserIDs(ctx, r.Database)
 	if err != nil {
@@ -251,7 +251,11 @@ func (r *Repository) EnsureAllAccessIdentities(ctx context.Context) ([]string, e
 func accessIdentityUserIDs(ctx context.Context, queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }) ([]string, error) {
-	rows, err := queryer.QueryContext(ctx, "SELECT id FROM users ORDER BY id")
+	rows, err := queryer.QueryContext(ctx, `SELECT u.id FROM users u
+		WHERE u.status<>'disabled'
+		OR EXISTS(SELECT 1 FROM devices d WHERE d.user_id=u.id AND d.status='active')
+		OR NOT EXISTS(SELECT 1 FROM devices d WHERE d.user_id=u.id)
+		ORDER BY u.id`)
 	if err != nil {
 		return nil, err
 	}

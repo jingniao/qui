@@ -247,7 +247,8 @@ func TestRestoreCandidateNeedsNoStartupIdentityWrites(t *testing.T) {
 		t.Fatalf("read-only startup tried to repair identities: %v %v", ids, err)
 	}
 	assertText(t, database, "SELECT status FROM users WHERE id=?", "disabled", u.ID)
-	assertText(t, database, "SELECT status FROM devices WHERE user_id=?", "active", u.ID)
+	assertText(t, database, "SELECT status FROM devices WHERE user_id=?", "disabled", u.ID)
+	assertInt(t, database, "SELECT count(*) FROM credentials WHERE user_id=? AND status='active'", 0, u.ID)
 }
 
 func TestRestoreBackupTakenBeforeManualTrafficReset(t *testing.T) {

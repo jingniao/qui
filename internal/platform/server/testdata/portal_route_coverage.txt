@@ -17,6 +17,7 @@ DELETE /api/v1/outbounds/{id}
 DELETE /api/v1/policies/{id}
 DELETE /api/v1/probe-targets/{target}
 DELETE /api/v1/proxy-chains/{id}
+DELETE /api/v1/server-egress-groups/{id}
 DELETE /api/v1/service-sets/{id}
 DELETE /api/v1/subscription-sources/{id}
 DELETE /api/v1/tunnel-rules/{id}
@@ -115,6 +116,7 @@ GET /api/v1/restore-records
 GET /api/v1/revisions
 GET /api/v1/revisions/{id}/diff
 GET /api/v1/runtime-topology
+GET /api/v1/server-egress-groups
 GET /api/v1/service-sets
 GET /api/v1/service-sets/{id}
 GET /api/v1/service-sets/{id}/references
@@ -226,6 +228,8 @@ POST /api/v1/revisions
 POST /api/v1/revisions/proxy
 POST /api/v1/revisions/user-access
 POST /api/v1/revisions/{id}/deploy
+POST /api/v1/server-egress-groups
+POST /api/v1/server-egress-groups/preview
 POST /api/v1/service-sets
 POST /api/v1/service-sets/{id}/sources/{sourceId}/refresh
 POST /api/v1/subscription-sources
@@ -264,6 +268,7 @@ PUT /api/v1/policies/{id}
 PUT /api/v1/portal/auth/password
 PUT /api/v1/probe-targets/{target}
 PUT /api/v1/proxy-chains/{id}
+PUT /api/v1/server-egress-groups/{id}
 PUT /api/v1/service-sets/{id}
 PUT /api/v1/subscription-sources/{id}
 PUT /api/v1/system/access-retention

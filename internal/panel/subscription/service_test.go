@@ -129,8 +129,16 @@ func setupProtocols(t *testing.T, limit int64, protocols ...string) *fixture {
 		}
 		f.groups = append(f.groups, group)
 	}
-	input := user.Input{Username: "sub_user", Status: "active", TrafficLimit: limit, MaxDevices: 3, MaxConnections: 8, AllowedProtocols: protocols, NodeGroupIDs: []string{f.groups[0].ID, f.groups[1].ID, f.groups[2].ID}}
+	input := user.Input{Username: "sub_user", Status: "active", TrafficLimit: limit, MaxDevices: 3, MaxConnections: 8, AllowedProtocols: protocols, NodeGroupIDs: []string{f.groups[0].ID, f.groups[1].ID}}
 	f.u, err = f.users.Save(ctx, "", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a legacy relay grant to keep Group C covered by the subscription filter.
+	if _, err := database.ExecContext(ctx, "INSERT INTO user_node_group_grants(user_id,group_id) VALUES(?,?)", f.u.ID, f.groups[2].ID); err != nil {
+		t.Fatal(err)
+	}
+	f.u, err = f.users.Get(ctx, f.u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,30 @@
 import type { GroupInput, GroupImport } from '../nodes/groupsApi';
+import type { Inbound } from './api';
 import { resolveImportMember } from './importIdentity';
 import type { ProxyNodeItem, SubscriptionItem } from './proxyNodes';
+
+export interface GroupMemberNode {
+  id: string;
+  name: string;
+  protocol: string;
+  port: number | string;
+  server?: string;
+  sourceType: 'self_hosted' | 'subscription' | 'manual' | 'tunnel_relay';
+  sourceTypeName: string;
+  sourceName: string;
+  serverId?: string;
+  sourceId?: string;
+  proxyKey?: string;
+  enabled: boolean;
+  subscriptionVisible?: boolean;
+  internalRelay?: boolean;
+  routeSummary?: Inbound['routeSummary'];
+  invalid?: boolean;
+  ruleId?: string;
+  pendingDelete?: boolean;
+  note?: string;
+}
+
 export function isUserGroup(group: Pick<GroupInput, 'purpose'>): boolean {
   return group.purpose === 'subscription' || group.purpose === 'mixed';
 }

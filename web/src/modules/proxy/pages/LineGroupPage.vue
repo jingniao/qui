@@ -215,7 +215,7 @@
       <!-- 弹窗内部：左边菜单（账号、节点），右边对应内容 -->
       <div v-if="selected" class="flex flex-col md:flex-row gap-6 flex-1 min-h-0 h-full overflow-hidden">
         <!-- 左侧菜单：账号 与 节点 -->
-        <div class="w-full md:w-56 lg:w-60 shrink-0 space-y-2 border-b md:border-b-0 md:border-r border-black/[0.06] pb-4 md:pb-0 md:pr-4 overflow-y-auto h-full pr-1">
+        <div class="w-full md:w-56 lg:w-60 shrink-0 space-y-2 border-b md:border-b-0 md:border-r border-black/[0.06] pb-4 md:pb-0 md:pr-4 overflow-y-auto md:h-full pr-1">
           <div class="px-2 py-1 text-xs font-semibold text-neutral-400 uppercase tracking-wider">
             管理菜单
           </div>
@@ -292,7 +292,7 @@
         </div>
 
         <!-- 右侧内容区域：根据 activeMenu 切换展示账号或节点 -->
-        <div class="flex-1 min-w-0 h-full overflow-y-auto space-y-4 pr-1">
+        <div class="flex-1 min-h-0 min-w-0 md:h-full overflow-y-auto pr-1">
           <!-- 菜单 1：授权账号 (Accounts) -->
           <div v-if="activeMenu === 'users'" class="space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
@@ -374,124 +374,100 @@
           </div>
 
           <!-- 菜单 2：组内节点 (Nodes) -->
-          <div v-else-if="activeMenu === 'nodes'" class="space-y-4">
-            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
+          <div v-else-if="activeMenu === 'nodes'" class="flex h-full flex-col gap-4">
+            <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-black/[0.06] pb-3">
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="text-neutral-900 text-base font-semibold leading-normal">组内节点列表</h3>
-                  <span class="px-2 py-0.5 rounded-full text-xs font-mono font-semibold bg-neutral-200/70 text-neutral-700 tabular-nums">
-                    {{ currentGroupNodes.length }}
-                  </span>
+                  <h3 class="text-neutral-900 text-base font-semibold leading-normal">组内节点</h3>
                 </div>
-                <p class="text-xs text-neutral-400 mt-0.5">
-                  分组内包含的代理节点，可作为用户订阅入口或分流出口。
+                <p v-if="isOwner" class="text-xs text-neutral-400 mt-0.5">
+                  勾选要加入分组的节点，保存后更新成员。
                 </p>
               </div>
-              <button
-                v-if="isOwner && hasAvailableNodes"
-                type="button"
-                class="ios-btn-primary px-3.5 py-1.5 h-8 font-medium inline-flex items-center gap-1.5 shadow-2xs"
-                :disabled="busy"
-                @click="openPicker"
-              >
-                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span>添加节点</span>
-              </button>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded-full bg-ios-blue/10 px-2.5 py-0.5 text-xs tabular-nums text-ios-blue">
+                  已选 {{ checkedMemberIds.size }} / {{ candidateGroupNodes.length }}
+                </span>
+                <template v-if="isOwner && Object.keys(memberEdits).length">
+                  <button type="button" class="ios-btn-secondary" :disabled="busy" @click="cancelMemberEdits">取消变更</button>
+                  <button type="button" class="ios-btn-primary" :disabled="busy" @click="saveMemberEdits">保存成员变更</button>
+                </template>
+              </div>
             </div>
 
-            <!-- 节点表格 -->
-            <p v-if="currentGroupNodes.some(node => node.invalid)" class="text-sm text-ios-orange">组内有失效成员，请逐个移出后保存。其他成员仍可编辑。</p>
-            <div v-if="pendingRemovedIds.length" class="flex flex-wrap items-center gap-3 text-sm">
-              <span>已移出 {{ pendingRemovedIds.length }} 个成员，尚未保存。</span>
-              <button class="ios-btn-primary" :disabled="busy" @click="saveRemovedMembers">保存成员变更</button>
-              <button class="ios-btn-secondary" :disabled="busy" @click="cancelRemovedMembers">取消变更</button>
+            <div class="flex shrink-0 flex-wrap items-center gap-2" role="group" aria-label="组内节点筛选">
+              <div class="inline-flex max-w-full flex-wrap items-center rounded-xl border border-black/[0.04] bg-black/[0.04] p-0.5" role="group" aria-label="节点来源">
+                <button
+                  v-for="option in sourceOptions"
+                  :key="option.value"
+                  type="button"
+                  :aria-pressed="filterSource === option.value"
+                  class="h-8 whitespace-nowrap rounded-lg px-2.5 text-sm font-medium transition-all"
+                  :class="filterSource === option.value ? 'bg-white font-semibold text-ios-label shadow-xs' : 'text-ios-tertiary hover:text-ios-label'"
+                  @click="filterSource = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <AppSelect v-model="filterProtocol" :options="protocolOptions" class="w-32" teleport />
             </div>
-            <div class="rounded-2xl border border-black/[0.06] overflow-hidden bg-white shadow-2xs">
-              <DataTable v-if="currentGroupNodes.length" class="border-0 shadow-none rounded-none">
-                <template #header>
-                  <th>节点名称</th>
-                  <th>来源类型</th>
-                  <th>协议</th>
-                  <th>端口</th>
-                  <th>所属服务器 / 来源</th>
-                  <th>状态</th>
-                  <th v-if="isOwner">操作</th>
-                </template>
-                <template #body>
-                  <tr v-for="node in currentGroupNodes" :key="node.id" class="hover:bg-neutral-50/60 transition-colors">
-                    <td>
-                      <span class="block text-sm font-semibold text-neutral-800">
-                        {{ node.name }}
-                      </span>
-                      <EntryRouteSummary :summary="node.routeSummary" :show-scheme-link="isOwner" />
-                      <span v-if="node.server" class="block text-xs font-mono text-ios-secondary break-all">{{ node.server }}:{{ node.port }}</span>
-                      <span v-if="node.internalRelay" class="block text-xs text-ios-orange">
-                        内部监听（不应作为用户成员）
-                      </span>
-                      <span v-if="node.note" class="block text-xs text-ios-orange">{{ node.note }}</span>
-                      <span class="block text-xs text-neutral-400 truncate max-w-[220px]" :title="memberServerLabel(node)">
-                        {{ memberServerLabel(node) }}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        class="px-2 py-0.5 rounded text-xs font-medium"
-                        :class="sourceBadgeClass(node.sourceType)"
-                      >
-                        {{ node.sourceTypeName }}
-                      </span>
-                    </td>
-                    <td>
-                      <ProtocolBadge :protocol="node.protocol" compact class="uppercase" />
-                    </td>
-                    <td class="font-mono tabular-nums text-xs text-neutral-600">
-                      {{ node.port }}
-                    </td>
-                    <td>
-                      <router-link
-                        v-if="node.serverId && serverMap[node.serverId]"
-                        :to="`/nodes/${node.serverId}`"
-                        class="text-xs text-ios-blue hover:underline inline-flex items-center gap-1.5"
-                      >
-                        <span
-                          class="w-1.5 h-1.5 rounded-full inline-block shrink-0"
-                          :class="serverMap[node.serverId].status === 'online' ? 'bg-emerald-500' : 'bg-neutral-300' "
-                        />
-                        <span class="truncate max-w-[160px]">{{ serverMap[node.serverId].name }}</span>
-                      </router-link>
-                      <span v-else class="text-xs text-neutral-500 font-medium">
-                        {{ node.sourceName }}
-                      </span>
-                    </td>
-                    <td>
-                      <StatusBadge v-if="node.sourceType === 'self_hosted' || (node.sourceType === 'tunnel_relay' && !node.invalid)" :status="node.enabled ? 'active' : 'disabled'" />
-                      <span v-else class="text-xs text-neutral-400">—</span>
-                    </td>
-                    <td v-if="isOwner">
-                      <button
-                        type="button"
-                        class="h-7 px-2.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-medium transition-colors"
-                        :disabled="busy"
-                        @click="removeNode(node.id)"
-                      >
-                        移出
-                      </button>
-                    </td>
-                  </tr>
-                </template>
-              </DataTable>
-              <div v-else class="p-8">
+
+            <p v-if="currentGroupNodes.some(node => node.invalid && checkedMemberIds.has(node.id))" class="shrink-0 text-sm text-ios-orange">请取消勾选失效成员，再保存变更。</p>
+            <div
+              class="min-h-32 flex-1 overflow-y-auto rounded-2xl border border-black/[0.05] bg-ios-bg/75 p-3"
+              role="group"
+              aria-label="节点成员"
+            >
+              <div v-if="filteredGroupNodes.length" class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,190px),1fr))] gap-2">
+                <label
+                  v-for="node in filteredGroupNodes"
+                  :key="node.id"
+                  :title="memberTitle(node)"
+                  class="flex min-w-0 flex-col gap-1.5 rounded-xl border px-2.5 py-2 shadow-xs transition-colors select-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ios-blue/30"
+                  :class="[
+                    checkedMemberIds.has(node.id) ? 'border-ios-blue bg-ios-blue/[0.08] text-ios-blue' : 'border-black/[0.08] bg-white text-ios-label',
+                    memberToggleDisabled(node) ? 'cursor-default opacity-60' : 'cursor-pointer hover:border-ios-blue'
+                  ]"
+                >
+                  <input
+                    type="checkbox"
+                    class="sr-only"
+                    :checked="checkedMemberIds.has(node.id)"
+                    :disabled="memberToggleDisabled(node)"
+                    :aria-label="node.name"
+                    @change="toggleMember(node, $event)"
+                  />
+                  <span class="flex min-w-0 items-center gap-2">
+                    <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="memberDotClass(node)" aria-hidden="true"></span>
+                    <span class="min-w-0 flex-1 truncate text-sm leading-snug" :class="checkedMemberIds.has(node.id) ? 'font-semibold' : 'font-medium'">{{ node.name }}</span>
+                    <span
+                      class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                      :class="checkedMemberIds.has(node.id) ? 'border-ios-blue bg-ios-blue text-white' : 'border-ios-border bg-white'"
+                      aria-hidden="true"
+                    >
+                      <svg v-if="checkedMemberIds.has(node.id)" class="h-2.5 w-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.5 6.2 4.8 8.5 9.5 3.5" />
+                      </svg>
+                    </span>
+                  </span>
+                  <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ios-secondary">
+                    <ProtocolBadge v-if="node.protocol !== '—'" :protocol="node.protocol" compact class="uppercase" />
+                    <span v-if="node.port !== '—'" class="font-mono tabular-nums">:{{ node.port }}</span>
+                    <span>{{ node.sourceTypeName }}</span>
+                  </span>
+                  <span class="truncate text-xs text-ios-secondary empty:hidden">{{ memberCardSource(node) }}</span>
+                </label>
+              </div>
+              <div v-else class="p-5">
                 <EmptyState
-                  title="暂无组内节点"
-                  description="点击右上角「+ 添加节点」将自建入站或导入节点加入此分组。"
+                  :title="candidateGroupNodes.length ? '没有符合筛选条件的节点' : '暂无节点'"
+                  :description="candidateGroupNodes.length ? '调整来源或协议筛选后重试。' : '创建或导入节点后，可以在这里选择。'"
                 />
               </div>
             </div>
 
             <!-- 中转 / 出口分组显式服务器成员配置 -->
-            <div v-if="!isUserGroup(selected)" class="panel-card p-5 space-y-3 mt-4">
+            <div v-if="!isUserGroup(selected)" class="panel-card shrink-0 p-5 space-y-3">
               <p class="text-xs text-neutral-500">中转 / 出口分组不授予用户接入权限。</p>
               <template v-if="selected.serverIds !== undefined">
                 <h4 class="text-neutral-800 text-base font-semibold leading-normal">显式服务器成员</h4>
@@ -511,17 +487,6 @@
 
     <!-- 弹窗组件群 (Modals) -->
     <LineGroupEditor v-model="editorOpen" :group="editing" @saved="saved" />
-    <LineGroupPicker
-      v-if="pickerGroup"
-      v-model="pickerOpen"
-      :group="pickerGroup"
-      :servers="servers"
-      :nodes="allAvailableNodes"
-      :current-selected-ids="pickerNodeIds"
-      :saving="busy"
-      :error="pickerError"
-      @save="savePicker"
-    />
     <ConfirmDialog v-model="confirmOpen" :title="confirmTitle" :message="confirmMessage" @confirm="runConfirmed" />
   </div>
 </template>
@@ -535,15 +500,13 @@ import { request, type Page } from '../../../app/apiClient';
 import { showToast } from '../../../app/api';
 import { isOwner } from '../../../app/auth';
 import PageHeader from '../../../components/PageHeader.vue';
-import DataTable from '../../../components/DataTable.vue';
-import StatusBadge from '../../../components/StatusBadge.vue';
+import AppSelect from '../../../components/AppSelect.vue';
 import ProtocolBadge from '../../../components/ProtocolBadge.vue';
 import ErrorState from '../../../components/ErrorState.vue';
 import EmptyState from '../../../components/EmptyState.vue';
 import ConfirmDialog from '../../../components/ConfirmDialog.vue';
 import AppDialog from '../../../components/AppDialog.vue';
 import LineGroupEditor from '../components/LineGroupEditor.vue';
-import LineGroupPicker, { type GroupPickerNode } from '../components/LineGroupPicker.vue';
 import { groupAPI, freshGroup, type NodeGroup } from '../../nodes/groupsApi';
 import { userAPI, type UserChoice } from '../../users/api';
 import type { NodeView } from '../../nodes/api';
@@ -551,11 +514,12 @@ import { choices, proxyAPI, type Inbound } from '../api';
 import { importSourceKind, loadImports } from '../importApi';
 import { proxyNodeStore } from '../proxyNodes';
 import { policyAPI, type PolicyRecord, type StoredRuleTemplate } from '../../routing/api';
-import { groupInput, importMemberId, relayMemberId, isUserGroup, groupPurposeNames, assertValidImportMembers, invalidImportMembers } from '../lineGroups';
+import { groupInput, importMemberId, relayMemberId, isUserGroup, groupPurposeNames, assertValidImportMembers, type GroupMemberNode } from '../lineGroups';
 import { tunnelRuleAPI, type TunnelRule } from '../../tunnels/api';
 import { importProxyKey, resolveImportMember } from '../importIdentity';
 import { isUserEntry } from '../userEntries';
-import EntryRouteSummary from '../components/EntryRouteSummary.vue';
+import { routeSummaryPath } from '../routeSummary';
+import { useProxyNodeFilters } from '../proxyNodeFilters';
 
 const route = useRoute();
 const router = useRouter();
@@ -579,12 +543,7 @@ const editing = ref<NodeGroup | null>(null);
 // 弹窗状态与菜单控制
 const groupModalVisible = ref(false);
 const activeMenu = ref<'users' | 'nodes'>('users');
-
-const pickerOpen = ref(false);
-const pickerGroup = ref<NodeGroup | null>(null);
-const pickerError = ref('');
-const pendingRemovals = ref<Record<string, string[]>>({});
-const pendingRemovedIds = computed(() => selected.value ? pendingRemovals.value[selected.value.id] || [] : []);
+const pendingMemberEdits = ref<Record<string, Record<string, boolean>>>({});
 
 const serverMap = computed(() => {
   const map: Record<string, NodeView> = {};
@@ -594,24 +553,16 @@ const serverMap = computed(() => {
   return map;
 });
 
-function sourceBadgeClass(type: string) {
-  if (type === 'self_hosted') return 'bg-emerald-50 text-emerald-700 border border-emerald-200/60';
-  if (type === 'subscription') return 'bg-purple-50 text-purple-700 border border-purple-200/60';
-  if (type === 'tunnel_relay') return 'bg-orange-50 text-ios-orange border border-orange-200/60';
-  return 'bg-blue-50 text-ios-blue border border-blue-200/60';
-}
-
-// Member names can repeat across servers, so the server (or import source) is shown
-// as a secondary line under the name instead of relying on the scrollable column.
-function memberServerLabel(node: GroupPickerNode) {
+// Member names can repeat across servers.
+function memberServerLabel(node: GroupMemberNode) {
   if (node.sourceType === 'tunnel_relay') return node.sourceName;
   if (node.serverId && serverMap.value[node.serverId]) return serverMap.value[node.serverId].name;
   return node.sourceName || '—';
 }
 
 // Keep internal listeners here so historical group members remain visible and removable.
-const allGroupNodes = computed<GroupPickerNode[]>(() => {
-  const result: GroupPickerNode[] = [];
+const allGroupNodes = computed<GroupMemberNode[]>(() => {
+  const result: GroupMemberNode[] = [];
 
   // 1. Self-hosted Inbounds
   for (const ib of inbounds.value) {
@@ -625,7 +576,6 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
       sourceTypeName: '自建',
       sourceName: srv ? srv.name : (ib.nodeId || '自建服务器'),
       serverId: ib.nodeId,
-      status: ib.enabled ? 'active' : 'disabled',
       enabled: ib.enabled,
       subscriptionVisible: ib.subscriptionVisible,
       internalRelay: ib.internalRelay,
@@ -650,7 +600,6 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
       sourceTypeName: '隧道转发',
       sourceName: `${rule.entryNodeName} → ${target.mode === 'import' ? '导入 ' : ''}${target.nodeName}${via}`,
       serverId: rule.entryNodeId,
-      status: rule.enabled ? 'active' : 'disabled',
       enabled: rule.enabled,
       subscriptionVisible: rule.subscriptionVisible,
       pendingDelete: rule.status === 'pending_delete',
@@ -666,7 +615,7 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
     if (importSourceKind(source) !== 'url') continue;
     result.push({ id: importMemberId({ sourceId: source.id, proxyKey: '' }),
       sourceId: source.id, proxyKey: '', name: source.name + '（整个来源）', protocol: '—', port: '—',
-      sourceType: 'subscription', sourceTypeName: '整源', sourceName: source.name, status: 'active', enabled: true });
+      sourceType: 'subscription', sourceTypeName: '整源', sourceName: source.name, enabled: true });
   }
   for (const node of proxyNodeStore.manualNodes) {
     if (!node.sourceId || node.proxyKey === undefined) continue;
@@ -676,29 +625,27 @@ const allGroupNodes = computed<GroupPickerNode[]>(() => {
     result.push({ id, sourceId: node.sourceId, proxyKey, name: node.name,
       protocol: node.protocol, port: node.port, server: node.server, sourceType: node.sourceType,
       sourceTypeName: node.sourceType === 'manual' ? '单独导入' : '机场导入',
-      sourceName: node.sourceName || '—', status: 'active', enabled: true });
+      sourceName: node.sourceName || '—', enabled: true });
   }
 
   return result;
 });
-
-const allAvailableNodes = computed(() => allGroupNodes.value.filter(isUserEntry));
 
 const selected = computed(() => groups.value.find(group => group.id === route.query.group) || groups.value[0]);
 
 function memberIds(group: NodeGroup) {
   return [...(group.inboundIds || []), ...(group.relayIds || []).map(relayMemberId), ...(group.imports || []).map(importMemberId)];
 }
-function groupNodesFor(groupId: string): GroupPickerNode[] {
+function groupNodesFor(groupId: string): GroupMemberNode[] {
   const group = groups.value.find(item => item.id === groupId);
   if (!group) return [];
-  return memberIds(group).filter(id => !pendingRemovals.value[groupId]?.includes(id)).map(id => {
+  return memberIds(group).map(id => {
     const existing = allGroupNodes.value.find(item => item.id === id);
     if (existing) return existing;
     const ruleId = (group.relayIds || []).find(item => relayMemberId(item) === id);
     if (ruleId !== undefined) {
       return { id, ruleId, name: `未找到的隧道线路：${ruleId}`, protocol: '—', port: '—', sourceType: 'tunnel_relay' as const,
-        sourceTypeName: '隧道转发', sourceName: '—', status: 'disabled' as const, enabled: false, invalid: true };
+        sourceTypeName: '隧道转发', sourceName: '—', enabled: false, invalid: true };
     }
     const member = group.imports.find(item => importMemberId(item) === id);
     const source = proxyNodeStore.subscriptions.find(item => item.id === member?.sourceId);
@@ -707,17 +654,57 @@ function groupNodesFor(groupId: string): GroupPickerNode[] {
       id, name: resolved?.name || `已失效：${id}`, protocol: '—', port: '—',
       sourceId: member?.sourceId, proxyKey: member?.proxyKey,
       sourceType: importSourceKind(source) === 'content' ? 'manual' : 'subscription',
-      sourceTypeName: '失效', sourceName: source?.name || '—', status: 'disabled', enabled: false, invalid: true
+      sourceTypeName: '失效', sourceName: source?.name || '—', enabled: false, invalid: true
     };
   });
 }
 const currentGroupNodes = computed(() => selected.value ? groupNodesFor(selected.value.id) : []);
-const hasAvailableNodes = computed(() => allAvailableNodes.value.some(node =>
-  !currentGroupNodes.value.some(member => member.id === node.id)
-  && (node.sourceType !== 'self_hosted' || (node.enabled && node.subscriptionVisible))
-  && (node.sourceType !== 'tunnel_relay' || (node.subscriptionVisible && !node.pendingDelete))
-));
-const pickerNodeIds = computed(() => pickerGroup.value ? memberIds(pickerGroup.value).filter(id => !pendingRemovals.value[pickerGroup.value!.id]?.includes(id)) : []);
+const savedMemberIds = computed(() => new Set(selected.value ? memberIds(selected.value) : []));
+const memberEdits = computed(() => selected.value ? pendingMemberEdits.value[selected.value.id] || {} : {});
+const checkedMemberIds = computed(() => {
+  const ids = new Set(savedMemberIds.value);
+  for (const [id, checked] of Object.entries(memberEdits.value)) {
+    if (checked) ids.add(id);
+    else ids.delete(id);
+  }
+  return ids;
+});
+const candidateGroupNodes = computed(() => {
+  if (!isOwner.value) return currentGroupNodes.value;
+  return [
+    ...currentGroupNodes.value,
+    ...allGroupNodes.value.filter(node => isUserEntry(node) && !savedMemberIds.value.has(node.id))
+  ];
+});
+const orderedGroupNodes = computed(() => {
+  const checked = checkedMemberIds.value;
+  return [
+    ...candidateGroupNodes.value.filter(node => checked.has(node.id)),
+    ...candidateGroupNodes.value.filter(node => !checked.has(node.id))
+  ];
+});
+const protocolsByImportSource = computed(() => {
+  const protocols = new Map<string, string[]>();
+  for (const node of proxyNodeStore.manualNodes) {
+    if (!node.sourceId) continue;
+    const values = protocols.get(node.sourceId) ?? [];
+    values.push(node.protocol);
+    protocols.set(node.sourceId, values);
+  }
+  return protocols;
+});
+const {
+  source: filterSource, protocol: filterProtocol, sourceOptions, protocolOptions, filteredNodes: filteredGroupNodes
+} = useProxyNodeFilters(() => orderedGroupNodes.value, {
+  hasRelay: node => node.routeSummary?.type === 'relay' || node.routeSummary?.type === 'tunnel',
+  protocolsFor: node => node.sourceId && node.proxyKey === ''
+    ? protocolsByImportSource.value.get(node.sourceId) ?? []
+    : [node.protocol]
+});
+watch(() => selected.value?.id, () => {
+  filterSource.value = 'all';
+  filterProtocol.value = 'all';
+});
 
 const authorizationUsers = computed(() => {
   const ids = selected.value?.grantedUserIds || [];
@@ -831,12 +818,6 @@ async function saved(group: NodeGroup) {
   selectGroup(group.id);
 }
 
-function openPicker() {
-  pickerGroup.value = selected.value || null;
-  pickerError.value = '';
-  pickerOpen.value = true;
-}
-
 async function mutate(action: () => Promise<unknown>) {
   if (busy.value || !isOwner.value) return;
   busy.value = true;
@@ -850,88 +831,92 @@ async function mutate(action: () => Promise<unknown>) {
   }
 }
 
-async function savePicker(ids: string[]) {
-  const group = pickerGroup.value;
-  if (!group || busy.value || !isOwner.value) return;
-  busy.value = true;
-  pickerError.value = '';
+function memberAddError(node: GroupMemberNode): string {
+  if (node.invalid) return '节点已失效';
+  if (node.sourceType === 'tunnel_relay') {
+    if (node.pendingDelete) return '中转线路正在等待移除';
+    if (node.protocol === '—') return '中转目标已失效';
+    if (!node.subscriptionVisible) return '中转线路未开启订阅可见';
+  }
+  if (node.sourceType === 'self_hosted') {
+    if (node.internalRelay) return '内部监听不提供用户接入';
+    if (!node.enabled) return '节点已停用';
+    if (!node.subscriptionVisible) return '节点未开启订阅可见';
+  }
+  return '';
+}
 
-  try {
+function memberToggleDisabled(node: GroupMemberNode): boolean {
+  return !isOwner.value || busy.value || (
+    !checkedMemberIds.value.has(node.id) && !savedMemberIds.value.has(node.id) && !!memberAddError(node)
+  );
+}
+
+function memberTitle(node: GroupMemberNode): string {
+  const endpoint = [node.protocol !== '—' ? node.protocol.toUpperCase() : '', node.port !== '—' ? `端口 ${node.port}` : ''].filter(Boolean).join(' · ');
+  return [node.name, node.sourceTypeName, endpoint, memberCardSource(node), memberAddError(node), node.note]
+    .filter(Boolean).join('\n');
+}
+
+function memberCardSource(node: GroupMemberNode): string {
+  const summary = node.routeSummary;
+  if (summary?.pathIncomplete) return '路径无法解析';
+  const source = (summary && routeSummaryPath(summary)) || memberServerLabel(node);
+  return source === node.sourceTypeName || source === '—' ? node.server || '' : source;
+}
+
+function memberDotClass(node: GroupMemberNode): string {
+  if (node.invalid) return 'bg-ios-orange';
+  if (!node.enabled || node.sourceType === 'manual' || node.sourceType === 'subscription') return 'bg-ios-quaternary';
+  return 'bg-ios-green';
+}
+
+function toggleMember(node: GroupMemberNode, event: Event) {
+  const group = selected.value;
+  if (!group || memberToggleDisabled(node)) return;
+  const checked = (event.target as HTMLInputElement).checked;
+  const edits = { ...memberEdits.value };
+  if (checked === savedMemberIds.value.has(node.id)) delete edits[node.id];
+  else edits[node.id] = checked;
+  pendingMemberEdits.value[group.id] = edits;
+}
+
+function cancelMemberEdits() {
+  if (selected.value) delete pendingMemberEdits.value[selected.value.id];
+}
+
+function saveMemberEdits() {
+  const group = selected.value;
+  const edits = { ...memberEdits.value };
+  if (!group || !Object.keys(edits).length) return;
+  return mutate(async () => {
     const fresh = await freshGroup(group.id);
-    const input = memberEditInput(fresh);
-    for (const id of ids) {
-      const candidate = allAvailableNodes.value.find(item => item.id === id);
-      if (!candidate) throw new Error('候选节点已变化，请刷新后重试');
-      if (candidate.ruleId !== undefined) {
-        if (!candidate.subscriptionVisible || candidate.pendingDelete) throw new Error('隧道线路不符合用户接入条件');
-        const relayIds = input.relayIds ?? (input.relayIds = []);
-        if (!relayIds.includes(candidate.ruleId)) relayIds.push(candidate.ruleId);
-      } else if (candidate.sourceId !== undefined && candidate.proxyKey !== undefined) {
-        if (!input.imports.some(item => importMemberId(item) === id)) input.imports.push({ sourceId: candidate.sourceId, proxyKey: candidate.proxyKey });
+    const input = groupInput(fresh);
+    input.inboundIds = input.inboundIds.filter(id => edits[id] !== false);
+    if (input.relayIds) input.relayIds = input.relayIds.filter(id => edits[relayMemberId(id)] !== false);
+    input.imports = input.imports.filter(member => edits[importMemberId(member)] !== false);
+
+    const existingIds = new Set(memberIds(fresh));
+    for (const [id, checked] of Object.entries(edits)) {
+      if (!checked || existingIds.has(id)) continue;
+      const node = allGroupNodes.value.find(candidate => candidate.id === id);
+      if (!node) throw new Error('候选节点已变化，请刷新后重试');
+      const reason = memberAddError(node);
+      if (reason) throw new Error(`${node.name}：${reason}`);
+      if (node.ruleId !== undefined) {
+        (input.relayIds ??= []).push(node.ruleId);
+      } else if (node.sourceId !== undefined && node.proxyKey !== undefined) {
+        input.imports.push({ sourceId: node.sourceId, proxyKey: node.proxyKey });
       } else {
-        if (!candidate.enabled || !candidate.subscriptionVisible || candidate.internalRelay) throw new Error('入站不符合用户接入条件');
-        if (!input.inboundIds.includes(id)) input.inboundIds.push(id);
+        input.inboundIds.push(id);
       }
     }
     assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
-    await groupAPI.save(group.id, input);
-    delete pendingRemovals.value[group.id];
-
-    pickerOpen.value = false;
-    showToast(`已向分组添加 ${ids.length} 个代理节点`);
-    await load();
-  } catch (e) {
-    pickerError.value = (e as Error).message;
-    await load();
-    pickerGroup.value = groups.value.find(item => item.id === group.id) || null;
-  } finally {
-    busy.value = false;
-  }
-}
-
-function removeNode(nodeId: string) {
-  const group = selected.value;
-  if (!group) return;
-  if (invalidImportMembers(group.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes).length || pendingRemovedIds.value.length) {
-    pendingRemovals.value[group.id] = [...pendingRemovedIds.value, nodeId];
-    return;
-  }
-
-  mutate(async () => {
-    const fresh = await freshGroup(group.id);
-    const input = groupInput(fresh);
-    input.inboundIds = input.inboundIds.filter(id => id !== nodeId);
-    input.relayIds = (input.relayIds || []).filter(id => relayMemberId(id) !== nodeId);
-    input.imports = input.imports.filter(item => importMemberId(item) !== nodeId);
-    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
-    await groupAPI.save(group.id, input);
-    showToast('节点已从分组中移出');
-  });
-}
-
-function memberEditInput(group: NodeGroup) {
-  const input = groupInput(group);
-  const removed = pendingRemovals.value[group.id] || [];
-  input.inboundIds = input.inboundIds.filter(id => !removed.includes(id));
-  input.relayIds = (input.relayIds || []).filter(id => !removed.includes(relayMemberId(id)));
-  input.imports = input.imports.filter(member => !removed.includes(importMemberId(member)));
-  return input;
-}
-
-function saveRemovedMembers() {
-  const group = selected.value;
-  if (!group) return;
-  mutate(async () => {
-    const input = memberEditInput(await freshGroup(group.id));
-    assertValidImportMembers(input.imports, proxyNodeStore.subscriptions, proxyNodeStore.manualNodes);
-    await groupAPI.save(group.id, input);
-    delete pendingRemovals.value[group.id];
+    const saved = await groupAPI.save(group.id, input);
+    groups.value = groups.value.map(item => item.id === saved.id ? saved : item);
+    delete pendingMemberEdits.value[group.id];
     showToast('成员变更已保存');
   });
-}
-
-function cancelRemovedMembers() {
-  if (selected.value) delete pendingRemovals.value[selected.value.id];
 }
 
 const confirmOpen = ref(false);

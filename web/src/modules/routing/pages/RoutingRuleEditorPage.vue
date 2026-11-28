@@ -76,7 +76,7 @@
         <div class="flex flex-wrap items-start justify-between gap-2 pb-3.5 mb-5 border-b border-black/[0.06]">
           <div>
             <h2 class="text-base font-semibold leading-normal text-ios-label">生效范围</h2>
-            <p class="text-xs text-ios-tertiary mt-0.5">点击卡片多选；不选表示适用于全部，同时限定多个类别时取交集生效。</p>
+            <p class="text-xs text-ios-tertiary mt-0.5">用户和节点组二选一，每类可多选。入口服务器可另选，策略只对同时符合的流量生效。未勾选的类别不限范围。</p>
           </div>
           <span
             class="inline-flex items-center px-2.5 min-h-[24px] rounded-full text-xs font-medium leading-normal border tabular-nums"
@@ -89,8 +89,83 @@
         </div>
 
         <div class="space-y-3.5">
+          <!-- 限定入口服务器节点 -->
+          <div role="group" aria-label="限定入口服务器节点" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
+            <div class="flex items-center justify-between gap-2 mb-2.5">
+              <span class="text-xs font-medium text-ios-secondary">限定入口服务器节点</span>
+              <div class="flex items-center gap-2">
+                <span
+                  class="px-2 py-0.5 rounded-full text-xs font-medium tabular-nums"
+                  :class="selectedNodeCount ? 'bg-ios-blue/10 text-ios-blue' : 'bg-white text-ios-tertiary border border-black/[0.06]'"
+                >
+                  {{ selectedNodeCount ? `已选 ${selectedNodeCount} / ${nodes.length}` : '全部节点' }}
+                </span>
+                <button
+                  v-if="selectedNodeCount"
+                  type="button"
+                  class="text-xs text-ios-tertiary hover:text-ios-label transition-colors"
+                  @click="form.scope.node_ids = []"
+                >
+                  清空
+                </button>
+              </div>
+            </div>
+            <div v-if="orderedNodes.length" class="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-2 max-h-60 overflow-y-auto p-0.5">
+              <label
+                v-for="node in orderedNodes"
+                :key="node.id"
+                :title="node.name"
+                class="group relative flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border transition-all duration-150 cursor-pointer select-none active:scale-[0.98] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ios-blue/30"
+                :class="isSelected(form.scope.node_ids, node.id)
+                  ? 'bg-ios-blue/[0.08] border-ios-blue shadow-xs'
+                  : 'bg-white border-black/[0.08] shadow-xs hover:border-ios-border hover:bg-white/90'"
+              >
+                <input v-model="form.scope.node_ids" type="checkbox" :value="node.id" class="sr-only" />
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="nodeDotClass(node)"></span>
+                  <span
+                    class="text-sm leading-snug truncate"
+                    :class="isSelected(form.scope.node_ids, node.id) ? 'font-semibold text-ios-blue' : 'font-medium text-ios-label'"
+                  >
+                    {{ node.name }}
+                  </span>
+                </div>
+                <span
+                  class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-colors"
+                  :class="isSelected(form.scope.node_ids, node.id)
+                    ? 'bg-ios-blue border-ios-blue text-white'
+                    : 'bg-white border-ios-border group-hover:border-ios-quaternary'"
+                >
+                  <svg v-if="isSelected(form.scope.node_ids, node.id)" class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.5 6.2 4.8 8.5 9.5 3.5" />
+                  </svg>
+                </span>
+              </label>
+            </div>
+            <div v-else class="text-xs text-ios-quaternary py-2">暂无节点</div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div class="inline-flex rounded-xl border border-black/[0.04] bg-black/[0.04] p-0.5" role="group" aria-label="范围类型">
+              <button
+                v-for="option in scopeModes"
+                :key="option.value"
+                type="button"
+                :aria-pressed="scopeMode === option.value"
+                class="h-8 rounded-lg px-3 text-sm font-medium transition-colors"
+                :class="scopeMode === option.value ? 'bg-white text-ios-label shadow-xs' : 'text-ios-tertiary hover:text-ios-label'"
+                @click="scopeMode = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <p v-if="scopeMode === null" class="text-xs text-ios-orange" role="status">
+              原策略同时限定了用户和节点组，请选择保留哪一类范围后再保存。
+            </p>
+          </div>
+
           <!-- 限定用户 -->
-          <div role="group" aria-label="限定用户" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
+          <div v-if="scopeMode === 'users'" role="group" aria-label="限定用户" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
             <div class="flex items-center justify-between gap-2 mb-2.5">
               <span class="text-xs font-medium text-ios-secondary">限定用户</span>
               <div class="flex items-center gap-2">
@@ -150,64 +225,8 @@
             <div v-else class="text-xs text-ios-quaternary py-2">暂无用户</div>
           </div>
 
-          <!-- 限定入口服务器节点 -->
-          <div role="group" aria-label="限定入口服务器节点" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
-            <div class="flex items-center justify-between gap-2 mb-2.5">
-              <span class="text-xs font-medium text-ios-secondary">限定入口服务器节点</span>
-              <div class="flex items-center gap-2">
-                <span
-                  class="px-2 py-0.5 rounded-full text-xs font-medium tabular-nums"
-                  :class="selectedNodeCount ? 'bg-ios-blue/10 text-ios-blue' : 'bg-white text-ios-tertiary border border-black/[0.06]'"
-                >
-                  {{ selectedNodeCount ? `已选 ${selectedNodeCount} / ${nodes.length}` : '全部节点' }}
-                </span>
-                <button
-                  v-if="selectedNodeCount"
-                  type="button"
-                  class="text-xs text-ios-tertiary hover:text-ios-label transition-colors"
-                  @click="form.scope.node_ids = []"
-                >
-                  清空
-                </button>
-              </div>
-            </div>
-            <div v-if="orderedNodes.length" class="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-2 max-h-60 overflow-y-auto p-0.5">
-              <label
-                v-for="node in orderedNodes"
-                :key="node.id"
-                :title="node.name"
-                class="group relative flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl border transition-all duration-150 cursor-pointer select-none active:scale-[0.98] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ios-blue/30"
-                :class="isSelected(form.scope.node_ids, node.id)
-                  ? 'bg-ios-blue/[0.08] border-ios-blue shadow-xs'
-                  : 'bg-white border-black/[0.08] shadow-xs hover:border-ios-border hover:bg-white/90'"
-              >
-                <input v-model="form.scope.node_ids" type="checkbox" :value="node.id" class="sr-only" />
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="nodeDotClass(node)"></span>
-                  <span
-                    class="text-sm leading-snug truncate"
-                    :class="isSelected(form.scope.node_ids, node.id) ? 'font-semibold text-ios-blue' : 'font-medium text-ios-label'"
-                  >
-                    {{ node.name }}
-                  </span>
-                </div>
-                <span
-                  class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0 transition-colors"
-                  :class="isSelected(form.scope.node_ids, node.id)
-                    ? 'bg-ios-blue border-ios-blue text-white'
-                    : 'bg-white border-ios-border group-hover:border-ios-quaternary'"
-                >
-                  <svg v-if="isSelected(form.scope.node_ids, node.id)" class="w-2.5 h-2.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.5 6.2 4.8 8.5 9.5 3.5" />
-                  </svg>
-                </span>
-              </label>
-            </div>
-            <div v-else class="text-xs text-ios-quaternary py-2">暂无节点</div>
-          </div>
-
           <!-- 限定入口节点分组 -->
-          <div role="group" aria-label="限定入口节点分组" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
+          <div v-else-if="scopeMode === 'groups'" role="group" aria-label="限定入口节点分组" class="p-3 rounded-2xl bg-ios-bg/75 border border-black/[0.05]">
             <div class="flex items-center justify-between gap-2 mb-2.5">
               <span class="text-xs font-medium text-ios-secondary">限定入口节点分组</span>
               <div class="flex items-center gap-2">
@@ -266,6 +285,13 @@
             </div>
             <div v-else class="text-xs text-ios-quaternary py-2">暂无节点分组</div>
           </div>
+
+          <p
+            v-if="form.match.network !== 'tcp' && scopeMode === 'users' && selectedUserCount"
+            class="text-xs text-ios-label bg-ios-orange/10 border border-ios-orange/25 rounded-xl px-3.5 py-2.5 leading-relaxed"
+          >
+            Xray 的 SOCKS5 UDP 无法识别用户。策略涉及这类入站时，发布会被拒绝。
+          </p>
         </div>
       </section>
 
@@ -396,62 +422,7 @@
         </div>
       </section>
 
-      <!-- 4. 端口、网络与时间 -->
-      <section class="panel-card p-6">
-        <div class="pb-3.5 mb-5 border-b border-black/[0.06]">
-          <h2 class="text-base font-semibold leading-normal text-ios-label">端口、网络与生效时间</h2>
-          <p class="text-xs text-ios-tertiary mt-0.5">进一步按传输协议、目标端口或时段收窄匹配条件。</p>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-          <label class="block">
-            <span class="block text-xs font-medium text-ios-secondary mb-1.5">端口或范围</span>
-            <input
-              v-model="portsText"
-              placeholder="80,443,8000-9000"
-              class="form-input-base font-mono tabular-nums"
-            />
-            <span class="block text-xs text-ios-tertiary mt-1.5">逗号分隔，留空不限</span>
-          </label>
-
-          <label class="block">
-            <span class="block text-xs font-medium text-ios-secondary mb-1.5">协议网络</span>
-            <select v-model="form.match.network" class="form-input-base">
-              <option value="all">TCP + UDP</option>
-              <option value="tcp">仅 TCP</option>
-              <option value="udp">仅 UDP</option>
-            </select>
-          </label>
-
-          <label class="block">
-            <span class="block text-xs font-medium text-ios-secondary mb-1.5">生效时间段</span>
-            <input
-              v-model="form.match.time_range"
-              placeholder="23:00-06:00"
-              class="form-input-base font-mono tabular-nums"
-            />
-            <span class="block text-xs text-ios-tertiary mt-1.5">留空表示全天 24 小时</span>
-          </label>
-
-          <label class="block">
-            <span class="block text-xs font-medium text-ios-secondary mb-1.5">时间段时区</span>
-            <input
-              v-model="form.timezone"
-              placeholder="Asia/Shanghai"
-              class="form-input-base font-mono"
-            />
-          </label>
-        </div>
-
-        <p
-          v-if="form.match.network !== 'tcp' && form.scope.user_ids?.length"
-          class="mt-4 text-xs text-ios-label bg-ios-orange/10 border border-ios-orange/25 rounded-xl px-3.5 py-2.5 leading-relaxed"
-        >
-          当前 Xray 的 SOCKS5 UDP 不携带账户身份，涉及该入站的用户/设备 UDP 策略会被拒绝发布。请使用可执行该范围的协议或核心。
-        </p>
-      </section>
-
-      <!-- 5. 服务器端执行动作 -->
+      <!-- 4. 服务器端执行动作 -->
       <section class="panel-card p-6">
         <div class="pb-3.5 mb-5 border-b border-black/[0.06]">
           <h2 class="text-base font-semibold leading-normal text-ios-label">执行动作</h2>
@@ -513,7 +484,7 @@
         </p>
       </section>
 
-      <!-- 6. 失败容灾处理（仅旧策略显示） -->
+      <!-- 5. 失败容灾处理（仅旧策略显示） -->
       <section v-if="usingLegacyAction" class="panel-card p-6">
         <div class="pb-3.5 mb-4 border-b border-black/[0.06]">
           <h2 class="text-base font-semibold leading-normal text-ios-label">失败容灾处理</h2>
@@ -523,7 +494,7 @@
         </p>
       </section>
 
-      <!-- 7. 记录与备注 -->
+      <!-- 6. 记录与备注 -->
       <section class="panel-card p-6">
         <div class="pb-3.5 mb-5 border-b border-black/[0.06]">
           <h2 class="text-base font-semibold leading-normal text-ios-label">记录与备注</h2>
@@ -584,7 +555,7 @@
           <router-link to="/routing/rules" class="ios-btn-secondary">
             取消
           </router-link>
-          <button :disabled="saving || loading" class="ios-btn-primary disabled:opacity-40">
+          <button :disabled="saving || loading || scopeMode === null" class="ios-btn-primary disabled:opacity-40">
             {{ saving ? '保存中…' : '保存节点策略草稿' }}
           </button>
         </div>
@@ -599,10 +570,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { actionNames, policyAPI, serverEgressGroupAPI, defaults, input, type Action, type PolicyInput, type ServerEgressGroup, type ServiceSet } from '../api';
 import { authState } from '../../../app/auth';
 import { showToast } from '../../../app/api';
-import { userAPI, type UserChoice } from '../../users/api';
 import { groupAPI, type NodeGroup } from '../../nodes/groupsApi';
 import { nodeAPI, type NodeView } from '../../nodes/api';
 import { nodeHasUserCore } from '../../nodes/coreSummary';
+import { userAPI, type UserChoice } from '../../users/api';
 import { proxyAPI, type Outbound, type OutboundGroup, type ProxyChain, choices, failureNames } from '../../proxy/api';
 import PageHeader from '../../../components/PageHeader.vue';
 import ErrorState from '../../../components/ErrorState.vue';
@@ -656,10 +627,14 @@ const form = reactive<PolicyInput>(defaults());
 const domainsText = ref('');
 const suffixesText = ref('');
 const cidrsText = ref('');
-const portsText = ref('');
-const users = ref<UserChoice[]>([]);
 const nodes = ref<NodeView[]>([]);
 const groups = ref<NodeGroup[]>([]);
+const users = ref<UserChoice[]>([]);
+const scopeModes = [
+  { value: 'users', label: '按用户' },
+  { value: 'groups', label: '按节点组' }
+] as const;
+const scopeMode = ref<(typeof scopeModes)[number]['value'] | null>('groups');
 const services = ref<ServiceSet[]>([]);
 const outbounds = ref<Outbound[]>([]);
 const loading = ref(false);
@@ -667,14 +642,14 @@ const detailReady = ref(false);
 const saving = ref(false);
 const error = ref('');
 
-const orderedUsers = computed(() => selectedFirst(users.value, form.scope.user_ids));
 const orderedNodes = computed(() => selectedFirst(nodes.value, form.scope.node_ids));
 const orderedGroups = computed(() => selectedFirst(groups.value, form.scope.group_ids));
+const orderedUsers = computed(() => selectedFirst(users.value, form.scope.user_ids));
 const orderedServices = computed(() => selectedFirst(services.value, form.match.service_ids));
 
-const selectedUserCount = computed(() => form.scope.user_ids?.length || 0);
+const selectedUserCount = computed(() => scopeMode.value === 'groups' ? 0 : (form.scope.user_ids?.length ?? 0));
 const selectedNodeCount = computed(() => form.scope.node_ids?.length || 0);
-const selectedGroupCount = computed(() => form.scope.group_ids?.length || 0);
+const selectedGroupCount = computed(() => scopeMode.value === 'users' ? 0 : (form.scope.group_ids?.length ?? 0));
 const scopeSummaryText = computed(() => {
   const parts = [
     selectedUserCount.value ? `${selectedUserCount.value} 位用户` : '',
@@ -693,10 +668,10 @@ const totalMatchCount = computed(() => domainCount.value + suffixCount.value + c
 async function load() {
   loading.value = true; detailReady.value = false;
   try {
-    const [u, n, g, s, egress, policy] = await Promise.all([
-      userAPI.choices(1, '', 100),
+    const [n, g, u, s, egress, policy] = await Promise.all([
       choices((p, size) => nodeAPI.choices(p, '', size)),
       groupAPI.list(1, 100),
+      choices((p, size) => userAPI.choices(p, '', size)),
       policyAPI.services(1, 100),
       serverEgressGroupAPI.list(),
       editingId.value ? policyAPI.get(editingId.value) : Promise.resolve(null)
@@ -710,14 +685,16 @@ async function load() {
       ]);
     }
     Object.assign(form, policy ? input(policy) : defaults());
+    scopeMode.value = form.scope.user_ids?.length
+      ? (form.scope.group_ids?.length ? null : 'users')
+      : 'groups';
     if (!policy) form.timezone = authState.timezone;
     domainsText.value = form.match.domains?.join('\n') || '';
     suffixesText.value = form.match.suffixes?.join('\n') || '';
     cidrsText.value = form.match.cidrs?.join('\n') || '';
-    portsText.value = form.match.ports?.join(',') || '';
-    users.value = u.items;
     nodes.value = n;
     groups.value = g.items;
+    users.value = u;
     services.value = s.items;
     egressGroups.value = egress;
     detailReady.value = true;
@@ -738,17 +715,15 @@ function lines(value: string) {
 }
 
 async function save() {
-  if (saving.value || loading.value || error.value) return;
+  if (saving.value || loading.value || error.value || scopeMode.value === null) return;
   saving.value = true;
   try {
     const value: PolicyInput = JSON.parse(JSON.stringify(form));
+    if (scopeMode.value === 'users') value.scope.group_ids = [];
+    else value.scope.user_ids = [];
     value.match.domains = lines(domainsText.value);
     value.match.suffixes = lines(suffixesText.value);
     value.match.cidrs = lines(cidrsText.value);
-    value.match.ports = portsText.value
-      .split(',')
-      .map(item => item.trim())
-      .filter(Boolean);
 
     if (value.action.type === 'Direct' || value.action.type === 'Block') {
       value.action.failover = 'Block';

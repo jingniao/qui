@@ -75,82 +75,14 @@
           </button>
         </div>
 
-        <!-- Filter 1: Source -->
-        <select v-model="filterSource" @change="applyFilter" class="form-input-base !w-auto py-2">
-          <option value="all">全部来源</option>
-          <option value="self_hosted">服务器自建</option>
-          <option value="subscription">机场订阅</option>
-          <option value="manual">单独导入</option>
-        </select>
-
-        <!-- Filter 2: Protocol -->
-        <select v-model="filterProtocol" @change="applyFilter" class="form-input-base !w-auto py-2">
-          <option value="all">全部协议</option>
-          <option value="vless">VLESS</option>
-          <option value="vmess">VMess</option>
-          <option value="shadowsocks">Shadowsocks</option>
-          <option value="trojan">Trojan</option>
-          <option value="hysteria2">Hysteria2</option>
-          <option value="tuic">TUIC</option>
-          <option value="wireguard">WireGuard</option>
-          <option value="socks5">Socks5</option>
-          <option value="http">HTTP</option>
-        </select>
-
-        <!-- Filter 3: Status -->
-        <select v-model="filterStatus" @change="applyFilter" class="form-input-base !w-auto py-2">
-          <option value="all">全部状态</option>
-          <option value="online">在线</option>
-          <option value="degraded">降级</option>
-          <option value="reconnecting">等待恢复</option>
-          <option value="core_error">核心异常</option>
-          <option value="error">异常</option>
-          <option value="applying">应用配置中</option>
-          <option value="rollback">回滚中</option>
-          <option value="pending">待登记</option>
-          <option value="disabled">已停用</option>
-          <option value="untested">未检测</option>
-          <option value="offline">离线</option>
-        </select>
+        <AppSelect v-model="filterSource" :options="sourceOptions" class="w-32" teleport />
+        <AppSelect v-model="filterProtocol" :options="protocolOptions" class="w-32" teleport />
+        <AppSelect v-model="filterStatus" :options="statusOptions" class="w-36" teleport />
       </form>
 
       <!-- Right: View Mode Toggle & Tools (100% Aligned with Server Page) -->
       <div class="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-        <!-- View Switcher (List vs Grid, Same as Server Page) -->
-        <div class="flex items-center bg-black/[0.04] p-0.5 rounded-xl border border-black/[0.04]">
-          <button
-            type="button"
-            @click="setDisplayMode('list')"
-            :class="[
-              'px-2.5 py-1 rounded-lg text-xs font-medium transition-all inline-flex items-center gap-1.5',
-              displayMode === 'list'
-                ? 'bg-white text-ios-label shadow-xs font-semibold'
-                : 'text-ios-tertiary hover:text-ios-label'
-            ]"
-            title="列表视图"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-            <span>列表</span>
-          </button>
-          <button
-            type="button"
-            @click="setDisplayMode('grid')"
-            :class="[
-              'px-2.5 py-1 rounded-lg text-xs font-medium transition-all inline-flex items-center gap-1.5',
-              displayMode === 'grid'
-                ? 'bg-white text-ios-label shadow-xs font-semibold'
-                : 'text-ios-tertiary hover:text-ios-label'
-            ]"
-            title="卡片视图"
-          >
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-            <span>卡片</span>
-          </button>
-        </div>
+        <ServerDisplayMode :display-mode="displayMode" @change="setDisplayMode" />
 
         <!-- Speed Test -->
         <button
@@ -190,8 +122,8 @@
     <LoadingSkeleton v-if="loading && !allNodes.length" />
     <EmptyState
       v-else-if="!filteredNodes.length"
-      :title="searchKeyword || filterSource !== 'all' || filterProtocol !== 'all' ? '未找到匹配的代理节点' : '暂无代理节点'"
-      :description="searchKeyword ? '请尝试调整筛选条件或搜索关键词。' : '您可以点击右上角“新建节点”为服务器添加自建协议入站，或点击“导入节点”导入外部节点。'"
+      :title="allNodes.length ? '未找到匹配的代理节点' : '暂无代理节点'"
+      :description="allNodes.length ? '请尝试调整筛选条件或搜索关键词。' : '您可以点击右上角“新建节点”为服务器添加自建协议入站，或点击“导入节点”导入外部节点。'"
     />
 
     <!-- ================= Mode 1: Table List View (Aligned with Server Page DataTable) ================= -->
@@ -1129,12 +1061,15 @@ import { request } from '../../../app/apiClient';
 import { checkNodeReachability } from '../reachability';
 import type { NodeView } from '../../nodes/api';
 import { serverStatus } from '../../nodes/components/serverListModel';
+import ServerDisplayMode from '../../nodes/components/ServerDisplayMode.vue';
+import AppSelect from '../../../components/AppSelect.vue';
 import { deploymentAPI } from '../../system/deploymentApi';
 import { canvasAPI, type Inbound, choices, loadProtocolSupport } from '../api';
 import { resolveCountryInfo, countryTitle, getNodeMeta, type CountryInfo } from '../../nodes/nodeMeta';
 import { connectAddress } from '../../nodes/nodeAddress';
 import { isUserEntry } from '../userEntries';
 import EntryRouteSummary from '../components/EntryRouteSummary.vue';
+import { useProxyNodeFilters } from '../proxyNodeFilters';
 import {
   proxyNodeStore,
   loadStoredData,
@@ -1170,9 +1105,6 @@ const editingInbound = ref<Inbound | null>(null);
 
 // Filter states
 const searchKeyword = ref('');
-const filterSource = ref<'all' | 'self_hosted' | 'subscription' | 'manual'>('all');
-const filterProtocol = ref<string>('all');
-const filterStatus = ref<string>('all');
 
 // Collapsed states for relay routes accordion in card view
 const collapsedRelayState = reactive<Record<string, boolean>>({});
@@ -1360,28 +1292,6 @@ const hiddenServerIds = computed(() => new Set(displayServers.value
   .map(server => server.id)));
 const allNodes = computed<ProxyNodeItem[]>(() => [...selfHostedNodes.value.filter(node => !relayNesting.value.hidden.has(node.id) && !hiddenServerIds.value.has(node.sourceId!)), ...proxyNodeStore.manualNodes]);
 
-// Filtered nodes
-const filteredNodes = computed<ProxyNodeItem[]>(() => {
-  return allNodes.value.filter(node => {
-    if (searchKeyword.value.trim()) {
-      const q = searchKeyword.value.trim().toLowerCase();
-      const matchName = (node.name || '').toLowerCase().includes(q);
-      const matchServer = (node.server || '').toLowerCase().includes(q);
-      const matchPort = String(node.port).includes(q);
-      const matchSource = (node.sourceName || '').toLowerCase().includes(q);
-      if (!matchName && !matchServer && !matchPort && !matchSource) return false;
-    }
-    if (filterSource.value !== 'all' && node.sourceType !== filterSource.value) {
-      return false;
-    }
-    if (filterProtocol.value !== 'all' && node.protocol.toLowerCase() !== filterProtocol.value.toLowerCase()) {
-      return false;
-    }
-    if (filterStatus.value !== 'all' && (node.displayStatus?.key ?? node.status) !== filterStatus.value) return false;
-    return true;
-  });
-});
-
 const pagedNodes = computed(() => {
   const start = (currentPage.value - 1) * pageSize;
   return filteredNodes.value.slice(start, start + pageSize);
@@ -1396,6 +1306,33 @@ const {
   linkedRelays, loadNodeRelays, canUseExistingTunnel, canAddRelay,
   handleAddRelay, createRelayScheme, isLinkedRelayRule,
 } = useNodeRelayActions(isOwner, servers, serverInbounds);
+
+const importedStatusLabels: Record<ProxyNodeItem['status'], string> = {
+  online: '在线',
+  offline: '离线',
+  untested: '未检测',
+  error: '异常',
+  reconnecting: '等待恢复'
+};
+const {
+  source: filterSource, protocol: filterProtocol, status: filterStatus,
+  sourceOptions, protocolOptions, statusOptions, filteredNodes
+} = useProxyNodeFilters(() => {
+  const query = searchKeyword.value.trim().toLowerCase();
+  if (!query) return allNodes.value;
+  return allNodes.value.filter(node => [node.name, node.server, String(node.port), node.sourceName]
+    .some(value => value?.toLowerCase().includes(query)));
+}, {
+  hasRelay: node => {
+    const routeType = entryRouteSummaries.value.get(node.inboundId || '')?.type;
+    return routeType === 'relay' || routeType === 'tunnel' || relayCount(node) > 0;
+  },
+  statusFor: node => ({
+    value: node.displayStatus?.key ?? node.status,
+    label: node.displayStatus?.label ?? importedStatusLabels[node.status]
+  })
+});
+watch([searchKeyword, filterSource, filterProtocol, filterStatus], applyFilter);
 
 // Flag resolution helper
 function getCountryInfo(node: ProxyNodeItem): CountryInfo {
